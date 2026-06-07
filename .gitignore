@@ -8,6 +8,12 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+*.local.md
+*.local.json
+docs/local/
+
+# AI assistant local state
+.claude/
 
 # Dependency and build output
 node_modules/
