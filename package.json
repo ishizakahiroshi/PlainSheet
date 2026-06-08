@@ -1,0 +1,48 @@
+{
+  "name": "plainsheet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "tauri": "tauri",
+    "docker:setup": "docker build -t plainsheet-builder .",
+    "docker:cargo": "docker run --rm -v $(pwd):/app -v plainsheet-cargo-cache:/root/.cargo plainsheet-builder cargo build --manifest-path src-tauri/Cargo.toml"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.9.0",
+    "@tauri-apps/plugin-dialog": "^2.4.0",
+    "@tauri-apps/plugin-fs": "^2.4.2",
+    "@vitejs/plugin-react": "4",
+    "js-yaml": "^4.1.0",
+    "lucide-react": "^1.17.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@tauri-apps/cli": "^2.9.3",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^24.10.1",
+    "@types/react": "18.3.24",
+    "@types/react-dom": "18.3.7",
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^16.5.0",
+    "jsdom": "^27.2.0",
+    "prettier": "^3.6.2",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.46.4",
+    "vite": "5",
+    "vitest": "2"
+  }
+}

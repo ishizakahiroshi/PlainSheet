@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "PlainSheet",
+  "version": "0.1.0",
+  "identifier": "app.plainsheet.desktop",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "PlainSheet",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 760,
+        "minHeight": 520,
+        "decorations": false,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "Plain text table editor",
+    "longDescription": "PlainSheet edits CSV, TSV and other plain text tables without converting them to a binary spreadsheet format.",
+    "fileAssociations": [
+      {
+        "ext": ["csv", "tsv", "md", "markdown", "json", "yaml", "yml"],
+        "name": "PlainSheet table file",
+        "description": "Plain text table files",
+        "mimeType": "text/csv"
+      }
+    ]
+  }
+}

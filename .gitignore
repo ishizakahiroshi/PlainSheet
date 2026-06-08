@@ -21,6 +21,7 @@ dist/
 build/
 .cache/
 coverage/
+src-tauri/target/
 
 # Python cache
 __pycache__/
