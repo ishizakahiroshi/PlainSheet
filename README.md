@@ -38,7 +38,7 @@ bun run tauri dev
 bun run tauri build
 ```
 
-Desktop build checks are produced by GitHub Actions. Pull requests and branch pushes run Tauri builds without publishing downloadable artifacts. Run **Tauri Build** manually from any branch to get private development artifacts, or push a `v*` tag to attach Windows, macOS, and Linux bundles to a GitHub Release.
+Desktop build checks are produced by GitHub Actions. In a private repository, branch pushes automatically publish downloadable development artifacts for local testing. In a public repository, pull requests and branch pushes run Tauri builds without publishing artifacts; run **Tauri Build** manually for development artifacts, or push a `v*` tag to attach Windows, macOS, and Linux bundles to a GitHub Release.
 
 ## Web Demo Notes
 

@@ -46,7 +46,7 @@ GITHUB_PAGES=1 npm run build -> passed
 追加済み:
 
 ```text
-.github/workflows/tauri-release.yml -> Windows / macOS / Linux の Tauri build。ブランチ/PRではビルド確認のみ、手動実行ではartifact確認、v*タグではRelease添付。
+.github/workflows/tauri-release.yml -> Windows / macOS / Linux の Tauri build。private repo ではブランチpushでartifact確認、public repo ではブランチ/PRはビルド確認のみ、手動実行ではartifact確認、v*タグではRelease添付。
 ```
 
 未確認:
