@@ -23,128 +23,151 @@ type FileDropPayload =
 export function useFile({ loadData, getRows, getMeta, onToast, confirmDiscard }: UseFileOptions) {
   const loadPath = useCallback(
     async (path: string) => {
-      const content = await invoke<string>("read_file", { path });
-      const encoding = await invoke<string>("detect_encoding", { path });
-      const format = formatFromPath(path);
-      const delimiter = detectDelimiter(content);
-      const newline = detectNewline(content);
-      const rows = parseTableText(content, format, delimiter);
-      loadData(rows, {
-        filePath: path,
-        fileName: fileNameFromPath(path),
-        encoding: normalizeEncoding(encoding),
-        newline,
-        delimiter,
-        format,
-      });
-      onToast(t("toastLoaded"));
+      try {
+        const content = await invoke<string>("read_file", { path });
+        const encoding = await invoke<string>("detect_encoding", { path });
+        const format = formatFromPath(path);
+        const delimiter = detectDelimiter(content);
+        const newline = detectNewline(content);
+        const rows = parseTableText(content, format, delimiter);
+        loadData(rows, {
+          filePath: path,
+          fileName: fileNameFromPath(path),
+          encoding: normalizeEncoding(encoding),
+          newline,
+          delimiter,
+          format,
+        });
+        onToast(t("toastLoaded"));
+      } catch {
+        onToast(t("toastLoadFailed"));
+      }
     },
     [loadData, onToast],
   );
 
   const openFile = useCallback(async () => {
-    if (getMeta().dirty && !confirmDiscard()) {
-      return;
-    }
-    if (!isTauriRuntime()) {
-      await openBrowserFile(loadData, onToast);
-      return;
-    }
-    const path = await invoke<string | null>("open_file_dialog");
-    if (path) {
-      await loadPath(path);
-    }
-  }, [confirmDiscard, getMeta, loadPath]);
-
-  const saveAs = useCallback(async () => {
-    const currentMeta = getMeta();
-    const defaultName = currentMeta.fileName ?? "untitled.csv";
-    if (!isTauriRuntime()) {
-      const fileName = window.prompt("Save as", defaultName);
-      if (!fileName) {
+    try {
+      if (getMeta().dirty && !confirmDiscard()) {
         return;
       }
-      const format = formatFromPath(fileName);
+      if (!isTauriRuntime()) {
+        await openBrowserFile(loadData, onToast);
+        return;
+      }
+      const path = await invoke<string | null>("open_file_dialog");
+      if (path) {
+        await loadPath(path);
+      }
+    } catch {
+      onToast(t("toastLoadFailed"));
+    }
+  }, [confirmDiscard, getMeta, loadData, loadPath, onToast]);
+
+  const saveAs = useCallback(async () => {
+    try {
+      const currentMeta = getMeta();
+      const defaultName = currentMeta.fileName ?? "untitled.csv";
+      if (!isTauriRuntime()) {
+        const fileName = window.prompt("Save as", defaultName);
+        if (!fileName) {
+          return;
+        }
+        const format = formatFromPath(fileName);
+        const delimiter = delimiterFromFormat(format);
+        const content = serializeTableText(getRows(), format, delimiter, currentMeta.newline);
+        downloadText(content, fileName);
+        loadData(getRows(), {
+          ...currentMeta,
+          fileName,
+          delimiter,
+          dirty: false,
+          format,
+        });
+        onToast(t("toastSaved"));
+        return;
+      }
+      const path = await invoke<string | null>("save_file_dialog", { defaultName });
+      if (!path) {
+        return;
+      }
+      const format = formatFromPath(path);
       const delimiter = delimiterFromFormat(format);
       const content = serializeTableText(getRows(), format, delimiter, currentMeta.newline);
-      downloadText(content, fileName);
+      await invoke("write_file", { path, content, encoding: currentMeta.encoding });
       loadData(getRows(), {
         ...currentMeta,
-        fileName,
+        filePath: path,
+        fileName: fileNameFromPath(path),
         delimiter,
         dirty: false,
-        format,
+        format: formatFromPath(path),
       });
       onToast(t("toastSaved"));
-      return;
+    } catch {
+      onToast(t("toastSaveFailed"));
     }
-    const path = await invoke<string | null>("save_file_dialog", { defaultName });
-    if (!path) {
-      return;
-    }
-    const format = formatFromPath(path);
-    const delimiter = delimiterFromFormat(format);
-    const content = serializeTableText(getRows(), format, delimiter, currentMeta.newline);
-    await invoke("write_file", { path, content, encoding: currentMeta.encoding });
-    loadData(getRows(), {
-      ...currentMeta,
-      filePath: path,
-      fileName: fileNameFromPath(path),
-      delimiter,
-      dirty: false,
-      format: formatFromPath(path),
-    });
-    onToast(t("toastSaved"));
   }, [getMeta, getRows, loadData, onToast]);
 
   const saveFile = useCallback(async () => {
-    const currentMeta = getMeta();
-    if (!isTauriRuntime()) {
+    try {
+      const currentMeta = getMeta();
+      if (!isTauriRuntime()) {
+        const content = serializeTableText(
+          getRows(),
+          currentMeta.format ?? "csv",
+          currentMeta.delimiter,
+          currentMeta.newline,
+        );
+        downloadText(content, currentMeta.fileName ?? "untitled.csv");
+        loadData(getRows(), { ...currentMeta, dirty: false });
+        onToast(t("toastSaved"));
+        return;
+      }
+      if (!currentMeta.filePath) {
+        await saveAs();
+        return;
+      }
       const content = serializeTableText(
         getRows(),
         currentMeta.format ?? "csv",
         currentMeta.delimiter,
         currentMeta.newline,
       );
-      downloadText(content, currentMeta.fileName ?? "untitled.csv");
+      await invoke("write_file", {
+        path: currentMeta.filePath,
+        content,
+        encoding: currentMeta.encoding,
+      });
       loadData(getRows(), { ...currentMeta, dirty: false });
       onToast(t("toastSaved"));
-      return;
+    } catch {
+      onToast(t("toastSaveFailed"));
     }
-    if (!currentMeta.filePath) {
-      await saveAs();
-      return;
-    }
-    const content = serializeTableText(
-      getRows(),
-      currentMeta.format ?? "csv",
-      currentMeta.delimiter,
-      currentMeta.newline,
-    );
-    await invoke("write_file", {
-      path: currentMeta.filePath,
-      content,
-      encoding: currentMeta.encoding,
-    });
-    loadData(getRows(), { ...currentMeta, dirty: false });
-    onToast(t("toastSaved"));
   }, [getMeta, getRows, loadData, onToast, saveAs]);
 
   const loadSample = useCallback(async () => {
-    if (getMeta().dirty && !confirmDiscard()) {
-      return;
+    try {
+      if (getMeta().dirty && !confirmDiscard()) {
+        return;
+      }
+      const response = await fetch("/sample.csv");
+      if (!response.ok) {
+        throw new Error("sample file is unavailable");
+      }
+      const content = await response.text();
+      const rows = parseTableText(content, "csv", ",");
+      loadData(rows, {
+        fileName: "sample.csv",
+        delimiter: ",",
+        newline: detectNewline(content),
+        encoding: "utf-8",
+        format: "csv",
+      });
+      onToast(t("toastLoaded"));
+    } catch {
+      onToast(t("toastLoadFailed"));
     }
-    const response = await fetch("/sample.csv");
-    const content = await response.text();
-    const rows = parseTableText(content, "csv", ",");
-    loadData(rows, {
-      fileName: "sample.csv",
-      delimiter: ",",
-      newline: detectNewline(content),
-      encoding: "utf-8",
-      format: "csv",
-    });
-    onToast(t("toastLoaded"));
   }, [confirmDiscard, getMeta, loadData, onToast]);
 
   useEffect(() => {
@@ -173,12 +196,18 @@ export function useFile({ loadData, getRows, getMeta, onToast, confirmDiscard }:
 
     listen<FileDropPayload>("tauri://file-drop", (event) => {
       const path = extractDropPath(event.payload);
-      if (path) {
-        void loadPath(path);
+      if (!path) {
+        return;
       }
-    }).then((handler) => {
-      unlisten = handler;
-    });
+      if (getMeta().dirty && !confirmDiscard()) {
+        return;
+      }
+      void loadPath(path);
+    })
+      .then((handler) => {
+        unlisten = handler;
+      })
+      .catch(() => onToast(t("toastLoadFailed")));
 
     return () => {
       if (unlisten) {
@@ -260,18 +289,22 @@ async function loadBrowserFile(
   loadData: UseFileOptions["loadData"],
   onToast: UseFileOptions["onToast"],
 ): Promise<void> {
-  const content = await file.text();
-  const format = formatFromPath(file.name);
-  const delimiter = format === "tsv" ? "\t" : detectDelimiter(content);
-  const rows = parseTableText(content, format, delimiter);
-  loadData(rows, {
-    fileName: file.name,
-    delimiter,
-    newline: detectNewline(content),
-    encoding: "utf-8",
-    format,
-  });
-  onToast(t("toastLoaded"));
+  try {
+    const content = await file.text();
+    const format = formatFromPath(file.name);
+    const delimiter = format === "tsv" ? "\t" : detectDelimiter(content);
+    const rows = parseTableText(content, format, delimiter);
+    loadData(rows, {
+      fileName: file.name,
+      delimiter,
+      newline: detectNewline(content),
+      encoding: "utf-8",
+      format,
+    });
+    onToast(t("toastLoaded"));
+  } catch {
+    onToast(t("toastLoadFailed"));
+  }
 }
 
 function downloadText(content: string, fileName: string): void {

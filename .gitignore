@@ -1,8 +1,11 @@
 # OS and editor files
 .DS_Store
 Thumbs.db
+desktop.ini
 *.swp
 *.swo
+.idea/
+.vscode/
 
 # Local environment
 .env
@@ -28,5 +31,31 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
-# Logs
+# Logs and scratch artifacts
 *.log
+*.jsonl
+*.tmp
+*.bak
+*.orig
+*.rej
+
+# Local-only files (*.local.md / *.local.json are listed individually above; cover the rest)
+*.local
+*.local.*
+
+# --- Credentials / secrets / keys (never push to a public repo) ---
+*.pem
+*.key
+*.p12
+*.pfx
+*.ppk
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+secrets.*
+*.secret.*
+*credential*
+.netrc
+.npmrc
+.pypirc

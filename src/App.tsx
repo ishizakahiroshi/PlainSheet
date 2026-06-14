@@ -171,13 +171,17 @@ export default function App() {
       showToast(t("toastClipboardUnavailable"));
       return;
     }
-    await navigator.clipboard.writeText(text);
-    showToast(
-      t("toastCopiedRange", {
-        rows: normalized.endRow - normalized.startRow + 1,
-        cols: normalized.endCol - normalized.startCol + 1,
-      }),
-    );
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(
+        t("toastCopiedRange", {
+          rows: normalized.endRow - normalized.startRow + 1,
+          cols: normalized.endCol - normalized.startCol + 1,
+        }),
+      );
+    } catch {
+      showToast(t("toastClipboardUnavailable"));
+    }
   };
 
   const pasteClipboard = async () => {
@@ -185,18 +189,22 @@ export default function App() {
       showToast(t("toastClipboardUnavailable"));
       return;
     }
-    const text = await navigator.clipboard.readText();
-    const grid = parseClipboardText(text);
-    recordBeforeChange();
-    const pastedRange = sheet.pasteGrid(selectionState.selection.row, selectionState.selection.col, grid);
-    selectionState.selectRange(pastedRange);
-    const normalized = normalizeRange(pastedRange);
-    showToast(
-      t("toastPastedRange", {
-        rows: normalized.endRow - normalized.startRow + 1,
-        cols: normalized.endCol - normalized.startCol + 1,
-      }),
-    );
+    try {
+      const text = await navigator.clipboard.readText();
+      const grid = parseClipboardText(text);
+      recordBeforeChange();
+      const pastedRange = sheet.pasteGrid(selectionState.selection.row, selectionState.selection.col, grid);
+      selectionState.selectRange(pastedRange);
+      const normalized = normalizeRange(pastedRange);
+      showToast(
+        t("toastPastedRange", {
+          rows: normalized.endRow - normalized.startRow + 1,
+          cols: normalized.endCol - normalized.startCol + 1,
+        }),
+      );
+    } catch {
+      showToast(t("toastClipboardUnavailable"));
+    }
   };
 
   const clearSelectedCells = () => {

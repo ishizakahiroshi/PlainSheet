@@ -3,5 +3,5 @@
   "identifier": "main-capability",
   "description": "PlainSheet main window permissions",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default", "fs:default"]
+  "permissions": ["core:default", "dialog:default"]
 }
