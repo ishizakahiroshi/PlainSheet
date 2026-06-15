@@ -95,6 +95,19 @@ describe("serializeCsv", () => {
   it("leaves formula-like cells untouched when the guard is off", () => {
     expect(serializeCsv([["=SUM(A1)"]], ",", "LF")).toBe("=SUM(A1)");
   });
+
+  it("guards cells whose formula trigger sits behind invisibles or a BOM", () => {
+    const bom = "﻿";
+    const bomEq = `${bom}=cmd|'/c calc'!A1`;
+    const lfEq = "\n=HYPERLINK(\"x\")";
+    const tabEq = "\t=SUM(A1)";
+    const output = serializeCsv([[bomEq, lfEq, tabEq]], ",", "LF", true);
+    // The single-quote guard is inserted before the leading invisible, so the
+    // sequence is ' → invisible → trigger character.
+    expect(output.includes(`'${bom}=`)).toBe(true);
+    expect(output.includes("'\n=")).toBe(true);
+    expect(output.includes("'\t=")).toBe(true);
+  });
 });
 
 describe("delimiter and newline detection", () => {
@@ -108,5 +121,11 @@ describe("delimiter and newline detection", () => {
 
   it("detects CRLF", () => {
     expect(detectNewline("a,b\r\nc,d")).toBe("CRLF");
+  });
+
+  it("prefers the dominant delimiter when a single outlier row has more of another", () => {
+    // Two of three rows use commas; one row throws in pipes. The detector
+    // should not let the single outlier flip the whole sheet to '|'.
+    expect(detectDelimiter("a,b\nc|d|e\n1,2")).toBe(",");
   });
 });

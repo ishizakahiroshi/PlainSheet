@@ -44,6 +44,12 @@ export function serializeTableText(
 }
 
 function parseObjectList(value: unknown): CellValue[][] {
+  // An empty YAML document (or comment-only file) parses to null. Treat that as
+  // an empty sheet, matching how CSV/JSON empty inputs already behave, instead
+  // of raising "Expected an array of objects" and failing the load.
+  if (value == null) {
+    return [];
+  }
   if (!Array.isArray(value)) {
     throw new Error("Expected an array of objects");
   }
@@ -82,10 +88,13 @@ function rowsToObjects(
   omitEmpty = false,
 ): Record<string, string>[] {
   const headers = uniqueHeaders(rows[0] ?? []);
-  return rows.slice(1).map((row) => {
+  return rows.slice(1).map((row, dataIndex) => {
     const entries = headers
       .map((header, index): [string, string] => [header, row[index] ?? ""])
-      .filter(([, value]) => !omitEmpty || value !== "");
+      // Per-row omit drops empty values, but the first data row keeps every
+      // header so a save-and-reopen round-trip preserves the original column
+      // order (parseObjectList unions keys in first-appearance order).
+      .filter(([, value]) => !omitEmpty || value !== "" || dataIndex === 0);
     return Object.fromEntries(entries);
   });
 }
@@ -165,7 +174,7 @@ function splitMarkdownRow(line: string): string[] {
     } else if (char === "\\") {
       escaped = true;
     } else if (char === "|") {
-      cells.push(cell.trim());
+      cells.push(stripSerializerPadding(cell));
       cell = "";
     } else if (char === "<") {
       // An unescaped <br> is the newline marker; a user's literal <br> arrives
@@ -182,8 +191,23 @@ function splitMarkdownRow(line: string): string[] {
       cell += char;
     }
   }
-  cells.push(cell.trim());
+  cells.push(stripSerializerPadding(cell));
   return cells;
+}
+
+// The serializer always inserts exactly one space of padding around each cell
+// (`| a |`), so the parser should strip exactly that one leading and trailing
+// space, not greedy whitespace. Greedy trim used to silently drop cells that
+// were a single newline, started with a space, or contained only whitespace.
+function stripSerializerPadding(cell: string): string {
+  let result = cell;
+  if (result.startsWith(" ")) {
+    result = result.slice(1);
+  }
+  if (result.endsWith(" ")) {
+    result = result.slice(0, -1);
+  }
+  return result;
 }
 
 function escapeMarkdownCell(value: string): string {

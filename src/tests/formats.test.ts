@@ -112,15 +112,54 @@ describe("table formats", () => {
     expect(parseTableText("[]", "json", ",")).toEqual([]);
   });
 
-  it("omits empty cells from JSON objects when requested", () => {
-    const json = serializeTableText([["a", "b"], ["1", ""]], "json", ",", "LF", {
+  it("omits empty cells from JSON objects when requested (later rows only)", () => {
+    // The first data row keeps every header so a save-and-reopen round-trip
+    // preserves the original column order; later rows drop empty keys.
+    const json = serializeTableText([["a", "b"], ["1", "x"], ["2", ""]], "json", ",", "LF", {
       omitEmptyCells: true,
     });
-    expect(JSON.parse(json)).toEqual([{ a: "1" }]);
+    expect(JSON.parse(json)).toEqual([
+      { a: "1", b: "x" },
+      { a: "2" },
+    ]);
   });
 
   it("keeps empty cells in JSON objects by default", () => {
     const json = serializeTableText([["a", "b"], ["1", ""]], "json", ",", "LF");
     expect(JSON.parse(json)).toEqual([{ a: "1", b: "" }]);
+  });
+
+  it("preserves column order across save and reopen with omitEmptyCells", () => {
+    const rows = [
+      ["name", "age", "city"],
+      ["", "35", ""],
+      ["Hanako", "", "Tokyo"],
+    ];
+    const json = serializeTableText(rows, "json", ",", "LF", { omitEmptyCells: true });
+    const reopened = parseTableText(json, "json", ",");
+    // The first data row keeps every header key so parseObjectList's
+    // first-appearance union recovers the original column order, even though
+    // later rows are emitted with empty keys dropped.
+    expect(reopened[0]).toEqual(["name", "age", "city"]);
+  });
+
+  it("round-trips a Markdown cell that contains only a newline", () => {
+    const rows = [["a"], ["\n"]];
+    const md = serializeTableText(rows, "markdown", ",", "LF");
+    expect(parseTableText(md, "markdown", ",")).toEqual(rows);
+  });
+
+  it("preserves a leading space in a Markdown cell", () => {
+    const rows = [
+      ["a", "b"],
+      [" leading", "trailing "],
+    ];
+    const md = serializeTableText(rows, "markdown", ",", "LF");
+    expect(parseTableText(md, "markdown", ",")).toEqual(rows);
+  });
+
+  it("treats an empty YAML document as an empty sheet", () => {
+    expect(parseTableText("", "yaml", ",")).toEqual([]);
+    expect(parseTableText("# only a comment\n", "yaml", ",")).toEqual([]);
   });
 });

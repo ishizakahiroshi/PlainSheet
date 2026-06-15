@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Range, Selection } from "../types/sheet";
 import { EMPTY_SELECTION } from "../types/sheet";
 import { normalizeRange } from "../lib/clipboard";
+import { clamp } from "../lib/columnWidth";
 
 export function useSelection() {
   const [selection, setSelectionState] = useState<Selection>(EMPTY_SELECTION);
@@ -88,8 +89,4 @@ export function selectionToRange(selection: Selection, range: Range): Exclude<Ra
       endCol: selection.col,
     }
   );
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
 }

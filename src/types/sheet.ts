@@ -43,11 +43,6 @@ export type HistoryEntry = {
 
 export type ColumnWidthMap = Record<number, number>;
 
-export type ClipboardPayload = {
-  rows: CellValue[][];
-  source: "single-cell" | "range";
-};
-
 export const BUFFER_ROWS = 8;
 export const BUFFER_COLS = 8;
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyClipboardText, normalizeRange, parseClipboardText, rangeTsv } from "../lib/clipboard";
+import { normalizeRange, parseClipboardText, rangeTsv } from "../lib/clipboard";
 
 describe("rangeTsv", () => {
   it("serializes a selected range as TSV", () => {
@@ -50,16 +50,6 @@ describe("parseClipboardText", () => {
       ["a", "b"],
       ["c", "d"],
     ]);
-  });
-});
-
-describe("classifyClipboardText", () => {
-  it("classifies one cell", () => {
-    expect(classifyClipboardText("plain").source).toBe("single-cell");
-  });
-
-  it("classifies ranges", () => {
-    expect(classifyClipboardText("a\tb").source).toBe("range");
   });
 });
 

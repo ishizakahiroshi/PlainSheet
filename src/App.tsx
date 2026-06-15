@@ -14,14 +14,12 @@ import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
 import { parseClipboardText, rangeTsv, normalizeRange } from "./lib/clipboard";
 import { t } from "./lib/i18n";
-import { useEdit } from "./hooks/useEdit";
 import { useFile } from "./hooks/useFile";
 import { useHistory } from "./hooks/useHistory";
 import { useSelection, selectionToRange } from "./hooks/useSelection";
 import { cloneRows } from "./hooks/useSheet";
 import { useSheet } from "./hooks/useSheet";
 import type { CellValue, Range, Selection } from "./types/sheet";
-import { BUFFER_COLS } from "./types/sheet";
 
 type PendingConfirm = {
   action: () => void;
@@ -35,7 +33,6 @@ type SearchHit = {
 export default function App() {
   const sheet = useSheet();
   const selectionState = useSelection();
-  const edit = useEdit();
   const history = useHistory();
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm>(null);
@@ -97,6 +94,9 @@ export default function App() {
       history.reset();
       selectionState.setSelection({ row: 0, col: 0 });
     },
+    // Save paths use this so that flipping dirty:false on the meta doesn't drag
+    // along history.reset, the A1 selection jump, or the column-width refit.
+    updateMeta: (meta) => sheet.setMeta(meta),
     getRows: () => rowsRef.current,
     getMeta: () => metaRef.current,
     onToast: showToast,
@@ -127,6 +127,10 @@ export default function App() {
   useEffect(() => {
     if (activeSearchIndex >= searchHits.length) {
       setActiveSearchIndex(0);
+      // Edits can shrink the hit list out from under the cursor. Bump the
+      // scroll nonce so the grid follows the reset to whatever's now hit 0,
+      // rather than leaving focus stranded on the old (now-removed) match.
+      setSearchScrollNonce((nonce) => nonce + 1);
     }
   }, [activeSearchIndex, searchHits.length]);
 
@@ -146,45 +150,17 @@ export default function App() {
     selectionState.setSelection(entry.selection);
   };
 
-  const moveAfterCommit = (direction: "none" | "down" | "up" | "right" | "left") => {
-    if (direction === "none") {
-      return;
-    }
-    const deltas = {
-      down: [1, 0],
-      up: [-1, 0],
-      right: [0, 1],
-      left: [0, -1],
-    } as const;
-    const [rowDelta, colDelta] = deltas[direction];
-    selectionState.moveSelection(
-      rowDelta,
-      colDelta,
-      false,
-      sheet.rows.length + 8,
-      sheet.columnCount + BUFFER_COLS,
-    );
-  };
-
-  const commitCell = (
-    row: number,
-    col: number,
-    value: string,
-    reselect: boolean,
-    direction: "none" | "down" | "up" | "right" | "left" = "none",
-  ) => {
+  const commitCell = (row: number, col: number, value: string, reselect: boolean) => {
     const previousValue = sheet.rows[row]?.[col] ?? "";
     if (previousValue !== value) {
       recordBeforeChange();
       sheet.updateCell(row, col, value);
     }
-    edit.cancelEditing();
     // On blur the selection may already have moved to the cell the user clicked,
     // so only pull the selection back when committing explicitly (Enter).
     if (reselect) {
       selectionState.selectCell(row, col, false);
     }
-    moveAfterCommit(direction);
   };
 
   const editCell = (row: number, col: number, value: string) => {
@@ -327,12 +303,28 @@ export default function App() {
     if (!matcher) {
       return;
     }
+    // Replace only the first match in the active cell so users get one-at-a-time
+    // replace semantics (matching VS Code / Notepad++); the unconditional 'g'
+    // flag used by findSearchHits would otherwise blow away every occurrence
+    // inside the cell in a single click.
+    const singleShot = new RegExp(matcher.source, matcher.flags.replace("g", ""));
+    const previous = sheet.rows[hit.row]?.[hit.col] ?? "";
+    // Function replacer keeps the replacement literal so $&/$1/$$ don't become
+    // accidental patterns; same as replaceAll.
+    const replaced = previous.replace(singleShot, () => replacement);
+    if (replaced === previous) {
+      return;
+    }
     recordBeforeChange();
     const next = cloneRows(sheet.rows);
-    // Use a function replacer so the replacement is inserted literally, matching
-    // replaceAll. A string replacement would treat $&/$1/$$ as special patterns.
-    next[hit.row][hit.col] = next[hit.row][hit.col].replace(matcher, () => replacement);
-    sheet.replaceRows(next);
+    next[hit.row][hit.col] = replaced;
+    // Keep the user's manually adjusted column widths — a content edit isn't a
+    // structural change. (Same reason history restore passes recalcWidths=false.)
+    sheet.replaceRows(next, true, false);
+    // After the cell mutates, the searchHits memo will shrink/shift. Bump the
+    // scroll nonce so the grid follows whatever match now sits at the current
+    // activeSearchIndex; the existing index-out-of-range effect handles wrap.
+    setSearchScrollNonce((nonce) => nonce + 1);
   };
 
   const replaceAll = () => {
@@ -340,7 +332,6 @@ export default function App() {
     if (!matcher) {
       return;
     }
-    recordBeforeChange();
     let count = 0;
     const next = sheet.rows.map((row) =>
       row.map((cell) =>
@@ -350,7 +341,16 @@ export default function App() {
         }),
       ),
     );
-    sheet.replaceRows(next);
+    if (count === 0) {
+      // No-op replace must not push a phantom undo entry, dirty the file, or
+      // clear the redo stack — just report 0 matches and bail.
+      showToast(t("toastSearchDone", { count }));
+      return;
+    }
+    recordBeforeChange();
+    // recalcWidths=false: same rationale as replaceCurrent — content edits
+    // should not undo the user's manual column widths.
+    sheet.replaceRows(next, true, false);
     showToast(t("toastSearchDone", { count }));
   };
 
@@ -448,6 +448,8 @@ export default function App() {
             rows={sheet.rows}
             columnCount={sheet.columnCount}
             colWidths={sheet.colWidths}
+            selection={selectionState.selection}
+            range={selectionState.range}
             searchHits={searchHitSet}
             activeSearchHit={activeSearchHit}
             scrollNonce={searchScrollNonce}
@@ -546,6 +548,11 @@ function referenceForSelection(selection: Selection, range: Range): string {
   }`;
 }
 
+// Bound the hit list so a common-letter query on a large sheet (e.g. 'e' over
+// 100k cells) doesn't recompute and re-render tens of thousands of Highlight
+// regions on every keystroke. Next/Prev still work inside the cap.
+const SEARCH_HIT_CAP = 5000;
+
 function findSearchHits(rows: CellValue[][], query: string, options: SearchOptions): SearchHit[] {
   const matcher = buildMatcher(query, options);
   if (!matcher) {
@@ -558,6 +565,9 @@ function findSearchHits(rows: CellValue[][], query: string, options: SearchOptio
       matcher.lastIndex = 0;
       if (matcher.test(rows[rowIndex][colIndex])) {
         hits.push({ row: rowIndex, col: colIndex });
+        if (hits.length >= SEARCH_HIT_CAP) {
+          return hits;
+        }
       }
     }
   }

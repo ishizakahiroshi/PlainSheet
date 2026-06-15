@@ -21,6 +21,8 @@ type GlideSheetProps = {
   rows: CellValue[][];
   columnCount: number;
   colWidths: ColumnWidthMap;
+  selection: { row: number; col: number };
+  range: Range;
   searchHits: Set<string>;
   activeSearchHit: string | null;
   scrollNonce: number;
@@ -40,6 +42,8 @@ export function GlideSheet({
   rows,
   columnCount,
   colWidths,
+  selection,
+  range,
   searchHits,
   activeSearchHit,
   scrollNonce,
@@ -159,6 +163,56 @@ export function GlideSheet({
     });
     ref.current?.scrollTo(col, row);
   }, [scrollNonce]);
+
+  // Sync glide's internal selection from App's authoritative selection so that
+  // programmatic changes (paste, undo/redo, context-menu actions, search jump,
+  // newFile) move the visible cell cursor too. Without this, the grid keeps
+  // highlighting the last clicked cell while FormulaBar/StatusBar follow App's
+  // selection, and any subsequent FormulaBar edit lands on the wrong cell.
+  const rangeStartRow = range?.startRow;
+  const rangeStartCol = range?.startCol;
+  const rangeEndRow = range?.endRow;
+  const rangeEndCol = range?.endCol;
+  useEffect(() => {
+    const maxRow = Math.max(0, rows.length + BUFFER_ROWS - 1);
+    const maxCol = Math.max(0, columnCount + BUFFER_COLS - 1);
+    const col = Math.min(Math.max(0, selection.col), maxCol);
+    const row = Math.min(Math.max(0, selection.row), maxRow);
+    let rect: { x: number; y: number; width: number; height: number };
+    if (
+      rangeStartRow !== undefined &&
+      rangeStartCol !== undefined &&
+      rangeEndRow !== undefined &&
+      rangeEndCol !== undefined
+    ) {
+      const startRow = Math.min(rangeStartRow, rangeEndRow);
+      const startCol = Math.min(rangeStartCol, rangeEndCol);
+      const endRow = Math.min(Math.max(rangeStartRow, rangeEndRow), maxRow);
+      const endCol = Math.min(Math.max(rangeStartCol, rangeEndCol), maxCol);
+      rect = {
+        x: startCol,
+        y: startRow,
+        width: endCol - startCol + 1,
+        height: endRow - startRow + 1,
+      };
+    } else {
+      rect = { x: col, y: row, width: 1, height: 1 };
+    }
+    setGridSelection({
+      columns: CompactSelection.empty(),
+      rows: CompactSelection.empty(),
+      current: { cell: [col, row], range: rect, rangeStack: [] },
+    });
+  }, [
+    selection.row,
+    selection.col,
+    rangeStartRow,
+    rangeStartCol,
+    rangeEndRow,
+    rangeEndCol,
+    rows.length,
+    columnCount,
+  ]);
 
   return (
     <div className="glideSheet">

@@ -137,7 +137,10 @@ fn encode_with(encoding: &'static Encoding, content: &str, label: &str) -> Resul
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
+        // tauri_plugin_fs is intentionally NOT registered. PlainSheet ships
+        // narrow read_file/write_file commands instead of exposing the fs
+        // plugin's broad API so the webview cannot reach into arbitrary paths
+        // even if a capability is later relaxed.
         .invoke_handler(tauri::generate_handler![
             open_file_dialog,
             read_file,

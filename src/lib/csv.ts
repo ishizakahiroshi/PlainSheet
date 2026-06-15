@@ -96,7 +96,12 @@ export function serializeCsv(
 
 // Cells starting with these are treated as formulas by spreadsheet apps; the
 // opt-in guard prefixes them with ' so an exported file cannot execute on open.
-const FORMULA_PREFIX = /^[=+\-@\t\r]/;
+// Leading C0 controls or BOM are stripped by Excel/Sheets before parsing, so
+// they would otherwise bypass the guard (e.g. a BOM followed by '=' or '\n='
+// at cell start). The pattern is built from a string literal because writing
+// the C0/BOM chars verbatim would trip no-irregular-whitespace.
+// eslint-disable-next-line no-control-regex
+const FORMULA_PREFIX = new RegExp("^[\\u0000-\\u001f\\uFEFF]*[=+\\-@\\t\\r\\n]");
 
 function serializeCell(cell: CellValue, delimiter: Delimiter, sanitizeFormulas = false): string {
   const value = sanitizeFormulas && FORMULA_PREFIX.test(cell) ? `'${cell}` : cell;
@@ -130,7 +135,11 @@ export function detectDelimiter(text: string): Delimiter {
     const counts = rows.map((row) => row.length);
     const max = Math.max(0, ...counts);
     const consistency = counts.filter((count) => count === max).length;
-    const score = max * 10 + consistency;
+    // Weight by how many rows actually agree on the column count first, so a
+    // single outlier row with many fields can't outrank the dominant
+    // delimiter. (Previously `max * 10 + consistency` let `c|d|e` beat
+    // a mostly-comma file.)
+    const score = consistency * 10 + max;
     if (max > 1 && score > bestScore) {
       best = delimiter;
       bestScore = score;

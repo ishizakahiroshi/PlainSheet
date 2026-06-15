@@ -7,7 +7,13 @@ import { t } from "../lib/i18n";
 import type { CellValue, Delimiter, FileFormat, SheetMeta } from "../types/sheet";
 
 type UseFileOptions = {
+  // Used only when a brand-new sheet is loaded (open / drop / sample / new).
+  // The callback owner is expected to reset history and selection alongside
+  // replacing rows. Do not invoke this for save-completed metadata patches —
+  // use updateMeta for that instead, otherwise every Ctrl+S wipes undo,
+  // resets selection, and refits column widths.
   loadData: (rows: CellValue[][], meta: Partial<SheetMeta>) => void;
+  updateMeta: (meta: Partial<SheetMeta>) => void;
   getRows: () => CellValue[][];
   getMeta: () => SheetMeta;
   onToast: (message: string) => void;
@@ -20,7 +26,14 @@ type FileDropPayload =
     }
   | string[];
 
-export function useFile({ loadData, getRows, getMeta, onToast, confirmDiscard }: UseFileOptions) {
+export function useFile({
+  loadData,
+  updateMeta,
+  getRows,
+  getMeta,
+  onToast,
+  confirmDiscard,
+}: UseFileOptions) {
   // Browser-only: handle returned by the File System Access save picker, reused
   // for overwrite saves. Only reused when its name still matches the sheet name.
   const fileHandleRef = useRef<FsFileHandle | null>(null);
@@ -107,8 +120,7 @@ export function useFile({ loadData, getRows, getMeta, onToast, confirmDiscard }:
           );
           await writeFileHandle(handle, content);
           fileHandleRef.current = handle;
-          loadData(getRows(), {
-            ...currentMeta,
+          updateMeta({
             fileName: handle.name,
             delimiter,
             dirty: false,
@@ -132,8 +144,7 @@ export function useFile({ loadData, getRows, getMeta, onToast, confirmDiscard }:
           serializeOptions(currentMeta),
         );
         downloadText(content, fileName);
-        loadData(getRows(), {
-          ...currentMeta,
+        updateMeta({
           fileName,
           delimiter,
           dirty: false,
@@ -159,8 +170,7 @@ export function useFile({ loadData, getRows, getMeta, onToast, confirmDiscard }:
         serializeOptions(currentMeta),
       );
       await invoke("write_file", { path, content, encoding });
-      loadData(getRows(), {
-        ...currentMeta,
+      updateMeta({
         filePath: path,
         fileName: fileNameFromPath(path),
         delimiter,
@@ -172,7 +182,7 @@ export function useFile({ loadData, getRows, getMeta, onToast, confirmDiscard }:
     } catch (error) {
       onToast(saveErrorMessage(error));
     }
-  }, [getMeta, getRows, loadData, onToast]);
+  }, [getMeta, getRows, updateMeta, onToast]);
 
   const saveFile = useCallback(async () => {
     try {
@@ -189,7 +199,7 @@ export function useFile({ loadData, getRows, getMeta, onToast, confirmDiscard }:
         // Reuse the chosen save target only while it still refers to this sheet.
         if (handle && handle.name === currentMeta.fileName) {
           await writeFileHandle(handle, content);
-          loadData(getRows(), { ...currentMeta, dirty: false });
+          updateMeta({ dirty: false });
           onToast(t("toastSaved"));
           return;
         }
@@ -199,7 +209,7 @@ export function useFile({ loadData, getRows, getMeta, onToast, confirmDiscard }:
           return;
         }
         downloadText(content, currentMeta.fileName ?? "untitled.csv");
-        loadData(getRows(), { ...currentMeta, dirty: false });
+        updateMeta({ dirty: false });
         onToast(t("toastDownloadStarted"));
         return;
       }
@@ -221,12 +231,12 @@ export function useFile({ loadData, getRows, getMeta, onToast, confirmDiscard }:
         content,
         encoding,
       });
-      loadData(getRows(), { ...currentMeta, encoding, dirty: false });
+      updateMeta({ encoding, dirty: false });
       onToast(t("toastSaved"));
     } catch (error) {
       onToast(saveErrorMessage(error));
     }
-  }, [getMeta, getRows, loadData, onToast, saveAs]);
+  }, [getMeta, getRows, updateMeta, onToast, saveAs]);
 
   const loadSample = useCallback(async () => {
     try {
@@ -277,7 +287,10 @@ export function useFile({ loadData, getRows, getMeta, onToast, confirmDiscard }:
       };
     }
 
-    listen<FileDropPayload>("tauri://file-drop", (event) => {
+    // Tauri v2 renamed the v1 'tauri://file-drop' event to 'tauri://drag-drop'
+    // (and split enter/over/leave into their own names). The v1 name silently
+    // never fires under v2, so listen on the v2 name.
+    listen<FileDropPayload>("tauri://drag-drop", (event) => {
       const path = extractDropPath(event.payload);
       if (!path) {
         return;
