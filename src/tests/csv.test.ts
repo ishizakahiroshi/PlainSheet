@@ -85,6 +85,16 @@ describe("serializeCsv", () => {
   it("supports CRLF", () => {
     expect(serializeCsv([["a"], ["b"]], ",", "CRLF")).toBe("a\r\nb");
   });
+
+  it("prefixes formula-like cells with ' when the guard is on", () => {
+    expect(serializeCsv([["=SUM(A1)", "+1", "-2", "@x", "ok"]], ",", "LF", true)).toBe(
+      "'=SUM(A1),'+1,'-2,'@x,ok",
+    );
+  });
+
+  it("leaves formula-like cells untouched when the guard is off", () => {
+    expect(serializeCsv([["=SUM(A1)"]], ",", "LF")).toBe("=SUM(A1)");
+  });
 });
 
 describe("delimiter and newline detection", () => {

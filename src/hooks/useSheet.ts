@@ -41,9 +41,13 @@ export function useSheet() {
     setMetaState((current) => ({ ...current, dirty: true }));
   }
 
-  function replaceRows(nextRows: CellValue[][], dirty = true): void {
+  function replaceRows(nextRows: CellValue[][], dirty = true, recalcWidths = true): void {
     setRows(nextRows, dirty);
-    setColWidths(calculateColumnWidths(nextRows));
+    // History restore keeps the user's manual column widths; only structural
+    // edits (insert/delete/paste) re-fit them.
+    if (recalcWidths) {
+      setColWidths(calculateColumnWidths(nextRows));
+    }
   }
 
   function insertRow(index: number): void {
@@ -175,7 +179,9 @@ export function ensureSize(
 
 export function trimTrailingEmptyRows(rows: CellValue[][]): CellValue[][] {
   const next = cloneRows(rows);
-  while (next.length > 0 && next[next.length - 1].every((cell) => cell === "")) {
+  // Keep at least one row so clearing the final cell does not collapse the
+  // whole sheet back to the empty state mid-edit.
+  while (next.length > 1 && next[next.length - 1].every((cell) => cell === "")) {
     next.pop();
   }
   return next;

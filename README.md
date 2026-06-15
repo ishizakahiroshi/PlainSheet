@@ -40,6 +40,14 @@ bun run tauri build
 
 Desktop build checks are produced by GitHub Actions. In a private repository, branch pushes automatically publish downloadable development artifacts for local testing. In a public repository, pull requests and branch pushes run Tauri builds without publishing artifacts; run **Tauri Build** manually for development artifacts, or push a `v*` tag to attach Windows, macOS, and Linux bundles to a GitHub Release.
 
+## Format Notes
+
+PlainSheet treats every cell as plain text, so some conversions are inherently lossy:
+
+- **JSON / YAML**: cells are written back as strings, so numbers and booleans become quoted strings, and a key that was missing on one record is written as an empty string on every record. Enable **Omit empty cells (JSON/YAML)** in Settings to drop empty values instead of emitting empty keys.
+- **Markdown**: the table format cannot preserve leading or trailing spaces inside a cell. Use CSV, TSV, or JSON when surrounding whitespace matters.
+- **CSV / TSV**: cells beginning with `=`, `+`, `-`, or `@` are written verbatim. If you plan to open the file in another spreadsheet app, enable **Formula-injection guard (CSV/TSV)** in Settings to prefix those cells with `'` so they are not evaluated as formulas.
+
 ## Web Demo Notes
 
 The web build can open files through the browser file picker and saves by downloading a new file. Direct overwrite save is handled by the Tauri desktop app.

@@ -86,25 +86,33 @@ export function serializeCsv(
   rows: readonly (readonly CellValue[])[],
   delimiter: Delimiter = ",",
   newline: Newline = "LF",
+  sanitizeFormulas = false,
 ): string {
   const lineBreak = newline === "CRLF" ? "\r\n" : "\n";
-  return rows.map((row) => row.map((cell) => serializeCell(cell, delimiter)).join(delimiter)).join(lineBreak);
+  return rows
+    .map((row) => row.map((cell) => serializeCell(cell, delimiter, sanitizeFormulas)).join(delimiter))
+    .join(lineBreak);
 }
 
-function serializeCell(cell: CellValue, delimiter: Delimiter): string {
+// Cells starting with these are treated as formulas by spreadsheet apps; the
+// opt-in guard prefixes them with ' so an exported file cannot execute on open.
+const FORMULA_PREFIX = /^[=+\-@\t\r]/;
+
+function serializeCell(cell: CellValue, delimiter: Delimiter, sanitizeFormulas = false): string {
+  const value = sanitizeFormulas && FORMULA_PREFIX.test(cell) ? `'${cell}` : cell;
   const mustQuote =
-    cell.includes(delimiter) ||
-    cell.includes("\"") ||
-    cell.includes("\r") ||
-    cell.includes("\n") ||
-    cell.startsWith(" ") ||
-    cell.endsWith(" ");
+    value.includes(delimiter) ||
+    value.includes("\"") ||
+    value.includes("\r") ||
+    value.includes("\n") ||
+    value.startsWith(" ") ||
+    value.endsWith(" ");
 
   if (!mustQuote) {
-    return cell;
+    return value;
   }
 
-  return `"${cell.replaceAll("\"", "\"\"")}"`;
+  return `"${value.replaceAll("\"", "\"\"")}"`;
 }
 
 export function detectNewline(text: string): Newline {

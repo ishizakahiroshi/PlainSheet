@@ -5,7 +5,8 @@ import { EmptyState } from "./components/EmptyState";
 import { FormulaBar } from "./components/FormulaBar";
 import { HelpModal } from "./components/HelpModal";
 import { SearchPanel, type SearchOptions } from "./components/SearchPanel";
-import { SheetGrid, columnName } from "./components/SheetGrid";
+import { GlideSheet } from "./components/GlideSheet";
+import { columnName } from "./lib/columns";
 import { SettingsModal } from "./components/SettingsModal";
 import { StatusBar } from "./components/StatusBar";
 import { TitleBar } from "./components/TitleBar";
@@ -20,6 +21,7 @@ import { useSelection, selectionToRange } from "./hooks/useSelection";
 import { cloneRows } from "./hooks/useSheet";
 import { useSheet } from "./hooks/useSheet";
 import type { CellValue, Range, Selection } from "./types/sheet";
+import { BUFFER_COLS } from "./types/sheet";
 
 type PendingConfirm = {
   action: () => void;
@@ -51,6 +53,10 @@ export default function App() {
     caseSensitive: false,
   });
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
+  // Bumped only by deliberate search actions (typing a query, toggling options,
+  // Next/Prev) so the grid scrolls for those — but not when an unrelated cell
+  // edit happens to shift the active match.
+  const [searchScrollNonce, setSearchScrollNonce] = useState(0);
 
   const rowsRef = useRef(sheet.rows);
   const metaRef = useRef(sheet.meta);
@@ -97,6 +103,15 @@ export default function App() {
     confirmDiscard: () => window.confirm(t("confirmUnsaved")),
   });
 
+  const newFile = useCallback(() => {
+    if (sheet.meta.dirty && !window.confirm(t("confirmUnsaved"))) {
+      return;
+    }
+    sheet.loadData([[""]], { fileName: undefined, format: "csv", delimiter: "," });
+    history.reset();
+    selectionState.setSelection({ row: 0, col: 0 });
+  }, [sheet, history, selectionState]);
+
   const searchHits = useMemo(
     () => findSearchHits(sheet.rows, query, searchOptions),
     [sheet.rows, query, searchOptions],
@@ -115,6 +130,10 @@ export default function App() {
     }
   }, [activeSearchIndex, searchHits.length]);
 
+  useEffect(() => {
+    setSearchScrollNonce((nonce) => nonce + 1);
+  }, [query, searchOptions]);
+
   const currentValue = sheet.rows[selectionState.selection.row]?.[selectionState.selection.col] ?? "";
   const selectedReference = referenceForSelection(selectionState.selection, selectionState.range);
 
@@ -123,7 +142,7 @@ export default function App() {
   }, [history, selectionState.selection, sheet.rows]);
 
   const replaceRowsFromHistory = (entry: { rows: CellValue[][]; selection: Selection }) => {
-    sheet.replaceRows(entry.rows, false);
+    sheet.replaceRows(entry.rows, false, false);
     selectionState.setSelection(entry.selection);
   };
 
@@ -143,7 +162,7 @@ export default function App() {
       colDelta,
       false,
       sheet.rows.length + 8,
-      Math.max(sheet.columnCount, 6),
+      sheet.columnCount + BUFFER_COLS,
     );
   };
 
@@ -151,6 +170,7 @@ export default function App() {
     row: number,
     col: number,
     value: string,
+    reselect: boolean,
     direction: "none" | "down" | "up" | "right" | "left" = "none",
   ) => {
     const previousValue = sheet.rows[row]?.[col] ?? "";
@@ -159,8 +179,20 @@ export default function App() {
       sheet.updateCell(row, col, value);
     }
     edit.cancelEditing();
-    selectionState.selectCell(row, col, false);
+    // On blur the selection may already have moved to the cell the user clicked,
+    // so only pull the selection back when committing explicitly (Enter).
+    if (reselect) {
+      selectionState.selectCell(row, col, false);
+    }
     moveAfterCommit(direction);
+  };
+
+  const editCell = (row: number, col: number, value: string) => {
+    const previousValue = sheet.rows[row]?.[col] ?? "";
+    if (previousValue !== value) {
+      recordBeforeChange();
+      sheet.updateCell(row, col, value);
+    }
   };
 
   const copySelection = async () => {
@@ -281,6 +313,7 @@ export default function App() {
     }
     const nextIndex = (activeSearchIndex + direction + searchHits.length) % searchHits.length;
     setActiveSearchIndex(nextIndex);
+    setSearchScrollNonce((nonce) => nonce + 1);
     const hit = searchHits[nextIndex];
     selectionState.selectCell(hit.row, hit.col, false);
   };
@@ -296,7 +329,9 @@ export default function App() {
     }
     recordBeforeChange();
     const next = cloneRows(sheet.rows);
-    next[hit.row][hit.col] = next[hit.row][hit.col].replace(matcher, replacement);
+    // Use a function replacer so the replacement is inserted literally, matching
+    // replaceAll. A string replacement would treat $&/$1/$$ as special patterns.
+    next[hit.row][hit.col] = next[hit.row][hit.col].replace(matcher, () => replacement);
     sheet.replaceRows(next);
   };
 
@@ -326,6 +361,9 @@ export default function App() {
       target instanceof HTMLTextAreaElement ||
       target instanceof HTMLSelectElement;
 
+    // Cell navigation, in-cell editing, copy/paste, select-all and clearing are
+    // owned by the Glide data grid. App-level handling is limited to global
+    // shortcuts that the grid does not provide.
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "o") {
       event.preventDefault();
       void file.openFile();
@@ -338,54 +376,19 @@ export default function App() {
     } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "h") {
       event.preventDefault();
       setSearchOpen(true);
-    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a" && !editingText) {
-      event.preventDefault();
-      selectionState.selectAll(Math.max(sheet.rows.length, 1), Math.max(sheet.columnCount, 1));
-    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !event.shiftKey) {
+    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !event.shiftKey && !editingText) {
       event.preventDefault();
       runUndo();
     } else if (
-      ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") ||
-      ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "z")
+      !editingText &&
+      (((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") ||
+        ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "z"))
     ) {
       event.preventDefault();
       runRedo();
-    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c" && !editingText) {
-      event.preventDefault();
-      void copySelection();
-    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v" && !editingText) {
-      event.preventDefault();
-      void pasteClipboard();
     } else if (!editingText && event.key === "Escape") {
-      selectionState.clearRange();
       setSearchOpen(false);
       setContextMenu(null);
-    } else if (!editingText && event.key === "Delete") {
-      event.preventDefault();
-      clearSelectedCells();
-    } else if (!editingText && event.key === "Backspace") {
-      event.preventDefault();
-      clearSelectedCells();
-    } else if (!editingText && event.key === "F2") {
-      event.preventDefault();
-      edit.startEditing(selectionState.selection.row, selectionState.selection.col, currentValue);
-    } else if (!editingText && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
-      event.preventDefault();
-      const delta = {
-        ArrowUp: [-1, 0],
-        ArrowDown: [1, 0],
-        ArrowLeft: [0, -1],
-        ArrowRight: [0, 1],
-      }[event.key] as [number, number];
-      selectionState.moveSelection(
-        delta[0],
-        delta[1],
-        event.shiftKey,
-        sheet.rows.length + 8,
-        Math.max(sheet.columnCount, 6),
-      );
-    } else if (!editingText && event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      edit.startEditing(selectionState.selection.row, selectionState.selection.col, currentValue, event.key);
     }
   };
 
@@ -397,6 +400,7 @@ export default function App() {
       <Toolbar
         canUndo={history.canUndo}
         canRedo={history.canRedo}
+        onNew={newFile}
         onOpen={() => void file.openFile()}
         onSave={() => void file.saveFile()}
         onSaveAs={() => void file.saveAs()}
@@ -434,34 +438,38 @@ export default function App() {
       {hasData ? (
         <>
           <FormulaBar
+            row={selectionState.selection.row}
+            col={selectionState.selection.col}
             reference={selectedReference}
             value={currentValue}
-            onCommit={(value) => commitCell(selectionState.selection.row, selectionState.selection.col, value)}
+            onCommit={(row, col, value, reselect) => commitCell(row, col, value, reselect)}
           />
-          <SheetGrid
+          <GlideSheet
             rows={sheet.rows}
             columnCount={sheet.columnCount}
             colWidths={sheet.colWidths}
-            selection={selectionState.selection}
-            range={selectionState.range}
-            editing={edit.editing}
             searchHits={searchHitSet}
             activeSearchHit={activeSearchHit}
-            zebra={zebra}
-            headerHighlight={headerHighlight}
-            onSelectCell={(row, col, extend) => selectionState.selectCell(row, col, extend)}
-            onSelectRow={(row) => selectionState.selectRow(row, Math.max(sheet.columnCount, 1))}
-            onSelectColumn={(col) => selectionState.selectColumn(col, Math.max(sheet.rows.length, 1))}
-            onStartEdit={(row, col, overwrite) => edit.startEditing(row, col, sheet.rows[row]?.[col] ?? "", overwrite)}
-            onUpdateEdit={edit.updateEditingValue}
-            onCommitEdit={commitCell}
-            onCancelEdit={edit.cancelEditing}
+            scrollNonce={searchScrollNonce}
+            onEdit={editCell}
+            onColumnResize={sheet.setColumnWidth}
+            onSelectionChange={(sel, range) => {
+              if (range) {
+                selectionState.selectRange(range);
+              } else {
+                selectionState.selectCell(sel.row, sel.col, false);
+              }
+            }}
+            onPasteGrid={(startRow, startCol, grid) => {
+              recordBeforeChange();
+              const pasted = sheet.pasteGrid(startRow, startCol, grid);
+              selectionState.selectRange(pasted);
+            }}
             onOpenContextMenu={openContextMenu}
-            onResizeColumn={sheet.setColumnWidth}
           />
         </>
       ) : (
-        <EmptyState onOpen={() => void file.openFile()} onSample={() => void file.loadSample()} />
+        <EmptyState onNew={newFile} onOpen={() => void file.openFile()} onSample={() => void file.loadSample()} />
       )}
       <StatusBar
         rows={sheet.rows}
@@ -511,11 +519,15 @@ export default function App() {
         newline={sheet.meta.newline}
         zebra={zebra}
         headerHighlight={headerHighlight}
+        csvFormulaGuard={sheet.meta.csvFormulaGuard}
+        omitEmptyCells={sheet.meta.omitEmptyCells}
         theme={theme}
         onEncodingChange={(encoding) => sheet.setMeta({ encoding, dirty: true })}
         onNewlineChange={(newline) => sheet.setMeta({ newline, dirty: true })}
         onZebraChange={setZebra}
         onHeaderHighlightChange={setHeaderHighlight}
+        onCsvFormulaGuardChange={(value) => sheet.setMeta({ csvFormulaGuard: value })}
+        onOmitEmptyCellsChange={(value) => sheet.setMeta({ omitEmptyCells: value })}
         onThemeChange={setTheme}
         onClose={() => setSettingsOpen(false)}
       />
@@ -552,8 +564,12 @@ function findSearchHits(rows: CellValue[][], query: string, options: SearchOptio
   return hits;
 }
 
+// A modest cap to keep a pathological user-supplied regex from locking the UI.
+// Full ReDoS protection (RE2 / a worker with a timeout) is a post-release item.
+const MAX_QUERY_LENGTH = 2000;
+
 function buildMatcher(query: string, options: SearchOptions): RegExp | null {
-  if (query === "") {
+  if (query === "" || query.length > MAX_QUERY_LENGTH) {
     return null;
   }
 

@@ -40,6 +40,17 @@ describe("parseClipboardText", () => {
   it("keeps a single value as a 1x1 grid", () => {
     expect(parseClipboardText("plain")).toEqual([["plain"]]);
   });
+
+  it("keeps a single comma line as one cell (commas are data, not columns)", () => {
+    expect(parseClipboardText("a, b, c")).toEqual([["a, b, c"]]);
+  });
+
+  it("still splits multi-line comma text into a grid", () => {
+    expect(parseClipboardText("a,b\nc,d")).toEqual([
+      ["a", "b"],
+      ["c", "d"],
+    ]);
+  });
 });
 
 describe("classifyClipboardText", () => {

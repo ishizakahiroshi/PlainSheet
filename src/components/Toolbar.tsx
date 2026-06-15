@@ -2,6 +2,7 @@ import {
   Bot,
   CircleHelp,
   Columns3,
+  FilePlus2,
   FolderOpen,
   Rows3,
   Redo2,
@@ -17,6 +18,7 @@ import { t } from "../lib/i18n";
 type ToolbarProps = {
   canUndo: boolean;
   canRedo: boolean;
+  onNew: () => void;
   onOpen: () => void;
   onSave: () => void;
   onSaveAs: () => void;
@@ -36,6 +38,7 @@ type ToolbarProps = {
 export function Toolbar({
   canUndo,
   canRedo,
+  onNew,
   onOpen,
   onSave,
   onSaveAs,
@@ -53,6 +56,10 @@ export function Toolbar({
 }: ToolbarProps) {
   return (
     <nav className="toolbar" aria-label={t("toolbarLabel")}>
+      <button className="toolbar__button" type="button" aria-label={t("newSheet")} onClick={onNew}>
+        <FilePlus2 size={16} aria-hidden="true" />
+        <span>{t("newFile")}</span>
+      </button>
       <button className="toolbar__button" type="button" aria-label={t("open")} onClick={onOpen}>
         <FolderOpen size={16} aria-hidden="true" />
         <span>{t("open")}</span>

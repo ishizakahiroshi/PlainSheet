@@ -30,7 +30,7 @@ virtual scrolling, richer export, and Git diff helpers are planned post-release.
 | Build    | Vite 5 + `tsc` |
 | Runtime  | Bun (package manager + scripts) |
 | Desktop  | Tauri v2 (Rust) — `@tauri-apps/api`, plugins `dialog` / `fs` |
-| Parsing  | `js-yaml` / `yaml` for YAML; custom parsers for CSV/TSV/MD/JSON |
+| Parsing  | `yaml` for YAML; custom parsers for CSV/TSV/MD/JSON |
 | Icons    | `lucide-react` |
 | Test     | Vitest + Testing Library + jsdom |
 | Lint     | ESLint (flat config) + Prettier |
