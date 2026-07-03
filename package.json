@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "tauri": "tauri",
+    "tauri:build": "tauri build --no-bundle && node scripts/copy-app.mjs",
     "docker:setup": "docker build -t plainsheet-builder .",
     "docker:cargo": "docker run --rm -v $(pwd):/app -v plainsheet-cargo-cache:/root/.cargo plainsheet-builder cargo build --manifest-path src-tauri/Cargo.toml"
   },

@@ -94,6 +94,9 @@ const dictionaries = {
     shortcutCopyPaste: "コピー / 貼り付け",
     shortcutEditCell: "セル編集",
     shortcutClearCell: "セルを空に",
+    windowMinimize: "最小化",
+    windowMaximize: "最大化 / 元に戻す",
+    windowClose: "閉じる",
   },
   en: {
     appName: "PlainSheet",
@@ -188,6 +191,9 @@ const dictionaries = {
     shortcutCopyPaste: "Copy / paste",
     shortcutEditCell: "Edit cell",
     shortcutClearCell: "Clear cell",
+    windowMinimize: "Minimize",
+    windowMaximize: "Maximize / Restore",
+    windowClose: "Close",
   },
 } as const;
 

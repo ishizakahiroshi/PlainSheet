@@ -42,11 +42,11 @@ button:disabled {
 
 .titleBar {
   display: grid;
-  grid-template-columns: 180px 1fr;
+  grid-template-columns: 180px 1fr auto;
   align-items: center;
   flex-shrink: 0;
   height: 34px;
-  padding: 0 14px;
+  padding: 0 0 0 14px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   user-select: none;
@@ -63,6 +63,32 @@ button:disabled {
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.titleBar__controls {
+  display: flex;
+  align-self: stretch;
+}
+
+.titleBar__control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.titleBar__control:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.titleBar__control--close:hover {
+  background: var(--danger);
+  color: #ffffff;
 }
 
 .toolbar,
