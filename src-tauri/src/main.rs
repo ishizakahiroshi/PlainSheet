@@ -17,14 +17,26 @@ async fn open_file_dialog(app: tauri::AppHandle) -> Option<String> {
         .map(|path| path.to_string())
 }
 
+// Defense in depth: these commands only ever receive absolute paths returned by
+// the native file dialog or drop events, so reject anything else.
+fn require_absolute(path: &str) -> Result<(), String> {
+    if std::path::Path::new(path).is_absolute() {
+        Ok(())
+    } else {
+        Err(format!("refusing non-absolute path: {path}"))
+    }
+}
+
 #[tauri::command]
-async fn read_file(path: String) -> Result<String, String> {
+async fn read_file(path: String) -> Result<DecodedText, String> {
+    require_absolute(&path)?;
     let bytes = fs::read(&path).map_err(|error| format!("failed to read {path}: {error}"))?;
-    decode_bytes(&bytes).map(|decoded| decoded.content)
+    decode_bytes(&bytes)
 }
 
 #[tauri::command]
 async fn write_file(path: String, content: String, encoding: Option<String>) -> Result<(), String> {
+    require_absolute(&path)?;
     let target_encoding = encoding.unwrap_or_else(|| "utf-8".to_string());
     let bytes = encode_text(&content, &target_encoding)?;
     fs::write(&path, bytes).map_err(|error| format!("failed to write {path}: {error}"))
@@ -44,12 +56,7 @@ async fn save_file_dialog(app: tauri::AppHandle, default_name: String) -> Option
         .map(|path| path.to_string())
 }
 
-#[tauri::command]
-async fn detect_encoding(path: String) -> Result<String, String> {
-    let bytes = fs::read(&path).map_err(|error| format!("failed to read {path}: {error}"))?;
-    decode_bytes(&bytes).map(|decoded| decoded.encoding)
-}
-
+#[derive(serde::Serialize)]
 struct DecodedText {
     content: String,
     encoding: String,
@@ -130,13 +137,15 @@ fn encode_with(encoding: &'static Encoding, content: &str, label: &str) -> Resul
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
+        // tauri_plugin_fs is intentionally NOT registered. PlainSheet ships
+        // narrow read_file/write_file commands instead of exposing the fs
+        // plugin's broad API so the webview cannot reach into arbitrary paths
+        // even if a capability is later relaxed.
         .invoke_handler(tauri::generate_handler![
             open_file_dialog,
             read_file,
             write_file,
-            save_file_dialog,
-            detect_encoding
+            save_file_dialog
         ])
         .run(tauri::generate_context!());
 

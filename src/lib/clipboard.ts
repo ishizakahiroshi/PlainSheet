@@ -1,4 +1,4 @@
-import type { CellValue, ClipboardPayload, Range } from "../types/sheet";
+import type { CellValue, Range } from "../types/sheet";
 import { parseCsv, serializeCsv } from "./csv";
 
 export function rangeTsv(rows: readonly (readonly CellValue[])[], range: Range): string {
@@ -26,17 +26,14 @@ export function parseClipboardText(text: string): CellValue[][] {
 
   const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const withoutTrailingNewline = normalized.endsWith("\n") ? normalized.slice(0, -1) : normalized;
+  // A single line without tabs is ambiguous: its commas are likely data, not
+  // column breaks. Keep it as one cell. Tab-separated text (Excel/Sheets) and
+  // any multi-line text still parse as a grid.
+  if (!withoutTrailingNewline.includes("\t") && !withoutTrailingNewline.includes("\n")) {
+    return [[withoutTrailingNewline]];
+  }
   const delimiter = withoutTrailingNewline.includes("\t") ? "\t" : ",";
   return parseCsv(withoutTrailingNewline, delimiter);
-}
-
-export function classifyClipboardText(text: string): ClipboardPayload {
-  const rows = parseClipboardText(text);
-  const isRange = rows.length > 1 || rows.some((row) => row.length > 1);
-  return {
-    rows,
-    source: isRange ? "range" : "single-cell",
-  };
 }
 
 export function normalizeRange(range: Exclude<Range, null>): Exclude<Range, null> {

@@ -1,17 +1,28 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { t } from "../lib/i18n";
 
 type FormulaBarProps = {
+  row: number;
+  col: number;
   reference: string;
   value: string;
-  onCommit: (value: string) => void;
+  onCommit: (row: number, col: number, value: string, reselect: boolean) => void;
 };
 
-export function FormulaBar({ reference, value, onCommit }: FormulaBarProps) {
+export function FormulaBar({ row, col, reference, value, onCommit }: FormulaBarProps) {
   const [draft, setDraft] = useState(value);
+  // The cell being edited, captured on focus. Committing to this target rather
+  // than the live selection prevents writing the draft into a different cell
+  // when a click moves the selection just before the input blurs.
+  const target = useRef({ row, col });
+  const focused = useRef(false);
 
   useEffect(() => {
-    setDraft(value);
+    // Don't clobber the draft while the user is typing; only sync from props
+    // when the bar isn't actively being edited.
+    if (!focused.current) {
+      setDraft(value);
+    }
   }, [value, reference]);
 
   return (
@@ -21,11 +32,18 @@ export function FormulaBar({ reference, value, onCommit }: FormulaBarProps) {
         className="formulaBar__input"
         aria-label={t("formulaInput")}
         value={draft}
+        onFocus={() => {
+          focused.current = true;
+          target.current = { row, col };
+        }}
         onChange={(event) => setDraft(event.target.value)}
-        onBlur={() => onCommit(draft)}
+        onBlur={() => {
+          focused.current = false;
+          onCommit(target.current.row, target.current.col, draft, false);
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
-            onCommit(draft);
+            onCommit(target.current.row, target.current.col, draft, true);
             event.currentTarget.blur();
           }
           if (event.key === "Escape") {

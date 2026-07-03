@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyClipboardText, normalizeRange, parseClipboardText, rangeTsv } from "../lib/clipboard";
+import { normalizeRange, parseClipboardText, rangeTsv } from "../lib/clipboard";
 
 describe("rangeTsv", () => {
   it("serializes a selected range as TSV", () => {
@@ -40,15 +40,16 @@ describe("parseClipboardText", () => {
   it("keeps a single value as a 1x1 grid", () => {
     expect(parseClipboardText("plain")).toEqual([["plain"]]);
   });
-});
 
-describe("classifyClipboardText", () => {
-  it("classifies one cell", () => {
-    expect(classifyClipboardText("plain").source).toBe("single-cell");
+  it("keeps a single comma line as one cell (commas are data, not columns)", () => {
+    expect(parseClipboardText("a, b, c")).toEqual([["a, b, c"]]);
   });
 
-  it("classifies ranges", () => {
-    expect(classifyClipboardText("a\tb").source).toBe("range");
+  it("still splits multi-line comma text into a grid", () => {
+    expect(parseClipboardText("a,b\nc,d")).toEqual([
+      ["a", "b"],
+      ["c", "d"],
+    ]);
   });
 });
 

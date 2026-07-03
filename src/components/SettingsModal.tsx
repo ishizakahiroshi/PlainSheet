@@ -7,11 +7,15 @@ type SettingsModalProps = {
   newline: Newline;
   zebra: boolean;
   headerHighlight: boolean;
+  csvFormulaGuard: boolean;
+  omitEmptyCells: boolean;
   theme: "light" | "dark" | "system";
   onEncodingChange: (encoding: Encoding) => void;
   onNewlineChange: (newline: Newline) => void;
   onZebraChange: (enabled: boolean) => void;
   onHeaderHighlightChange: (enabled: boolean) => void;
+  onCsvFormulaGuardChange: (enabled: boolean) => void;
+  onOmitEmptyCellsChange: (enabled: boolean) => void;
   onThemeChange: (theme: "light" | "dark" | "system") => void;
   onClose: () => void;
 };
@@ -22,11 +26,15 @@ export function SettingsModal({
   newline,
   zebra,
   headerHighlight,
+  csvFormulaGuard,
+  omitEmptyCells,
   theme,
   onEncodingChange,
   onNewlineChange,
   onZebraChange,
   onHeaderHighlightChange,
+  onCsvFormulaGuardChange,
+  onOmitEmptyCellsChange,
   onThemeChange,
   onClose,
 }: SettingsModalProps) {
@@ -81,6 +89,24 @@ export function SettingsModal({
               onChange={(event) => onHeaderHighlightChange(event.target.checked)}
             />
             <span>{t("headerHighlight")}</span>
+          </label>
+          <label className="checkControl">
+            <input
+              aria-label={t("csvFormulaGuard")}
+              type="checkbox"
+              checked={csvFormulaGuard}
+              onChange={(event) => onCsvFormulaGuardChange(event.target.checked)}
+            />
+            <span>{t("csvFormulaGuard")}</span>
+          </label>
+          <label className="checkControl">
+            <input
+              aria-label={t("omitEmptyCells")}
+              type="checkbox"
+              checked={omitEmptyCells}
+              onChange={(event) => onOmitEmptyCellsChange(event.target.checked)}
+            />
+            <span>{t("omitEmptyCells")}</span>
           </label>
           <label>
             <span>{t("theme")}</span>

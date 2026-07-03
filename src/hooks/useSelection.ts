@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Range, Selection } from "../types/sheet";
 import { EMPTY_SELECTION } from "../types/sheet";
 import { normalizeRange } from "../lib/clipboard";
+import { clamp } from "../lib/columnWidth";
 
 export function useSelection() {
   const [selection, setSelectionState] = useState<Selection>(EMPTY_SELECTION);
@@ -29,15 +30,6 @@ export function useSelection() {
     setAnchor({ row: normalized.startRow, col: normalized.startCol });
     setSelectionState({ row: normalized.endRow, col: normalized.endCol });
     setRange(normalized);
-  }
-
-  function selectAll(rowCount: number, colCount: number): void {
-    selectRange({
-      startRow: 0,
-      startCol: 0,
-      endRow: Math.max(0, rowCount - 1),
-      endCol: Math.max(0, colCount - 1),
-    });
   }
 
   function selectRow(row: number, colCount: number): void {
@@ -70,11 +62,6 @@ export function useSelection() {
     selectCell(nextRow, nextCol, extend);
   }
 
-  function clearRange(): void {
-    setRange(null);
-    setAnchor(selection);
-  }
-
   function setSelection(next: Selection): void {
     setSelectionState(next);
     setAnchor(next);
@@ -86,11 +73,9 @@ export function useSelection() {
     range,
     selectCell,
     selectRange,
-    selectAll,
     selectRow,
     selectColumn,
     moveSelection,
-    clearRange,
     setSelection,
   };
 }
@@ -104,21 +89,4 @@ export function selectionToRange(selection: Selection, range: Range): Exclude<Ra
       endCol: selection.col,
     }
   );
-}
-
-export function isCellInRange(row: number, col: number, range: Range): boolean {
-  if (range === null) {
-    return false;
-  }
-  const normalized = normalizeRange(range);
-  return (
-    row >= normalized.startRow &&
-    row <= normalized.endRow &&
-    col >= normalized.startCol &&
-    col <= normalized.endCol
-  );
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
 }
