@@ -67,8 +67,26 @@ export default function App() {
     document.title = `${sheet.meta.dirty ? "● " : ""}${sheet.meta.fileName ?? t("appName")}`;
   }, [sheet.meta]);
 
+  // "system" follows prefers-color-scheme so CSS vars and Glide canvas stay in sync.
+  const [systemIsDark, setSystemIsDark] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(prefers-color-scheme: dark)").matches : false,
+  );
+  const effectiveTheme: "light" | "dark" =
+    theme === "system" ? (systemIsDark ? "dark" : "light") : theme;
+
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.theme = effectiveTheme;
+  }, [effectiveTheme]);
+
+  useEffect(() => {
+    if (theme !== "system") {
+      return;
+    }
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => setSystemIsDark(media.matches);
+    onChange();
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
   }, [theme]);
 
   useEffect(() => {
@@ -83,9 +101,16 @@ export default function App() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, []);
 
+  const toastTimerRef = useRef<number | null>(null);
   const showToast = useCallback((message: string) => {
     setToast(message);
-    window.setTimeout(() => setToast(null), 2000);
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, 2000);
   }, []);
 
   const file = useFile({
@@ -146,7 +171,10 @@ export default function App() {
   }, [history, selectionState.selection, sheet.rows]);
 
   const replaceRowsFromHistory = (entry: { rows: CellValue[][]; selection: Selection }) => {
-    sheet.replaceRows(entry.rows, false, false);
+    // dirty=true: after Save the flag is false, but undo/redo changes cells away
+    // from (or back toward) the on-disk snapshot. Mark dirty so beforeunload and
+    // the title indicator still warn. (We do not track a saved fingerprint here.)
+    sheet.replaceRows(entry.rows, true, false);
     selectionState.setSelection(entry.selection);
   };
 
@@ -171,8 +199,8 @@ export default function App() {
     }
   };
 
-  const copySelection = async () => {
-    const selected = selectionToRange(selectionState.selection, selectionState.range);
+  const copySelection = async (overrideRange?: Exclude<Range, null>) => {
+    const selected = overrideRange ?? selectionToRange(selectionState.selection, selectionState.range);
     const normalized = normalizeRange(selected);
     const text = rangeTsv(sheet.rows, selected);
     if (!navigator.clipboard) {
@@ -192,7 +220,7 @@ export default function App() {
     }
   };
 
-  const pasteClipboard = async () => {
+  const pasteClipboard = async (start?: { row: number; col: number }) => {
     if (!navigator.clipboard) {
       showToast(t("toastClipboardUnavailable"));
       return;
@@ -200,8 +228,10 @@ export default function App() {
     try {
       const text = await navigator.clipboard.readText();
       const grid = parseClipboardText(text);
+      const row = start?.row ?? selectionState.selection.row;
+      const col = start?.col ?? selectionState.selection.col;
       recordBeforeChange();
-      const pastedRange = sheet.pasteGrid(selectionState.selection.row, selectionState.selection.col, grid);
+      const pastedRange = sheet.pasteGrid(row, col, grid);
       selectionState.selectRange(pastedRange);
       const normalized = normalizeRange(pastedRange);
       showToast(
@@ -215,13 +245,62 @@ export default function App() {
     }
   };
 
-  const clearSelectedCells = () => {
+  const clearSelectedCells = (overrideRange?: Exclude<Range, null>) => {
+    const selected = overrideRange ?? selectionToRange(selectionState.selection, selectionState.range);
+    // Peek whether clear would change data before recording history.
+    const normalized = normalizeRange(selected);
+    let wouldChange = false;
+    for (let r = normalized.startRow; r <= normalized.endRow && !wouldChange; r += 1) {
+      const row = sheet.rows[r];
+      if (!row) {
+        continue;
+      }
+      for (let c = normalized.startCol; c <= normalized.endCol; c += 1) {
+        if ((row[c] ?? "") !== "") {
+          wouldChange = true;
+          break;
+        }
+      }
+    }
+    if (!wouldChange) {
+      return;
+    }
     recordBeforeChange();
-    sheet.clearRange(selectionToRange(selectionState.selection, selectionState.range));
+    sheet.clearRange(selected);
   };
 
   const openContextMenu = (kind: ContextMenuKind, row: number, col: number, x: number, y: number) => {
     setContextMenu({ kind, row, col, x, y });
+  };
+
+  // Build a range from the context-menu target synchronously. Do not rely on
+  // setSelection then reading selection state in the same tick (stale).
+  const rangeFromContextMenu = (): Exclude<Range, null> | null => {
+    if (!contextMenu) {
+      return null;
+    }
+    if (contextMenu.kind === "column") {
+      return {
+        startRow: 0,
+        startCol: contextMenu.col,
+        endRow: Math.max(0, sheet.rows.length - 1),
+        endCol: contextMenu.col,
+      };
+    }
+    if (contextMenu.kind === "row") {
+      return {
+        startRow: contextMenu.row,
+        startCol: 0,
+        endRow: contextMenu.row,
+        endCol: Math.max(0, sheet.columnCount - 1),
+      };
+    }
+    return {
+      startRow: contextMenu.row,
+      startCol: contextMenu.col,
+      endRow: contextMenu.row,
+      endCol: contextMenu.col,
+    };
   };
 
   const selectContextCell = () => {
@@ -387,6 +466,18 @@ export default function App() {
       event.preventDefault();
       runRedo();
     } else if (!editingText && event.key === "Escape") {
+      if (settingsOpen) {
+        setSettingsOpen(false);
+        return;
+      }
+      if (helpOpen) {
+        setHelpOpen(false);
+        return;
+      }
+      if (pendingConfirm) {
+        setPendingConfirm(null);
+        return;
+      }
       setSearchOpen(false);
       setContextMenu(null);
     }
@@ -453,6 +544,9 @@ export default function App() {
             searchHits={searchHitSet}
             activeSearchHit={activeSearchHit}
             scrollNonce={searchScrollNonce}
+            theme={effectiveTheme}
+            zebra={zebra}
+            headerHighlight={headerHighlight}
             onEdit={editCell}
             onColumnResize={sheet.setColumnWidth}
             onSelectionChange={(sel, range) => {
@@ -484,16 +578,19 @@ export default function App() {
         state={contextMenu}
         onClose={() => setContextMenu(null)}
         onCopy={() => {
+          const range = rangeFromContextMenu();
           selectContextCell();
-          void copySelection();
+          void copySelection(range ?? undefined);
         }}
         onPaste={() => {
+          const menu = contextMenu;
           selectContextCell();
-          void pasteClipboard();
+          void pasteClipboard(menu ? { row: menu.row, col: menu.col } : undefined);
         }}
         onClear={() => {
+          const range = rangeFromContextMenu();
           selectContextCell();
-          clearSelectedCells();
+          clearSelectedCells(range ?? undefined);
         }}
         onInsertRowAbove={() => insertRow(0)}
         onInsertRowBelow={() => insertRow(1)}
@@ -502,7 +599,8 @@ export default function App() {
         onInsertColRight={() => insertColumn(1)}
         onDeleteCol={deleteColumnWithConfirm}
         onAutoFitColumn={() => {
-          sheet.autoFitColumns();
+          const col = contextMenu?.col ?? selectionState.selection.col;
+          sheet.autoFitColumn(col);
           showToast(t("toastAutoFit"));
         }}
       />
@@ -528,8 +626,8 @@ export default function App() {
         onNewlineChange={(newline) => sheet.setMeta({ newline, dirty: true })}
         onZebraChange={setZebra}
         onHeaderHighlightChange={setHeaderHighlight}
-        onCsvFormulaGuardChange={(value) => sheet.setMeta({ csvFormulaGuard: value })}
-        onOmitEmptyCellsChange={(value) => sheet.setMeta({ omitEmptyCells: value })}
+        onCsvFormulaGuardChange={(value) => sheet.setMeta({ csvFormulaGuard: value, dirty: true })}
+        onOmitEmptyCellsChange={(value) => sheet.setMeta({ omitEmptyCells: value, dirty: true })}
         onThemeChange={setTheme}
         onClose={() => setSettingsOpen(false)}
       />

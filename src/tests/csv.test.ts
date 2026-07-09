@@ -9,6 +9,13 @@ describe("parseCsv", () => {
     ]);
   });
 
+  it("strips a leading UTF-8 BOM so browser File.text() matches desktop decode", () => {
+    expect(parseCsv("\uFEFFname,age\n1,2")).toEqual([
+      ["name", "age"],
+      ["1", "2"],
+    ]);
+  });
+
   it("parses quoted cells containing delimiters", () => {
     expect(parseCsv("id,\"last, first\"\n1,\"Doe, Jane\"")).toEqual([
       ["id", "last, first"],

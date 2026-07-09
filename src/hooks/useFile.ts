@@ -37,6 +37,16 @@ export function useFile({
   // Browser-only: handle returned by the File System Access save picker, reused
   // for overwrite saves. Only reused when its name still matches the sheet name.
   const fileHandleRef = useRef<FsFileHandle | null>(null);
+  // Bumped on every load start so a slow earlier open cannot overwrite a later one.
+  const loadGenerationRef = useRef(0);
+  // Latest callbacks for the drag-drop effect (subscribe once; never leak listeners).
+  const loadPathRef = useRef<(path: string) => Promise<void>>(async () => undefined);
+  const getMetaRef = useRef(getMeta);
+  const confirmDiscardRef = useRef(confirmDiscard);
+  const onToastRef = useRef(onToast);
+  getMetaRef.current = getMeta;
+  confirmDiscardRef.current = confirmDiscard;
+  onToastRef.current = onToast;
 
   // Forget the previously chosen save target whenever a new file is loaded, so a
   // later Ctrl+S can't overwrite an unrelated file that merely shares a name.
@@ -46,6 +56,7 @@ export function useFile({
 
   const loadPath = useCallback(
     async (path: string) => {
+      const generation = ++loadGenerationRef.current;
       try {
         // Read bytes and detect encoding in a single command so the content and
         // its encoding always come from the same read (no double I/O, no race).
@@ -53,6 +64,9 @@ export function useFile({
           "read_file",
           { path },
         );
+        if (generation !== loadGenerationRef.current) {
+          return;
+        }
         const format = formatFromPath(path);
         const delimiter = detectDelimiter(content);
         const newline = detectNewline(content);
@@ -67,11 +81,15 @@ export function useFile({
         });
         onToast(t("toastLoaded"));
       } catch {
+        if (generation !== loadGenerationRef.current) {
+          return;
+        }
         onToast(t("toastLoadFailed"));
       }
     },
     [loadData, onToast],
   );
+  loadPathRef.current = loadPath;
 
   const openFile = useCallback(async () => {
     try {
@@ -243,7 +261,9 @@ export function useFile({
       if (getMeta().dirty && !confirmDiscard()) {
         return;
       }
-      const response = await fetch("/sample.csv");
+      // Respect Vite base (e.g. /PlainSheet/ on GitHub Pages) so sample open
+      // does not 404 against the site origin root.
+      const response = await fetch(`${import.meta.env.BASE_URL}sample.csv`);
       if (!response.ok) {
         throw new Error("sample file is unavailable");
       }
@@ -264,19 +284,18 @@ export function useFile({
   }, [confirmDiscard, getMeta, loadData, onToast, resetSaveTarget]);
 
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
     if (!isTauriRuntime()) {
       const handleDragOver = (event: DragEvent) => {
         event.preventDefault();
       };
       const handleDrop = (event: DragEvent) => {
         event.preventDefault();
-        if (getMeta().dirty && !confirmDiscard()) {
+        if (getMetaRef.current().dirty && !confirmDiscardRef.current()) {
           return;
         }
         const file = event.dataTransfer?.files[0];
         if (file) {
-          void loadBrowserFile(file, loadData, onToast, resetSaveTarget);
+          void loadBrowserFile(file, loadData, onToastRef.current, resetSaveTarget);
         }
       };
       window.addEventListener("dragover", handleDragOver);
@@ -290,27 +309,42 @@ export function useFile({
     // Tauri v2 renamed the v1 'tauri://file-drop' event to 'tauri://drag-drop'
     // (and split enter/over/leave into their own names). The v1 name silently
     // never fires under v2, so listen on the v2 name.
+    // Subscribe once: deps are stable (refs for latest callbacks) so we never
+    // accumulate orphaned listeners when App re-renders.
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
     listen<FileDropPayload>("tauri://drag-drop", (event) => {
       const path = extractDropPath(event.payload);
       if (!path) {
         return;
       }
-      if (getMeta().dirty && !confirmDiscard()) {
+      if (getMetaRef.current().dirty && !confirmDiscardRef.current()) {
         return;
       }
-      void loadPath(path);
+      void loadPathRef.current(path);
     })
       .then((handler) => {
+        if (cancelled) {
+          handler();
+          return;
+        }
         unlisten = handler;
       })
-      .catch(() => onToast(t("toastLoadFailed")));
+      .catch(() => {
+        if (!cancelled) {
+          onToastRef.current(t("toastLoadFailed"));
+        }
+      });
 
     return () => {
+      cancelled = true;
       if (unlisten) {
         unlisten();
       }
     };
-  }, [confirmDiscard, getMeta, loadData, loadPath, onToast, resetSaveTarget]);
+    // loadData/resetSaveTarget are used only on the browser branch; keep them
+    // so a change still refreshes that path. Tauri uses refs.
+  }, [loadData, resetSaveTarget]);
 
   return {
     openFile,

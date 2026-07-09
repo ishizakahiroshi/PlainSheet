@@ -1,5 +1,5 @@
 import { Copy, ClipboardPaste, Columns3, Plus, Trash2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { t } from "../lib/i18n";
 
 export type ContextMenuKind = "cell" | "row" | "column";
@@ -47,6 +47,24 @@ export function ContextMenu({
   onDeleteCol,
   onAutoFitColumn,
 }: ContextMenuProps) {
+  useEffect(() => {
+    if (!state) {
+      return;
+    }
+    // Close on outside pointer down so the menu does not stick after a grid click
+    // that never leaves the menu element (onMouseLeave-only was too easy to miss).
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest(".contextMenu")) {
+        return;
+      }
+      onClose();
+    };
+    // Capture so we run before the grid swallows the event.
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [state, onClose]);
+
   if (!state) {
     return null;
   }
@@ -89,7 +107,6 @@ export function ContextMenu({
       role="menu"
       aria-label={state.kind === "column" ? t("columnMenu") : state.kind === "row" ? t("rowMenu") : t("cellMenu")}
       style={{ left: state.x, top: state.y }}
-      onMouseLeave={onClose}
     >
       {items.map((item) => (
         <button

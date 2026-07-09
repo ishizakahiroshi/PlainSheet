@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { t } from "../lib/i18n";
 import type { Encoding, Newline } from "../types/sheet";
 
@@ -38,13 +39,33 @@ export function SettingsModal({
   onThemeChange,
   onClose,
 }: SettingsModalProps) {
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
   if (!open) {
     return null;
   }
 
   return (
-    <div className="modalBackdrop" role="presentation">
-      <section className="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div className="modalBackdrop" role="presentation" onClick={onClose}>
+      <section
+        className="modal modal--wide"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        onClick={(event) => event.stopPropagation()}
+      >
         <h2 id="settings-title">{t("settingsTitle")}</h2>
         <div className="settingsGrid">
           <label>

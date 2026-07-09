@@ -108,6 +108,47 @@ describe("table formats", () => {
     expect(() => parseTableText('["a","b","c"]', "json", ",")).toThrow();
   });
 
+  it("rejects a mixed array that contains non-object elements", () => {
+    expect(() => parseTableText('[{"a":1},42,{"a":2}]', "json", ",")).toThrow();
+  });
+
+  it("keeps header-only sheets as a sentinel empty object on JSON export", () => {
+    const json = serializeTableText([["name", "age"]], "json", ",", "LF");
+    expect(JSON.parse(json)).toEqual([{ name: "", age: "" }]);
+    expect(parseTableText(json, "json", ",")).toEqual([
+      ["name", "age"],
+      ["", ""],
+    ]);
+  });
+
+  it("exports data cells beyond the header width as extra columns", () => {
+    const json = serializeTableText(
+      [
+        ["name", "age"],
+        ["Taro", "35", "Tokyo", "extra"],
+      ],
+      "json",
+      ",",
+      "LF",
+    );
+    expect(JSON.parse(json)).toEqual([
+      { name: "Taro", age: "35", column_3: "Tokyo", column_4: "extra" },
+    ]);
+  });
+
+  it("round-trips lone CR inside a markdown cell", () => {
+    const rows = [["a"], ["x\ry"]];
+    const md = serializeTableText(rows, "markdown", ",", "LF");
+    expect(md).toContain("<br>");
+    expect(parseTableText(md, "markdown", ",")).toEqual([["a"], ["x\ny"]]);
+  });
+
+  it("writes full CRLF for JSON when newline is CRLF", () => {
+    const json = serializeTableText([["a"], ["1"]], "json", ",", "CRLF");
+    expect(json).toContain("\r\n");
+    expect(json.includes("\n") && !json.replace(/\r\n/g, "").includes("\n")).toBe(true);
+  });
+
   it("treats an empty JSON array as an empty sheet", () => {
     expect(parseTableText("[]", "json", ",")).toEqual([]);
   });

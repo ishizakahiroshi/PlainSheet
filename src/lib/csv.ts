@@ -5,6 +5,10 @@ export function parseCsv(text: string, delimiter: Delimiter = ","): CellValue[][
     return [];
   }
 
+  // Strip a leading UTF-8 BOM so browser File.text() loads match the Rust
+  // decoder (which already drops EF BB BF before decoding).
+  const source = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+
   const rows: CellValue[][] = [];
   let row: CellValue[] = [];
   let cell = "";
@@ -27,9 +31,9 @@ export function parseCsv(text: string, delimiter: Delimiter = ","): CellValue[][
     endedWithRowBreak = true;
   };
 
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    const next = text[index + 1];
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    const next = source[index + 1];
     endedWithRowBreak = false;
 
     if (inQuotes) {

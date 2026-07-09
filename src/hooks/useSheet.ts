@@ -63,6 +63,11 @@ export function useSheet() {
     }
     const next = cloneRows(rows);
     next.splice(index, 1);
+    // Never collapse to [] — that switches the UI to EmptyState mid-edit.
+    // Keep a single blank row so the grid (and undo) stay available.
+    if (next.length === 0) {
+      next.push([""]);
+    }
     replaceRows(next);
   }
 
@@ -93,11 +98,27 @@ export function useSheet() {
       return;
     }
     const normalized = normalizeRange(range);
-    const next = ensureSize(rows, normalized.endRow + 1, normalized.endCol + 1);
+    // Only touch cells that already exist in the data model. Expanding into the
+    // virtual buffer just to write "" would dirty the sheet and push a no-op
+    // undo entry for an empty clear.
+    let changed = false;
+    const next = cloneRows(rows);
     for (let rowIndex = normalized.startRow; rowIndex <= normalized.endRow; rowIndex += 1) {
-      for (let colIndex = normalized.startCol; colIndex <= normalized.endCol; colIndex += 1) {
-        next[rowIndex][colIndex] = "";
+      if (rowIndex >= next.length) {
+        continue;
       }
+      for (let colIndex = normalized.startCol; colIndex <= normalized.endCol; colIndex += 1) {
+        if (colIndex >= next[rowIndex].length) {
+          continue;
+        }
+        if (next[rowIndex][colIndex] !== "") {
+          next[rowIndex][colIndex] = "";
+          changed = true;
+        }
+      }
+    }
+    if (!changed) {
+      return;
     }
     replaceRows(trimTrailingEmptyRows(next));
   }
@@ -124,6 +145,17 @@ export function useSheet() {
     setColWidths(calculateColumnWidths(rows));
   }
 
+  function autoFitColumn(colIndex: number): void {
+    if (colIndex < 0) {
+      return;
+    }
+    const fitted = calculateColumnWidths(rows);
+    setColWidths((current) => ({
+      ...current,
+      [colIndex]: fitted[colIndex] ?? 120,
+    }));
+  }
+
   function setColumnWidth(colIndex: number, width: number): void {
     setColWidths((current) => ({
       ...current,
@@ -148,6 +180,7 @@ export function useSheet() {
     clearRange,
     pasteGrid,
     autoFitColumns,
+    autoFitColumn,
     setColumnWidth,
   };
 }

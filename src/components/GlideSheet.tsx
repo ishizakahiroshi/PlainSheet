@@ -10,6 +10,7 @@ import {
   type GridSelection,
   type Highlight,
   type Item,
+  type Theme,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import { BUFFER_COLS, BUFFER_ROWS, MIN_GRID_COLS, MIN_GRID_ROWS } from "../types/sheet";
@@ -26,11 +27,46 @@ type GlideSheetProps = {
   searchHits: Set<string>;
   activeSearchHit: string | null;
   scrollNonce: number;
+  theme: "light" | "dark";
+  zebra: boolean;
+  headerHighlight: boolean;
   onEdit: (row: number, col: number, value: string) => void;
   onColumnResize: (col: number, width: number) => void;
   onSelectionChange: (selection: { row: number; col: number }, range: Range) => void;
   onPasteGrid: (startRow: number, startCol: number, grid: CellValue[][]) => void;
   onOpenContextMenu: (kind: ContextMenuKind, row: number, col: number, x: number, y: number) => void;
+};
+
+const LIGHT_THEME: Partial<Theme> = {
+  accentColor: "#1d6ed8",
+  accentLight: "#dbeafe",
+  bgCell: "#ffffff",
+  bgCellMedium: "#eef2f6",
+  bgHeader: "#edf2f7",
+  bgHeaderHasFocus: "#dde5ee",
+  bgHeaderHovered: "#e5ebf2",
+  textDark: "#18212f",
+  textMedium: "#5d6878",
+  textLight: "#5d6878",
+  textHeader: "#18212f",
+  borderColor: "#cfd8e3",
+  horizontalBorderColor: "#cfd8e3",
+};
+
+const DARK_THEME: Partial<Theme> = {
+  accentColor: "#66a6ff",
+  accentLight: "#153456",
+  bgCell: "#181d23",
+  bgCellMedium: "#222a32",
+  bgHeader: "#222a32",
+  bgHeaderHasFocus: "#2d3844",
+  bgHeaderHovered: "#2d3844",
+  textDark: "#edf2f7",
+  textMedium: "#aab5c2",
+  textLight: "#aab5c2",
+  textHeader: "#edf2f7",
+  borderColor: "#3b4654",
+  horizontalBorderColor: "#3b4654",
 };
 
 const EMPTY_SELECTION: GridSelection = {
@@ -47,6 +83,9 @@ export function GlideSheet({
   searchHits,
   activeSearchHit,
   scrollNonce,
+  theme,
+  zebra,
+  headerHighlight,
   onEdit,
   onColumnResize,
   onSelectionChange,
@@ -71,6 +110,30 @@ export function GlideSheet({
   );
 
   const rowCount = Math.max(rows.length + BUFFER_ROWS, MIN_GRID_ROWS);
+
+  const gridTheme = useMemo<Partial<Theme>>(
+    () => (theme === "dark" ? DARK_THEME : LIGHT_THEME),
+    [theme],
+  );
+
+  const getRowThemeOverride = useCallback(
+    (row: number): Partial<Theme> | undefined => {
+      // Header row (first data row) wins over zebra when both are enabled.
+      if (headerHighlight && row === 0) {
+        return {
+          bgCell: theme === "dark" ? "#2d3844" : "#dde5ee",
+          textDark: theme === "dark" ? "#edf2f7" : "#18212f",
+        };
+      }
+      if (zebra && row % 2 === 1) {
+        return {
+          bgCell: theme === "dark" ? "#14191f" : "#f3f6f9",
+        };
+      }
+      return undefined;
+    },
+    [headerHighlight, zebra, theme],
+  );
 
   const getCellContent = useCallback(
     (cell: Item): GridCell => {
@@ -223,6 +286,8 @@ export function GlideSheet({
         height="100%"
         columns={columns}
         rows={rowCount}
+        theme={gridTheme}
+        getRowThemeOverride={getRowThemeOverride}
         getCellContent={getCellContent}
         onCellEdited={onCellEdited}
         getCellsForSelection={true}

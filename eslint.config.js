@@ -22,4 +22,12 @@ export default tseslint.config(
       "@typescript-eslint/ban-ts-comment": "error",
     },
   },
+  {
+    files: ["scripts/**/*.{js,mjs,cjs}"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: globals.node,
+    },
+  },
 );

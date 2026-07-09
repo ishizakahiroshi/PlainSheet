@@ -1,4 +1,5 @@
 import { ChevronDown, ChevronUp, Replace, X } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { t } from "../lib/i18n";
 
 export type SearchOptions = {
@@ -39,6 +40,16 @@ export function SearchPanel({
   onReplaceAll,
   onClose,
 }: SearchPanelProps) {
+  const findInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      // Ctrl+F / Ctrl+H should land keystrokes in the find box, not the grid.
+      findInputRef.current?.focus();
+      findInputRef.current?.select();
+    }
+  }, [open]);
+
   if (!open) {
     return null;
   }
@@ -46,6 +57,7 @@ export function SearchPanel({
   return (
     <aside className="searchPanel" aria-label={t("search")}>
       <input
+        ref={findInputRef}
         aria-label={t("findPlaceholder")}
         value={query}
         placeholder={t("findPlaceholder")}
