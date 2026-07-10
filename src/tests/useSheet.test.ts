@@ -32,3 +32,26 @@ describe("ensureSize", () => {
     ]);
   });
 });
+
+describe("multi row/column delete (shape used by useSheet)", () => {
+  it("deletes multiple rows in descending index order", () => {
+    const next = [["a"], ["b"], ["c"], ["d"]];
+    for (const index of [3, 1].sort((a, b) => b - a)) {
+      next.splice(index, 1);
+    }
+    expect(next).toEqual([["a"], ["c"]]);
+  });
+
+  it("deletes multiple columns without shifting indexes incorrectly", () => {
+    const rows = [
+      ["a", "b", "c", "d"],
+      ["1", "2", "3", "4"],
+    ];
+    const remove = new Set([1, 3]);
+    const next = rows.map((row) => row.filter((_, col) => !remove.has(col)));
+    expect(next).toEqual([
+      ["a", "c"],
+      ["1", "3"],
+    ]);
+  });
+});

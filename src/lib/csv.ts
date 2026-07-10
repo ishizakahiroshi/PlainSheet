@@ -152,3 +152,155 @@ export function detectDelimiter(text: string): Delimiter {
 
   return best;
 }
+
+/** Threshold (bytes) above which browser open prefers streaming parse. */
+export const STREAM_PARSE_THRESHOLD = 5 * 1024 * 1024;
+
+type StreamParseState = {
+  rows: CellValue[][];
+  row: CellValue[];
+  cell: string;
+  inQuotes: boolean;
+  quotedCell: boolean;
+  justClosedQuote: boolean;
+  endedWithRowBreak: boolean;
+};
+
+function createStreamState(): StreamParseState {
+  return {
+    rows: [],
+    row: [],
+    cell: "",
+    inQuotes: false,
+    quotedCell: false,
+    justClosedQuote: false,
+    endedWithRowBreak: false,
+  };
+}
+
+function pushStreamCell(state: StreamParseState): void {
+  state.row.push(state.cell);
+  state.cell = "";
+  state.quotedCell = false;
+  state.justClosedQuote = false;
+}
+
+function pushStreamRow(state: StreamParseState): void {
+  pushStreamCell(state);
+  state.rows.push(state.row);
+  state.row = [];
+  state.endedWithRowBreak = true;
+}
+
+/** Feeds a text chunk into an incremental CSV parser (handles quotes across chunks). */
+export function feedCsvChunk(
+  state: StreamParseState,
+  chunk: string,
+  delimiter: Delimiter,
+  isFirstChunk: boolean,
+): void {
+  let source = chunk;
+  if (isFirstChunk && source.length > 0 && source.charCodeAt(0) === 0xfeff) {
+    source = source.slice(1);
+  }
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index]!;
+    const next = source[index + 1];
+    state.endedWithRowBreak = false;
+
+    if (state.inQuotes) {
+      if (char === "\"") {
+        if (next === "\"") {
+          state.cell += "\"";
+          index += 1;
+        } else {
+          state.inQuotes = false;
+          state.justClosedQuote = true;
+        }
+      } else {
+        state.cell += char;
+      }
+      continue;
+    }
+
+    if (char === "\"" && state.cell.length === 0 && !state.quotedCell) {
+      state.inQuotes = true;
+      state.quotedCell = true;
+      continue;
+    }
+
+    if (char === delimiter) {
+      pushStreamCell(state);
+      continue;
+    }
+
+    if (char === "\r" || char === "\n") {
+      if (char === "\r" && next === "\n") {
+        index += 1;
+      }
+      pushStreamRow(state);
+      continue;
+    }
+
+    if (state.justClosedQuote && (char === " " || char === "\t")) {
+      continue;
+    }
+
+    state.cell += char;
+    state.justClosedQuote = false;
+  }
+}
+
+export function finishCsvStream(state: StreamParseState): CellValue[][] {
+  if (!state.endedWithRowBreak || state.row.length > 0 || state.cell.length > 0 || state.quotedCell) {
+    pushStreamCell(state);
+    state.rows.push(state.row);
+  }
+  return state.rows;
+}
+
+/**
+ * Parses CSV from an async iterable of text chunks (e.g. File stream).
+ * Call onProgress with 0–1 as chunks arrive when totalBytes is known.
+ */
+export async function parseCsvStream(
+  chunks: AsyncIterable<string>,
+  delimiter: Delimiter = ",",
+  options?: { totalBytes?: number; onProgress?: (ratio: number) => void },
+): Promise<CellValue[][]> {
+  const state = createStreamState();
+  let first = true;
+  let seen = 0;
+  for await (const chunk of chunks) {
+    feedCsvChunk(state, chunk, delimiter, first);
+    first = false;
+    seen += chunk.length;
+    if (options?.totalBytes && options.onProgress) {
+      options.onProgress(Math.min(1, seen / options.totalBytes));
+    }
+  }
+  return finishCsvStream(state);
+}
+
+/** Yields decoded text chunks from a Blob/File stream. */
+export async function* streamFileText(file: Blob): AsyncGenerator<string> {
+  if (typeof file.stream !== "function") {
+    yield await file.text();
+    return;
+  }
+  const reader = file.stream().pipeThrough(new TextDecoderStream()).getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (value) {
+        yield value;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}

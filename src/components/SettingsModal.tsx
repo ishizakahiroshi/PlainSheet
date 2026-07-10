@@ -11,6 +11,7 @@ type SettingsModalProps = {
   csvFormulaGuard: boolean;
   omitEmptyCells: boolean;
   theme: "light" | "dark" | "system";
+  useHeaderRow?: boolean;
   onEncodingChange: (encoding: Encoding) => void;
   onNewlineChange: (newline: Newline) => void;
   onZebraChange: (enabled: boolean) => void;
@@ -18,6 +19,7 @@ type SettingsModalProps = {
   onCsvFormulaGuardChange: (enabled: boolean) => void;
   onOmitEmptyCellsChange: (enabled: boolean) => void;
   onThemeChange: (theme: "light" | "dark" | "system") => void;
+  onUseHeaderRowChange?: (enabled: boolean) => void;
   onClose: () => void;
 };
 
@@ -30,6 +32,7 @@ export function SettingsModal({
   csvFormulaGuard,
   omitEmptyCells,
   theme,
+  useHeaderRow = true,
   onEncodingChange,
   onNewlineChange,
   onZebraChange,
@@ -37,6 +40,7 @@ export function SettingsModal({
   onCsvFormulaGuardChange,
   onOmitEmptyCellsChange,
   onThemeChange,
+  onUseHeaderRowChange,
   onClose,
 }: SettingsModalProps) {
   useEffect(() => {
@@ -141,6 +145,17 @@ export function SettingsModal({
               <option value="system">{t("system")}</option>
             </select>
           </label>
+          {onUseHeaderRowChange ? (
+            <label className="checkControl">
+              <input
+                aria-label={t("useHeaderRow")}
+                type="checkbox"
+                checked={useHeaderRow}
+                onChange={(event) => onUseHeaderRowChange(event.target.checked)}
+              />
+              <span>{t("useHeaderRow")}</span>
+            </label>
+          ) : null}
         </div>
         <div className="modal__actions">
           <button type="button" aria-label={t("close")} onClick={onClose}>

@@ -12,9 +12,13 @@ const shortcuts = [
   ["Ctrl+F", "shortcutSearch"],
   ["Ctrl+H", "shortcutReplace"],
   ["Ctrl+A", "shortcutSelectAll"],
-  ["Ctrl+C / Ctrl+V", "shortcutCopyPaste"],
-  ["F2", "shortcutEditCell"],
+  ["Ctrl+C / Ctrl+X / Ctrl+V", "shortcutCopyPaste"],
+  ["Arrows / Tab / Enter", "shortcutNavigate"],
+  ["Type / F2 / Double-click", "shortcutEditCell"],
   ["Delete", "shortcutClearCell"],
+  ["Ctrl+Z / Ctrl+Y", "shortcutUndoRedo"],
+  ["Name box + Enter", "shortcutJump"],
+  ["Ctrl+= / Ctrl+- / Ctrl+0", "shortcutZoom"],
 ] as const;
 
 export function HelpModal({ open, onClose }: HelpModalProps) {

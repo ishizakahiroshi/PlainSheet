@@ -1,13 +1,22 @@
 import { FilePlus2, FolderOpen, TableProperties } from "lucide-react";
 import { t } from "../lib/i18n";
+import { fileNameFromPath } from "../hooks/useFile";
 
 type EmptyStateProps = {
   onNew: () => void;
   onOpen: () => void;
   onSample: () => void;
+  recentFiles?: string[];
+  onOpenRecent?: (path: string) => void;
 };
 
-export function EmptyState({ onNew, onOpen, onSample }: EmptyStateProps) {
+export function EmptyState({
+  onNew,
+  onOpen,
+  onSample,
+  recentFiles = [],
+  onOpenRecent,
+}: EmptyStateProps) {
   return (
     <main className="emptyState">
       <div className="emptyState__content">
@@ -27,6 +36,24 @@ export function EmptyState({ onNew, onOpen, onSample }: EmptyStateProps) {
             <span>{t("openSample")}</span>
           </button>
         </div>
+        {onOpenRecent ? (
+          <div className="emptyState__recent">
+            <h2>{t("recentFiles")}</h2>
+            {recentFiles.length === 0 ? (
+              <p className="emptyState__hint">{t("noRecentFiles")}</p>
+            ) : (
+              <ul>
+                {recentFiles.map((path) => (
+                  <li key={path}>
+                    <button type="button" title={path} onClick={() => onOpenRecent(path)}>
+                      {fileNameFromPath(path)}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
         <div className="emptyState__hint">{t("emptyHint")}</div>
       </div>
     </main>

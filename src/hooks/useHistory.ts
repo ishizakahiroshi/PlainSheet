@@ -65,6 +65,34 @@ export function useHistory() {
     setRedoStack([]);
   }
 
+  function snapshot(): { undo: HistoryEntry[]; redo: HistoryEntry[] } {
+    return {
+      undo: undoRef.current.map((entry) => ({
+        rows: cloneRows(entry.rows),
+        selection: { ...entry.selection },
+      })),
+      redo: redoRef.current.map((entry) => ({
+        rows: cloneRows(entry.rows),
+        selection: { ...entry.selection },
+      })),
+    };
+  }
+
+  function restore(undo: HistoryEntry[], redo: HistoryEntry[]): void {
+    const nextUndo = undo.map((entry) => ({
+      rows: cloneRows(entry.rows),
+      selection: { ...entry.selection },
+    }));
+    const nextRedo = redo.map((entry) => ({
+      rows: cloneRows(entry.rows),
+      selection: { ...entry.selection },
+    }));
+    undoRef.current = nextUndo;
+    redoRef.current = nextRedo;
+    setUndoStack(nextUndo);
+    setRedoStack(nextRedo);
+  }
+
   return {
     canUndo: undoStack.length > 0,
     canRedo: redoStack.length > 0,
@@ -72,5 +100,7 @@ export function useHistory() {
     undo,
     redo,
     reset,
+    snapshot,
+    restore,
   };
 }

@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { detectDelimiter, detectNewline } from "../lib/csv";
+import {
+  detectDelimiter,
+  detectNewline,
+  parseCsvStream,
+  STREAM_PARSE_THRESHOLD,
+  streamFileText,
+} from "../lib/csv";
 import { parseTableText, serializeTableText, type SerializeOptions } from "../lib/formats";
 import { t } from "../lib/i18n";
 import type { CellValue, Delimiter, FileFormat, SheetMeta } from "../types/sheet";
@@ -18,6 +24,8 @@ type UseFileOptions = {
   getMeta: () => SheetMeta;
   onToast: (message: string) => void;
   confirmDiscard: () => boolean;
+  /** Called when a filesystem path is opened/saved (Tauri recent-files list). */
+  onRecentPath?: (path: string) => void;
 };
 
 type FileDropPayload =
@@ -33,23 +41,21 @@ export function useFile({
   getMeta,
   onToast,
   confirmDiscard,
+  onRecentPath,
 }: UseFileOptions) {
-  // Browser-only: handle returned by the File System Access save picker, reused
-  // for overwrite saves. Only reused when its name still matches the sheet name.
+  // Browser-only: handle returned by File System Access open/save pickers.
   const fileHandleRef = useRef<FsFileHandle | null>(null);
-  // Bumped on every load start so a slow earlier open cannot overwrite a later one.
   const loadGenerationRef = useRef(0);
-  // Latest callbacks for the drag-drop effect (subscribe once; never leak listeners).
   const loadPathRef = useRef<(path: string) => Promise<void>>(async () => undefined);
   const getMetaRef = useRef(getMeta);
   const confirmDiscardRef = useRef(confirmDiscard);
   const onToastRef = useRef(onToast);
+  const onRecentPathRef = useRef(onRecentPath);
   getMetaRef.current = getMeta;
   confirmDiscardRef.current = confirmDiscard;
   onToastRef.current = onToast;
+  onRecentPathRef.current = onRecentPath;
 
-  // Forget the previously chosen save target whenever a new file is loaded, so a
-  // later Ctrl+S can't overwrite an unrelated file that merely shares a name.
   const resetSaveTarget = useCallback(() => {
     fileHandleRef.current = null;
   }, []);
@@ -58,8 +64,6 @@ export function useFile({
     async (path: string) => {
       const generation = ++loadGenerationRef.current;
       try {
-        // Read bytes and detect encoding in a single command so the content and
-        // its encoding always come from the same read (no double I/O, no race).
         const { content, encoding } = await invoke<{ content: string; encoding: string }>(
           "read_file",
           { path },
@@ -79,6 +83,7 @@ export function useFile({
           delimiter,
           format,
         });
+        onRecentPath?.(path);
         onToast(t("toastLoaded"));
       } catch {
         if (generation !== loadGenerationRef.current) {
@@ -87,7 +92,7 @@ export function useFile({
         onToast(t("toastLoadFailed"));
       }
     },
-    [loadData, onToast],
+    [loadData, onToast, onRecentPath],
   );
   loadPathRef.current = loadPath;
 
@@ -97,7 +102,9 @@ export function useFile({
         return;
       }
       if (!isTauriRuntime()) {
-        await openBrowserFile(loadData, onToast, resetSaveTarget);
+        await openBrowserFile(loadData, onToast, (handle) => {
+          fileHandleRef.current = handle;
+        });
         return;
       }
       const path = await invoke<string | null>("open_file_dialog");
@@ -107,7 +114,7 @@ export function useFile({
     } catch {
       onToast(t("toastLoadFailed"));
     }
-  }, [confirmDiscard, getMeta, loadData, loadPath, onToast, resetSaveTarget]);
+  }, [confirmDiscard, getMeta, loadData, loadPath, onToast]);
 
   const saveAs = useCallback(async () => {
     try {
@@ -115,15 +122,14 @@ export function useFile({
       const defaultName = currentMeta.fileName ?? "untitled.csv";
       if (!isTauriRuntime()) {
         const fsWindow = fsAccessWindow();
-        if (fsWindow) {
+        if (fsWindow?.showSaveFilePicker) {
           let handle: FsFileHandle;
           try {
-            handle = await fsWindow.showSaveFilePicker!({
+            handle = await fsWindow.showSaveFilePicker({
               suggestedName: defaultName,
               types: saveFilePickerTypes(),
             });
           } catch {
-            // user cancelled the picker
             return;
           }
           const format = formatFromPath(handle.name);
@@ -176,8 +182,6 @@ export function useFile({
         return;
       }
       const format = formatFromPath(path);
-      // Keep the original delimiter when the format is unchanged so a ';' or '|'
-      // CSV is not silently rewritten with commas; only re-derive on a switch.
       const delimiter = format === currentMeta.format ? currentMeta.delimiter : delimiterFromFormat(format);
       const encoding = encodingForFormat(format, currentMeta.encoding);
       const content = serializeTableText(
@@ -196,11 +200,12 @@ export function useFile({
         dirty: false,
         format,
       });
+      onRecentPath?.(path);
       onToast(t("toastSaved"));
     } catch (error) {
       onToast(saveErrorMessage(error));
     }
-  }, [getMeta, getRows, updateMeta, onToast]);
+  }, [getMeta, getRows, updateMeta, onToast, onRecentPath]);
 
   const saveFile = useCallback(async () => {
     try {
@@ -214,15 +219,23 @@ export function useFile({
           serializeOptions(currentMeta),
         );
         const handle = fileHandleRef.current;
-        // Reuse the chosen save target only while it still refers to this sheet.
         if (handle && handle.name === currentMeta.fileName) {
+          if (typeof handle.queryPermission === "function") {
+            let permission = await handle.queryPermission({ mode: "readwrite" });
+            if (permission !== "granted" && typeof handle.requestPermission === "function") {
+              permission = await handle.requestPermission({ mode: "readwrite" });
+            }
+            if (permission !== "granted") {
+              await saveAs();
+              return;
+            }
+          }
           await writeFileHandle(handle, content);
           updateMeta({ dirty: false });
           onToast(t("toastSaved"));
           return;
         }
-        // No bound handle yet: let the user pick a location (with overwrite support).
-        if (fsAccessWindow()) {
+        if (fsAccessWindow()?.showSaveFilePicker) {
           await saveAs();
           return;
         }
@@ -250,19 +263,18 @@ export function useFile({
         encoding,
       });
       updateMeta({ encoding, dirty: false });
+      onRecentPath?.(currentMeta.filePath);
       onToast(t("toastSaved"));
     } catch (error) {
       onToast(saveErrorMessage(error));
     }
-  }, [getMeta, getRows, updateMeta, onToast, saveAs]);
+  }, [getMeta, getRows, updateMeta, onToast, saveAs, onRecentPath]);
 
   const loadSample = useCallback(async () => {
     try {
       if (getMeta().dirty && !confirmDiscard()) {
         return;
       }
-      // Respect Vite base (e.g. /PlainSheet/ on GitHub Pages) so sample open
-      // does not 404 against the site origin root.
       const response = await fetch(`${import.meta.env.BASE_URL}sample.csv`);
       if (!response.ok) {
         throw new Error("sample file is unavailable");
@@ -295,7 +307,10 @@ export function useFile({
         }
         const file = event.dataTransfer?.files[0];
         if (file) {
-          void loadBrowserFile(file, loadData, onToastRef.current, resetSaveTarget);
+          // D&D has no writable handle — next Save will pick a location.
+          void loadBrowserFile(file, loadData, onToastRef.current, () => {
+            fileHandleRef.current = null;
+          });
         }
       };
       window.addEventListener("dragover", handleDragOver);
@@ -306,11 +321,6 @@ export function useFile({
       };
     }
 
-    // Tauri v2 renamed the v1 'tauri://file-drop' event to 'tauri://drag-drop'
-    // (and split enter/over/leave into their own names). The v1 name silently
-    // never fires under v2, so listen on the v2 name.
-    // Subscribe once: deps are stable (refs for latest callbacks) so we never
-    // accumulate orphaned listeners when App re-renders.
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     listen<FileDropPayload>("tauri://drag-drop", (event) => {
@@ -342,8 +352,6 @@ export function useFile({
         unlisten();
       }
     };
-    // loadData/resetSaveTarget are used only on the browser branch; keep them
-    // so a change still refreshes that path. Tauri uses refs.
   }, [loadData, resetSaveTarget]);
 
   return {
@@ -352,6 +360,7 @@ export function useFile({
     saveAs,
     loadPath,
     loadSample,
+    resetSaveTarget,
   };
 }
 
@@ -401,8 +410,30 @@ function extractDropPath(payload: FileDropPayload): string | null {
 async function openBrowserFile(
   loadData: UseFileOptions["loadData"],
   onToast: UseFileOptions["onToast"],
-  onAdopt?: () => void,
+  onHandle: (handle: FsFileHandle | null) => void,
 ): Promise<void> {
+  const fsWindow = fsAccessWindow();
+  if (fsWindow?.showOpenFilePicker) {
+    try {
+      const [handle] = await fsWindow.showOpenFilePicker({
+        multiple: false,
+        types: openFilePickerTypes(),
+      });
+      if (!handle?.getFile) {
+        return;
+      }
+      const file = await handle.getFile();
+      await loadBrowserFile(file, loadData, onToast, () => onHandle(handle));
+      return;
+    } catch (error) {
+      // User cancel → AbortError; fall through only for unexpected errors.
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+      // Fall back to <input type=file>.
+    }
+  }
+
   const input = document.createElement("input");
   input.type = "file";
   input.accept = ".csv,.tsv,.txt,.md,.markdown,.json,.yaml,.yml,text/csv,text/tab-separated-values";
@@ -411,7 +442,7 @@ async function openBrowserFile(
     input.click();
   });
   if (file) {
-    await loadBrowserFile(file, loadData, onToast, onAdopt);
+    await loadBrowserFile(file, loadData, onToast, () => onHandle(null));
   }
 }
 
@@ -422,10 +453,35 @@ async function loadBrowserFile(
   onAdopt?: () => void,
 ): Promise<void> {
   try {
-    const content = await file.text();
     const format = formatFromPath(file.name);
+    let content = "";
+    let rows: CellValue[][];
+
+    if ((format === "csv" || format === "tsv") && file.size >= STREAM_PARSE_THRESHOLD) {
+      const peek = await file.slice(0, 64 * 1024).text();
+      const delimiter = format === "tsv" ? "\t" : detectDelimiter(peek);
+      const newline = detectNewline(peek);
+      rows = await parseCsvStream(streamFileText(file), delimiter, {
+        totalBytes: file.size,
+        onProgress: (ratio) => {
+          onToast(t("toastLoading", { percent: Math.round(ratio * 100) }));
+        },
+      });
+      onAdopt?.();
+      loadData(rows, {
+        fileName: file.name,
+        delimiter,
+        newline,
+        encoding: "utf-8",
+        format,
+      });
+      onToast(t("toastLoaded"));
+      return;
+    }
+
+    content = await file.text();
     const delimiter = format === "tsv" ? "\t" : detectDelimiter(content);
-    const rows = parseTableText(content, format, delimiter);
+    rows = parseTableText(content, format, delimiter);
     onAdopt?.();
     loadData(rows, {
       fileName: file.name,
@@ -440,9 +496,6 @@ async function loadBrowserFile(
   }
 }
 
-// JSON and YAML are interchange formats that downstream tools read as UTF-8, so
-// never write them in a legacy single-byte encoding even if the sheet was opened
-// in one. Other text formats keep the user's selected encoding.
 function encodingForFormat(
   format: FileFormat,
   encoding: SheetMeta["encoding"],
@@ -450,19 +503,18 @@ function encodingForFormat(
   return format === "json" || format === "yaml" ? "utf-8" : encoding;
 }
 
-// Opt-in export guards carried on the sheet meta.
 function serializeOptions(meta: SheetMeta): SerializeOptions {
   return { sanitizeFormulas: meta.csvFormulaGuard, omitEmptyCells: meta.omitEmptyCells };
 }
 
-// Surface the cause when the desktop backend rejects a save because the selected
-// encoding can't represent some characters; fall back to the generic message.
 function saveErrorMessage(error: unknown): string {
   if (typeof error === "string" && error.includes("cannot represent")) {
     return t("toastSaveFailedEncoding");
   }
   return t("toastSaveFailed");
 }
+
+type FsPermissionMode = "read" | "readwrite";
 
 type FsWritable = {
   write: (data: string | Blob) => Promise<void>;
@@ -472,6 +524,9 @@ type FsWritable = {
 type FsFileHandle = {
   name: string;
   createWritable: () => Promise<FsWritable>;
+  getFile?: () => Promise<File>;
+  queryPermission?: (descriptor?: { mode?: FsPermissionMode }) => Promise<PermissionState>;
+  requestPermission?: (descriptor?: { mode?: FsPermissionMode }) => Promise<PermissionState>;
 };
 
 type SaveFilePickerType = {
@@ -484,13 +539,26 @@ type SaveFilePickerOptions = {
   types?: SaveFilePickerType[];
 };
 
+type OpenFilePickerOptions = {
+  multiple?: boolean;
+  types?: SaveFilePickerType[];
+};
+
 type FsWindow = Window & {
   showSaveFilePicker?: (options?: SaveFilePickerOptions) => Promise<FsFileHandle>;
+  showOpenFilePicker?: (options?: OpenFilePickerOptions) => Promise<FsFileHandle[]>;
 };
 
 function fsAccessWindow(): FsWindow | null {
-  if (typeof window !== "undefined" && typeof (window as FsWindow).showSaveFilePicker === "function") {
-    return window as FsWindow;
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const candidate = window as FsWindow;
+  if (
+    typeof candidate.showSaveFilePicker === "function" ||
+    typeof candidate.showOpenFilePicker === "function"
+  ) {
+    return candidate;
   }
   return null;
 }
@@ -509,6 +577,10 @@ function saveFilePickerTypes(): SaveFilePickerType[] {
       },
     },
   ];
+}
+
+function openFilePickerTypes(): SaveFilePickerType[] {
+  return saveFilePickerTypes();
 }
 
 async function writeFileHandle(handle: FsFileHandle, content: string): Promise<void> {

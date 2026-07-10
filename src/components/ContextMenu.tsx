@@ -1,4 +1,15 @@
-import { Copy, ClipboardPaste, Columns3, Plus, Trash2 } from "lucide-react";
+import {
+  ArrowDownAZ,
+  ArrowUpAZ,
+  Copy,
+  ClipboardPaste,
+  Columns3,
+  Filter,
+  Plus,
+  Scissors,
+  Snowflake,
+  Trash2,
+} from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { t } from "../lib/i18n";
 
@@ -15,6 +26,7 @@ export type ContextMenuState = {
 type ContextMenuProps = {
   state: ContextMenuState;
   onClose: () => void;
+  onCut?: () => void;
   onCopy: () => void;
   onPaste: () => void;
   onClear: () => void;
@@ -25,17 +37,26 @@ type ContextMenuProps = {
   onInsertColRight: () => void;
   onDeleteCol: () => void;
   onAutoFitColumn: () => void;
+  onSortAsc?: () => void;
+  onSortDesc?: () => void;
+  onFilter?: () => void;
+  onFreezeToHere?: () => void;
+  onUnfreeze?: () => void;
+  filterActive?: boolean;
+  rowOpsDisabled?: boolean;
 };
 
 type MenuItem = {
   label: string;
   icon: ReactNode;
   action: () => void;
+  disabled?: boolean;
 };
 
 export function ContextMenu({
   state,
   onClose,
+  onCut,
   onCopy,
   onPaste,
   onClear,
@@ -46,13 +67,18 @@ export function ContextMenu({
   onInsertColRight,
   onDeleteCol,
   onAutoFitColumn,
+  onSortAsc,
+  onSortDesc,
+  onFilter,
+  onFreezeToHere,
+  onUnfreeze,
+  filterActive,
+  rowOpsDisabled,
 }: ContextMenuProps) {
   useEffect(() => {
     if (!state) {
       return;
     }
-    // Close on outside pointer down so the menu does not stick after a grid click
-    // that never leaves the menu element (onMouseLeave-only was too easy to miss).
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (target instanceof Element && target.closest(".contextMenu")) {
@@ -60,7 +86,6 @@ export function ContextMenu({
       }
       onClose();
     };
-    // Capture so we run before the grid swallows the event.
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
   }, [state, onClose]);
@@ -70,6 +95,9 @@ export function ContextMenu({
   }
 
   const commonCellItems: MenuItem[] = [
+    ...(onCut
+      ? [{ label: t("cut"), icon: <Scissors size={15} aria-hidden="true" />, action: onCut }]
+      : []),
     { label: t("copy"), icon: <Copy size={15} aria-hidden="true" />, action: onCopy },
     {
       label: t("paste"),
@@ -77,26 +105,119 @@ export function ContextMenu({
       action: onPaste,
     },
     { label: t("clearCells"), icon: <Trash2 size={15} aria-hidden="true" />, action: onClear },
-    { label: t("insertRowAbove"), icon: <Plus size={15} aria-hidden="true" />, action: onInsertRowAbove },
-    { label: t("insertRowBelow"), icon: <Plus size={15} aria-hidden="true" />, action: onInsertRowBelow },
-    { label: t("deleteRow"), icon: <Trash2 size={15} aria-hidden="true" />, action: onDeleteRow },
+    {
+      label: t("insertRowAbove"),
+      icon: <Plus size={15} aria-hidden="true" />,
+      action: onInsertRowAbove,
+      disabled: rowOpsDisabled,
+    },
+    {
+      label: t("insertRowBelow"),
+      icon: <Plus size={15} aria-hidden="true" />,
+      action: onInsertRowBelow,
+      disabled: rowOpsDisabled,
+    },
+    {
+      label: t("deleteRow"),
+      icon: <Trash2 size={15} aria-hidden="true" />,
+      action: onDeleteRow,
+      disabled: rowOpsDisabled,
+    },
   ];
 
   const columnItems: MenuItem[] = [
-    { label: t("insertColLeft"), icon: <Plus size={15} aria-hidden="true" />, action: onInsertColLeft },
-    { label: t("insertColRight"), icon: <Plus size={15} aria-hidden="true" />, action: onInsertColRight },
+    ...(onSortAsc
+      ? [{ label: t("sortAsc"), icon: <ArrowUpAZ size={15} aria-hidden="true" />, action: onSortAsc }]
+      : []),
+    ...(onSortDesc
+      ? [
+          {
+            label: t("sortDesc"),
+            icon: <ArrowDownAZ size={15} aria-hidden="true" />,
+            action: onSortDesc,
+          },
+        ]
+      : []),
+    ...(onFilter
+      ? [
+          {
+            label: filterActive ? t("filterClear") : t("filter"),
+            icon: <Filter size={15} aria-hidden="true" />,
+            action: onFilter,
+          },
+        ]
+      : []),
+    ...(onFreezeToHere
+      ? [
+          {
+            label: t("freezeToHere"),
+            icon: <Snowflake size={15} aria-hidden="true" />,
+            action: onFreezeToHere,
+          },
+        ]
+      : []),
+    ...(onUnfreeze
+      ? [
+          {
+            label: t("unfreeze"),
+            icon: <Snowflake size={15} aria-hidden="true" />,
+            action: onUnfreeze,
+          },
+        ]
+      : []),
+    {
+      label: t("insertColLeft"),
+      icon: <Plus size={15} aria-hidden="true" />,
+      action: onInsertColLeft,
+      disabled: rowOpsDisabled,
+    },
+    {
+      label: t("insertColRight"),
+      icon: <Plus size={15} aria-hidden="true" />,
+      action: onInsertColRight,
+      disabled: rowOpsDisabled,
+    },
     {
       label: t("recalculateColumn"),
       icon: <Columns3 size={15} aria-hidden="true" />,
       action: onAutoFitColumn,
     },
-    { label: t("deleteCol"), icon: <Trash2 size={15} aria-hidden="true" />, action: onDeleteCol },
+    {
+      label: t("deleteCol"),
+      icon: <Trash2 size={15} aria-hidden="true" />,
+      action: onDeleteCol,
+      disabled: rowOpsDisabled,
+    },
   ];
 
   const rowItems: MenuItem[] = [
-    { label: t("insertRowAbove"), icon: <Plus size={15} aria-hidden="true" />, action: onInsertRowAbove },
-    { label: t("insertRowBelow"), icon: <Plus size={15} aria-hidden="true" />, action: onInsertRowBelow },
-    { label: t("deleteRow"), icon: <Trash2 size={15} aria-hidden="true" />, action: onDeleteRow },
+    ...(onCut
+      ? [{ label: t("cut"), icon: <Scissors size={15} aria-hidden="true" />, action: onCut }]
+      : []),
+    { label: t("copy"), icon: <Copy size={15} aria-hidden="true" />, action: onCopy },
+    {
+      label: t("paste"),
+      icon: <ClipboardPaste size={15} aria-hidden="true" />,
+      action: onPaste,
+    },
+    {
+      label: t("insertRowAbove"),
+      icon: <Plus size={15} aria-hidden="true" />,
+      action: onInsertRowAbove,
+      disabled: rowOpsDisabled,
+    },
+    {
+      label: t("insertRowBelow"),
+      icon: <Plus size={15} aria-hidden="true" />,
+      action: onInsertRowBelow,
+      disabled: rowOpsDisabled,
+    },
+    {
+      label: t("deleteRow"),
+      icon: <Trash2 size={15} aria-hidden="true" />,
+      action: onDeleteRow,
+      disabled: rowOpsDisabled,
+    },
   ];
 
   const items = state.kind === "column" ? columnItems : state.kind === "row" ? rowItems : commonCellItems;
@@ -115,7 +236,11 @@ export function ContextMenu({
           type="button"
           role="menuitem"
           aria-label={item.label}
+          disabled={item.disabled}
           onClick={() => {
+            if (item.disabled) {
+              return;
+            }
             item.action();
             onClose();
           }}

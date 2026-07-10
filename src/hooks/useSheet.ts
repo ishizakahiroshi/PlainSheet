@@ -50,19 +50,30 @@ export function useSheet() {
     }
   }
 
-  function insertRow(index: number): void {
+  function insertRows(index: number, count = 1): void {
+    const n = Math.max(1, Math.floor(count));
     const boundedIndex = Math.max(0, Math.min(index, rows.length));
     const next = cloneRows(rows);
-    next.splice(boundedIndex, 0, Array.from({ length: Math.max(columnCount, 1) }, () => ""));
+    const blank = () => Array.from({ length: Math.max(columnCount, 1) }, () => "");
+    next.splice(boundedIndex, 0, ...Array.from({ length: n }, blank));
     replaceRows(next);
   }
 
-  function deleteRow(index: number): void {
-    if (index < 0 || index >= rows.length) {
+  function insertRow(index: number): void {
+    insertRows(index, 1);
+  }
+
+  function deleteRows(indexes: number[]): void {
+    const unique = [...new Set(indexes.filter((i) => i >= 0 && i < rows.length))].sort(
+      (a, b) => b - a,
+    );
+    if (unique.length === 0) {
       return;
     }
     const next = cloneRows(rows);
-    next.splice(index, 1);
+    for (const index of unique) {
+      next.splice(index, 1);
+    }
     // Never collapse to [] — that switches the UI to EmptyState mid-edit.
     // Keep a single blank row so the grid (and undo) stay available.
     if (next.length === 0) {
@@ -71,7 +82,12 @@ export function useSheet() {
     replaceRows(next);
   }
 
-  function insertColumn(index: number): void {
+  function deleteRow(index: number): void {
+    deleteRows([index]);
+  }
+
+  function insertColumns(index: number, count = 1): void {
+    const n = Math.max(1, Math.floor(count));
     const target = Math.max(0, Math.min(index, Math.max(columnCount, 1)));
     const baseRows = rows.length > 0 ? rows : [[""]];
     const next = baseRows.map((row) => {
@@ -79,18 +95,54 @@ export function useSheet() {
       while (copy.length < target) {
         copy.push("");
       }
-      copy.splice(target, 0, "");
+      copy.splice(target, 0, ...Array.from({ length: n }, () => ""));
       return copy;
     });
     replaceRows(next);
   }
 
-  function deleteColumn(index: number): void {
-    if (index < 0 || index >= columnCount) {
+  function insertColumn(index: number): void {
+    insertColumns(index, 1);
+  }
+
+  function deleteColumns(indexes: number[]): void {
+    const unique = new Set(indexes.filter((i) => i >= 0 && i < columnCount));
+    if (unique.size === 0) {
       return;
     }
-    const next = rows.map((row) => row.filter((_, colIndex) => colIndex !== index));
-    replaceRows(next);
+    const next = rows.map((row) => row.filter((_, colIndex) => !unique.has(colIndex)));
+    // Drop widths for deleted columns and shift remaining ones so resize history
+    // does not stick to the wrong column after a multi-delete.
+    setColWidths((current) => {
+      const remapped: ColumnWidthMap = {};
+      let dest = 0;
+      const maxCol = Math.max(columnCount - 1, ...Object.keys(current).map(Number), 0);
+      for (let src = 0; src <= maxCol; src += 1) {
+        if (unique.has(src)) {
+          continue;
+        }
+        if (current[src] !== undefined) {
+          remapped[dest] = current[src]!;
+        }
+        dest += 1;
+      }
+      return remapped;
+    });
+    setRows(next, true);
+  }
+
+  function deleteColumn(index: number): void {
+    deleteColumns([index]);
+  }
+
+  function restoreState(
+    nextRows: CellValue[][],
+    nextMeta: SheetMeta,
+    nextColWidths: ColumnWidthMap,
+  ): void {
+    setRowsState(cloneRows(nextRows));
+    setMetaState({ ...nextMeta });
+    setColWidths({ ...nextColWidths });
   }
 
   function clearRange(range: Range): void {
@@ -174,14 +226,19 @@ export function useSheet() {
     updateCell,
     replaceRows,
     insertRow,
+    insertRows,
     deleteRow,
+    deleteRows,
     insertColumn,
+    insertColumns,
     deleteColumn,
+    deleteColumns,
     clearRange,
     pasteGrid,
     autoFitColumns,
     autoFitColumn,
     setColumnWidth,
+    restoreState,
   };
 }
 
