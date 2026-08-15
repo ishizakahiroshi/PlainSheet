@@ -6,6 +6,12 @@ export default defineConfig({
   plugins: [react()],
   clearScreen: false,
   server: {
+    // Bind to loopback only. The dev server has no authentication, and on
+    // Windows a `server.fs.deny` bypass (GHSA-fx2h-pf6j-xcff, unpatched in the
+    // vite 5 line) lets anyone who can reach it read files outside the project.
+    // Tauri connects over http://localhost:1420 (`devUrl`), so nothing here
+    // needs the server to listen on other interfaces. Do not add --host.
+    host: "127.0.0.1",
     port: 1420,
     strictPort: false,
   },
