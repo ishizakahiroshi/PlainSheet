@@ -149,12 +149,196 @@ button:disabled {
 
 .formulaBar__reference {
   width: 100px;
-  padding: 6px 10px;
+  height: 30px;
+  padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface-muted);
+  color: var(--text);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
+}
+
+.formulaBar__reference--invalid {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface-muted));
+}
+
+.tabBar {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 0 6px;
+  gap: 4px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.tabBar__tabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+  overflow-x: auto;
+}
+
+.tabBar__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  height: 28px;
+  margin-top: 4px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.tabBar__tab--active {
+  background: var(--surface-muted);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.tabBar__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.tabBar__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.tabBar__close:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.tabBar__add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-top: 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.tabBar__add:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.filterPopover {
+  position: fixed;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  width: min(240px, calc(100vw - 24px));
+  max-height: min(320px, 50vh);
+  padding: 8px;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.filterPopover__actions,
+.filterPopover__footer {
+  display: flex;
+  gap: 6px;
+  justify-content: space-between;
+}
+
+.filterPopover__actions button,
+.filterPopover__footer button {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.filterPopover__apply {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #fff !important;
+}
+
+.filterPopover__list {
+  overflow: auto;
+  display: grid;
+  gap: 4px;
+  min-height: 0;
+}
+
+.filterPopover__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.filterPopover__item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.emptyState__recent {
+  margin-top: 18px;
+  text-align: left;
+}
+
+.emptyState__recent h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.emptyState__recent ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+.emptyState__recent button {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+}
+
+.emptyState__recent button:hover {
+  background: var(--surface-muted);
 }
 
 .formulaBar__input {

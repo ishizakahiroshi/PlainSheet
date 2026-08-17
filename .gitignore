@@ -17,6 +17,10 @@ docs/local/
 
 # AI assistant local state
 .claude/
+# many-ai-cli writes these into the working folder only while an opencode session
+# runs (opencode.json.many-ai-cli.lock is the exclusive lock). A killed session
+# leaves them behind; the prefix match is needed to catch the lock as well.
+opencode.json*
 
 # Dependency and build output
 node_modules/
@@ -59,3 +63,9 @@ secrets.*
 .netrc
 .npmrc
 .pypirc
+
+# docsweep: backup snapshots (30-day retention, auto-cleanup)
+.docsweep/
+# === obsidian-link: managed ===
+/docs/obsidian/
+# === /obsidian-link: managed ===

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { t } from "../lib/i18n";
 import type { Encoding, Newline } from "../types/sheet";
 
@@ -10,6 +11,7 @@ type SettingsModalProps = {
   csvFormulaGuard: boolean;
   omitEmptyCells: boolean;
   theme: "light" | "dark" | "system";
+  useHeaderRow?: boolean;
   onEncodingChange: (encoding: Encoding) => void;
   onNewlineChange: (newline: Newline) => void;
   onZebraChange: (enabled: boolean) => void;
@@ -17,6 +19,7 @@ type SettingsModalProps = {
   onCsvFormulaGuardChange: (enabled: boolean) => void;
   onOmitEmptyCellsChange: (enabled: boolean) => void;
   onThemeChange: (theme: "light" | "dark" | "system") => void;
+  onUseHeaderRowChange?: (enabled: boolean) => void;
   onClose: () => void;
 };
 
@@ -29,6 +32,7 @@ export function SettingsModal({
   csvFormulaGuard,
   omitEmptyCells,
   theme,
+  useHeaderRow = true,
   onEncodingChange,
   onNewlineChange,
   onZebraChange,
@@ -36,15 +40,36 @@ export function SettingsModal({
   onCsvFormulaGuardChange,
   onOmitEmptyCellsChange,
   onThemeChange,
+  onUseHeaderRowChange,
   onClose,
 }: SettingsModalProps) {
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
   if (!open) {
     return null;
   }
 
   return (
-    <div className="modalBackdrop" role="presentation">
-      <section className="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div className="modalBackdrop" role="presentation" onClick={onClose}>
+      <section
+        className="modal modal--wide"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        onClick={(event) => event.stopPropagation()}
+      >
         <h2 id="settings-title">{t("settingsTitle")}</h2>
         <div className="settingsGrid">
           <label>
@@ -120,6 +145,17 @@ export function SettingsModal({
               <option value="system">{t("system")}</option>
             </select>
           </label>
+          {onUseHeaderRowChange ? (
+            <label className="checkControl">
+              <input
+                aria-label={t("useHeaderRow")}
+                type="checkbox"
+                checked={useHeaderRow}
+                onChange={(event) => onUseHeaderRowChange(event.target.checked)}
+              />
+              <span>{t("useHeaderRow")}</span>
+            </label>
+          ) : null}
         </div>
         <div className="modal__actions">
           <button type="button" aria-label={t("close")} onClick={onClose}>

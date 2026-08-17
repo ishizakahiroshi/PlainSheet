@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { t } from "../lib/i18n";
 
 type HelpModalProps = {
@@ -11,19 +12,43 @@ const shortcuts = [
   ["Ctrl+F", "shortcutSearch"],
   ["Ctrl+H", "shortcutReplace"],
   ["Ctrl+A", "shortcutSelectAll"],
-  ["Ctrl+C / Ctrl+V", "shortcutCopyPaste"],
-  ["F2", "shortcutEditCell"],
+  ["Ctrl+C / Ctrl+X / Ctrl+V", "shortcutCopyPaste"],
+  ["Arrows / Tab / Enter", "shortcutNavigate"],
+  ["Type / F2 / Double-click", "shortcutEditCell"],
   ["Delete", "shortcutClearCell"],
+  ["Ctrl+Z / Ctrl+Y", "shortcutUndoRedo"],
+  ["Name box + Enter", "shortcutJump"],
+  ["Ctrl+= / Ctrl+- / Ctrl+0", "shortcutZoom"],
 ] as const;
 
 export function HelpModal({ open, onClose }: HelpModalProps) {
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
   if (!open) {
     return null;
   }
 
   return (
-    <div className="modalBackdrop" role="presentation">
-      <section className="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="help-title">
+    <div className="modalBackdrop" role="presentation" onClick={onClose}>
+      <section
+        className="modal modal--wide"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="help-title"
+        onClick={(event) => event.stopPropagation()}
+      >
         <h2 id="help-title">{t("helpTitle")}</h2>
         <table className="shortcutTable">
           <tbody>

@@ -19,8 +19,9 @@ spreadsheet format.
 - Save as UTF-8, UTF-8 BOM, Shift_JIS, EUC-JP, or Latin-1 in the desktop app
 - Local-first: no server upload, no AI API calls
 
-**Status**: `v0.1.0`. Optimized for small to medium tables. Large-file support,
-virtual scrolling, richer export, and Git diff helpers are planned post-release.
+**Status**: `v0.1.0`. Optimized for small to medium tables. The grid is a
+canvas-virtualized component (`glide-data-grid`). Large-file support, richer
+export, and Git diff helpers are planned post-release.
 
 ## Tech Stack
 
@@ -29,7 +30,8 @@ virtual scrolling, richer export, and Git diff helpers are planned post-release.
 | Frontend | React 18 + TypeScript (ESM) |
 | Build    | Vite 5 + `tsc` |
 | Runtime  | Bun (package manager + scripts) |
-| Desktop  | Tauri v2 (Rust) — `@tauri-apps/api`, plugins `dialog` / `fs` |
+| Grid     | `@glideapps/glide-data-grid` (canvas-based, virtualized) |
+| Desktop  | Tauri v2 (Rust) — `@tauri-apps/api`, plugin `dialog`; file IO via custom Rust commands (`encoding_rs`) |
 | Parsing  | `yaml` for YAML; custom parsers for CSV/TSV/MD/JSON |
 | Icons    | `lucide-react` |
 | Test     | Vitest + Testing Library + jsdom |
@@ -50,7 +52,10 @@ PlainSheet/
 │  ├─ src/          # Rust entry / commands
 │  └─ capabilities/ # Tauri permission capabilities
 ├─ docs/            # specs, notes, plans
-│  └─ docs/local/   # private notes (gitignored)
+│  └─ local/        # private notes (gitignored)
+├─ scripts/         # build helpers (copy-app.mjs)
+├─ assets/          # icons / images
+├─ archive/         # archived plans
 └─ public/
 ```
 
@@ -61,35 +66,32 @@ PlainSheet/
 - Desktop file system access goes through Tauri plugins; keep platform-specific
   behavior behind the plugin layer so the React side stays OS-agnostic.
 
-## Build / Run Rules (shared across AI agents)
+## Shared AI Working Rules
 
-- **Do not build, run, or commit unless the user explicitly asks.** No
-  proactive suggestions or confirmation prompts to build/run/commit. Report only
-  the summary of code changes. Type-checking and tests for verifying
-  correctness are exempt and may be run as needed.
+Common AI working rules — no build/run/commit without an explicit user request,
+secrets-scan duties, and the `plan_*` / `bugfix_*` / `pending_*` md conventions
+under `docs/` — follow each user's global AI configuration, which lives outside
+this repository (author's environment: `~/.claude/CLAUDE.md` and
+`~/.claude/guides/`). Private/local notes go under `docs/local/` (gitignored).
+
+## Build / Run
+
 - Package manager is **Bun**. Common scripts:
 
   ```sh
   bun install
-  bun run dev        # Vite dev server
-  bun run test       # vitest run
+  bun run dev          # Vite dev server
+  bun run test         # vitest run
   bun run lint
-  bun run build      # tsc && vite build
-  bun run tauri dev  # desktop app
-  bun run tauri build
+  bun run build        # tsc && vite build
+  bun run tauri dev    # desktop app (dev)
+  bun run tauri:build  # tauri build --no-bundle + scripts/copy-app.mjs
   ```
 
-- Desktop build artifacts are produced by GitHub Actions. In a private repo,
-  branch pushes publish downloadable dev artifacts. In a public repo, run
-  **Tauri Build** manually, or push a `v*` tag to attach Windows/macOS/Linux
-  bundles to a GitHub Release.
-
-## docs/ `.md` Conventions
-
-When creating `.md` files under `docs/`, follow the same naming/status
-conventions the user defines in their global guide (`plan_*.md` / `bugfix_*.md`
-/ `pending_*.md` with H1 status labels). Private/local notes go under
-`docs/local/` (gitignored).
+- Desktop build artifacts are produced by GitHub Actions (**Tauri Build**
+  workflow): branch pushes, PRs, and manual dispatch publish downloadable dev
+  artifacts; pushing a `v*` tag attaches Windows/macOS/Linux bundles to a
+  GitHub Release.
 
 ## Related Files
 

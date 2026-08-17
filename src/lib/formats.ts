@@ -29,9 +29,10 @@ export function serializeTableText(
 ): string {
   const { sanitizeFormulas = false, omitEmptyCells = false } = options;
   if (format === "json") {
-    return `${JSON.stringify(rowsToObjects(rows, omitEmptyCells), null, 2)}${
-      newline === "CRLF" ? "\r\n" : "\n"
-    }`;
+    const json = JSON.stringify(rowsToObjects(rows, omitEmptyCells), null, 2);
+    // JSON.stringify always emits LF; rewrite every break when the sheet asks for CRLF
+    // (YAML path already does a full replace).
+    return newline === "CRLF" ? `${json.replace(/\n/g, "\r\n")}\r\n` : `${json}\n`;
   }
   if (format === "yaml") {
     const yaml = stringifyYaml(rowsToObjects(rows, omitEmptyCells));
@@ -64,6 +65,11 @@ function parseObjectList(value: unknown): CellValue[][] {
     }
     return [];
   }
+  // Partial object lists (e.g. [{a:1}, 42, {a:2}]) used to drop non-objects
+  // silently and lose rows. Require every element to be a plain object.
+  if (records.length !== value.length) {
+    throw new Error("Expected an array of objects");
+  }
   const headers = Array.from(new Set(records.flatMap((record) => Object.keys(record))));
   if (headers.length === 0) {
     return [];
@@ -87,8 +93,17 @@ function rowsToObjects(
   rows: readonly (readonly CellValue[])[],
   omitEmpty = false,
 ): Record<string, string>[] {
-  const headers = uniqueHeaders(rows[0] ?? []);
-  return rows.slice(1).map((row, dataIndex) => {
+  // Widen the header row to the widest data row so extra cells past the last
+  // named column are not dropped on JSON/YAML export (Markdown already keeps them).
+  const maxCols = rows.reduce((max, row) => Math.max(max, row.length), 0);
+  const headerSource = Array.from({ length: maxCols }, (_, index) => rows[0]?.[index] ?? "");
+  const headers = uniqueHeaders(headerSource);
+  const dataRows = rows.slice(1);
+  // Header-only sheets must not serialize to [] — reopen would wipe column names.
+  if (dataRows.length === 0 && headers.length > 0) {
+    return [Object.fromEntries(headers.map((header) => [header, ""]))];
+  }
+  return dataRows.map((row, dataIndex) => {
     const entries = headers
       .map((header, index): [string, string] => [header, row[index] ?? ""])
       // Per-row omit drops empty values, but the first data row keeps every
@@ -218,7 +233,9 @@ function escapeMarkdownCell(value: string): string {
       // not decoded as a newline on reopen.
       .replace(/<br\s*\/?>/gi, "\\$&")
       .replaceAll("|", "\\|")
-      .replace(/\r?\n/g, "<br>")
+      // Normalize lone CR as well as CRLF/LF so parseMarkdownTable's line split
+      // on \r cannot fracture an in-cell carriage return into a broken table.
+      .replace(/\r\n|\r|\n/g, "<br>")
   );
 }
 

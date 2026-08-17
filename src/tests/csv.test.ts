@@ -1,11 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { detectDelimiter, detectNewline, parseCsv, serializeCsv } from "../lib/csv";
+import {
+  detectDelimiter,
+  detectNewline,
+  parseCsv,
+  parseCsvStream,
+  serializeCsv,
+} from "../lib/csv";
 
 describe("parseCsv", () => {
   it("parses simple comma-separated rows", () => {
     expect(parseCsv("a,b\nc,d")).toEqual([
       ["a", "b"],
       ["c", "d"],
+    ]);
+  });
+
+  it("strips a leading UTF-8 BOM so browser File.text() matches desktop decode", () => {
+    expect(parseCsv("\uFEFFname,age\n1,2")).toEqual([
+      ["name", "age"],
+      ["1", "2"],
     ]);
   });
 
@@ -127,5 +140,29 @@ describe("delimiter and newline detection", () => {
     // Two of three rows use commas; one row throws in pipes. The detector
     // should not let the single outlier flip the whole sheet to '|'.
     expect(detectDelimiter("a,b\nc|d|e\n1,2")).toBe(",");
+  });
+});
+
+describe("stream CSV parse", () => {
+  it("joins chunks that split mid-row and mid-quote", async () => {
+    async function* chunks() {
+      yield "a,\"hel";
+      yield "lo, world\"\nb,c";
+    }
+    const rows = await parseCsvStream(chunks());
+    expect(rows).toEqual([
+      ["a", "hello, world"],
+      ["b", "c"],
+    ]);
+  });
+
+  it("matches parseCsv when content is split across chunks", async () => {
+    const text = "id,name\n1,\"Doe, Jane\"\n2,Bob\n";
+    async function* chunks() {
+      yield text.slice(0, 7);
+      yield text.slice(7, 20);
+      yield text.slice(20);
+    }
+    expect(await parseCsvStream(chunks())).toEqual(parseCsv(text));
   });
 });
