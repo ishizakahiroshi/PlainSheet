@@ -1,4 +1,11 @@
 ---
+cover:
+  path: portfolio/overview-2026-09-28.jpg
+  alt: {ja: "PlainSheet の紹介動画", en: "PlainSheet overview video"}
+video:
+  provider: youtube
+  id: "rMYdZCiuIjE"
+  durationSeconds: 20
 schemaVersion: 1
 color: "#c85b8e"
 initials: "pl"
