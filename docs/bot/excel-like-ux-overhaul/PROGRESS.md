@@ -3,7 +3,7 @@
 - repo: `ishizakahiroshi/PlainSheet`
 - base: `develop`
 - 作業 branch: `bot/20261005-004-excel-like-ux`
-- 更新日時: 2026-10-05 02:30 UTC
+- 更新日時: 2026-10-05 02:40 UTC
 - 受付済み。同一案件番号の既存 PR / 作業 branch との衝突なし（開始時検索）。
 - 固定指示 `README.md` と `REVIEW.md` を SHA `037c29ea4649efc81acc8f28824dca3df08e7450` で全読了。
 - C1 から直列実施。各工程は PR CI と別担当レビューで判定。merge / release はしない。
@@ -116,3 +116,12 @@
 - 原因説明は shell-level の強い裏付けがある見立て。ログは stderr を捨てており「uppercase が無い」という明示エラーではない。別途合成 fixture で再現した結果と合わせて記録する。
 - Upload は public PR / 非 tag main では条件で skipped（成功した OS も同じ）。Release job は tag-only かつ build 成功に依存する。後続の artifact download / archive 検証 / SHA-256 / publish は未実行。すべての skipped を Linux 失敗だけが原因としない。
 - 停止条件 1・2・6 継続。必要な修正範囲は `.github/workflows/tauri-release.yml` の Linux binary selector と staging 検証。現在は禁止範囲なので変更も retry もしていない。追加指示までは実装しない。
+
+### 2026-10-05 02:40 UTC — 4 導線の読み取り再評価 / 追加操作を整理
+
+- 依頼者の追加指示に従い、初めて CSV を使う人 / Excel 利用者の「開く編集保存、選択コピー貼付けUndo、列幅列順、フィルタ検索解除」を再評価。[既存 C1 監査文書](../../ux-gap-and-stack-decision.md) に優先度・根拠・最小 6 操作を追記。
+- 優先度: 保存先・非表示セルの誤書込リスク → 選択の一貫性 → フィルタ状態と復帰 → 外観。手元観測とソース仮説を分離。Ctrl+S 未確定保存、同名ファイルの handle、フィルタ paste / 全置換、右クリックの対象変更等は未再現の仮説であり、実測済みとは書かない。
+- 最小 6 操作: 未確定 Ctrl+S、別フォルダ同名 2 タブ保存、2×2 右クリック Copy/Paste/Undo、非連続フィルタ 2 行 Paste/解除/Undo、非表示語の検索全置換/解除/Undo、手動列幅/Paste/Undo と一度の列ドラッグ。すべて使い捨て合成コピーで行う提案で、依頼者の終了済み部分実測と混同しない。
+- 確認済み編集キー、新規 / 開く / 保存ラベル、未保存表示等は維持候補。全面 toolbar 再編や色寄せは後順位。ただし実 IME / 2,000×30 / テーマ比較は基盤判定の必須残件のままで、免除しない。Glide 固有限界か app / wrapper の設計かは未判定。
+- `d47550c878f1ffa983dc755edb159b43caec69ce` の docs の過去の独立レビュー記録は今回確認できていない。今回の最終追記は別担当が改めて確認し、結果を PR へ記録する。[run 37255800037](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37255800037) は completed / failure。Windows / macOS は success、Ubuntu は同じ Linux staging exit 2（job 111592476389、生ログ照合）。旧 SHA の PASS は使わない。
+- この追記で生じる最新 head も PR の CI / 独立レビューで別途確認する。必要な修正範囲は引き続き許可外の `.github/workflows/tauri-release.yml`。CI 停止、C1 基盤判定保留、C2 未着手を維持。コード・依存・workflow の変更はしていない。
