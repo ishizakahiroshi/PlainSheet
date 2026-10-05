@@ -16,13 +16,13 @@ CSV は引用符・セル内改行を正しく含めて作る。列は `id,部�
 
 | 時間 | 操作 | 期待 | 結果 |
 |---|---|---|---|
-| 0–1分 | 初回→ファイルを開く | Browser / download / 元ファイル未変更の説明。内容は端末内で処理 | 未実施 |
-| 1–3分 | 検索、日本語を含む5セル変更、F2、文字置換、Enter/Shift+Enter/Tab/Shift+Tab、Alt+Enter、Esc | 方向と改行を区別。既存値を保つ/置換する意図が一致。日本語変換確定Enterで余計に移動しない | 未実施、実IME担当 |
+| 0–1分 | 初回→ファイルを開く | Browser / download / 元ファイル未変更の説明。内容は端末内で処理 | 部分確認。初回の版/ダウンロード/上書きしない説明とsample-openをAX上で確認 |
+| 1–3分 | 検索、日本語を含む5セル変更、F2、文字置換、Enter/Shift+Enter/Tab/Shift+Tab、Alt+Enter、Esc | 方向と改行を区別。既存値を保つ/置換する意図が一致。日本語変換確定Enterで余計に移動しない | 部分確認。B2値編集→EnterでB3→1回UndoでB2復帰、検索「営業」3セル→C2選択/value同期を確認。AX入力で実キーボード/IMEは未検収 |
 | 3–4分 | 2×2選択、範囲内右クリックCopy→Paste→Undo1回→Redo | 範囲が単セルにならず、変更全体が戻る。Shift逆方向で範囲が縮む。Ctrl+端/Ctrl+Aは実データ基準 | 未実施 |
 | 4–6分 | 営業filter→非連続表示2行へPaste→解除→Undo。表示行不足でも試す | 非表示元行は変わらない。行不足なら全体拒否。header設定ON/OFFで先頭行扱いが変わる。表示/全件数とfilter印/解除が分かる | 未実施 |
 | 6–7分 | filter中に隠れた行だけの語を検索/全置換、解除 | 対象は表示行と明示され、隠れた行は変わらない。Undoで回復 | 未実施 |
 | 7–8分 | 手動幅→列移動→Paste→Undo | 値/幅/順序/選択が一致し、通常編集で手動幅が変わらない | 未実施 |
-| 8–10分 | 未確定編集でCtrl+S、Download as取消、Download→コピーを再読込 | 最新値を含むコピーをdownload。元ファイルは変わらず、開始を上書き成功と表示しない。取消でclean化しない。日本語/長い番号等を照合 | 未実施 |
+| 8–10分 | 未確定編集でCtrl+S、Download as取消、Download→コピーを再読込 | 最新値を含むコピーをdownload。元ファイルは変わらず、開始を上書き成功と表示しない。取消でclean化しない。日本語/長い番号等を照合 | 部分確認。Download押下時の開始通知と未保存表示の維持を確認。生成ファイルの実読込・元データ比較・Download as取消は未実施 |
 
 補足: Browserのdownload完了/保存先はアプリから検証できない。コピーを実際に開くまで完了扱いにしない。編集中/変換中にreload/closeで警告が出るかを合成コピーで確認する。選択・clipboard待機中のtab切替では、誤ったtabへPaste/Cutしないことも確認する。
 
@@ -45,7 +45,7 @@ CSV は引用符・セル内改行を正しく含めて作る。列は `id,部�
 
 ## 追加承認後の実装と検証境界
 
-- Linux packaging: binary存在確認を順に行うselectorへ修正。合成4ケースの検証済み。実Linux runnerのstaging合否は同SHAのPR CIで確認する。
+- Linux packaging: binary存在確認を順に行うselectorへ修正。合成4ケースと実Linux runnerでcopy/chmod/tar成功を確認済み（PR #1 run 37265739398）。
 - Native外部close: 終了要求をpreventして共通の未保存確認を通すlistenerと、main限定の `core:window:allow-destroy` を追加。生成capabilityも同期。Windows build・mock回帰と、実OS/IMEの受入を分ける。
 - ブランド: 既存favicon SVGの参照を `index.html` に追加。新しいブランド画像の生成や全アイコンの刷新は行っていない。
 - Browser部分確認: sampleでB2編集→EnterでB3、Undo1回でB2値復帰、検索「営業」の3セル件数とC2参照同期、download開始と未保存保持を確認。canvas画像取得がtimeoutしたため、見た目・狭幅・テーマを合格にしない。downloadコピーの再読込も未確認。

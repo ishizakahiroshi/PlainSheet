@@ -209,3 +209,12 @@
 - 選択寸法は空セルを含む矩形/選択マーカーから、値の統計は実データと表示行から別に計算。実App+Glideの回帰でD5の1×1、virtual行ヘッダーの1×3、空統計を確認。
 - 新候補sourceの24 files / 190 tests、lint成功。対象2ファイルの独立レビューに追加blockerなし。Windows native再buildは同じsourceから実行。新commitのCI/dots確認結果はPRの検証コメントへ記録する。
 - ブラウザ部分操作・実機未検収の境界は維持。C1の方式判定や全体受入は保留、merge/tag/releaseを行わない。
+
+### 2026-10-05 05:02 UTC — 最終候補のCIと別担当レビュー
+
+- 最終code SHA `bb5ab648b6aa910db53758269dfdfb063ac14708`。同SHA [CI run 37265739398](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37265739398) はcompleted/success。Windows・macOS・Linuxすべてでfrontend lint、24 files/190 tests、Tauri build、各OS stagingが成功。Linuxのlowercase `plainsheet` 候補選択/copy/chmod/tarを実ログ照合。
+- Windows candidate buildは最終source後にexit0。PlainSheet.exe 9,609,728 bytes、version 0.1.0、SHA256 `B469B247AF3696139068EEA179786F8F34EEF4828E6DA9FADD5D9D017F124161`、frontend `index-CY0turXM.js` と既存favicon。実native UI/IME/Alt+F4/save I/O acceptanceとは別。
+- dots別担当は037c29e→bb5ab64の51ファイル全差分と途中19+12+4ファイルの各増分を読取レビューし、P1/P2/P3修正・190 tests/lint/typecheck/buildを確認。最終レビューに追加修正要求なし。これはscreen/device acceptanceではない。
+- Uploadは公開PR条件でskip、Releaseは非tag条件でskip。成果物upload/releaseは行われていない。PR本文と[PR validation comment](https://github.com/ishizakahiroshi/PlainSheet/pull/1#issuecomment-5988253724)は最終SHAと境界を更新済み。
+- Browser実ページで初回説明/sample open、B2編集→Enter/B3→Undo1回、検索3件とC2同期、download開始通知/未保存保持を部分確認。Help dialog close後focus復帰も確認。canvas screenshot timeoutで視覚受入は未実施。詳細は `docs/manual-check-excel-like-ux.md` の各操作状態へ記録。
+- 残り: 実IME、日本語候補Enter/Esc、OS menu/Alt+F4と未保存全タブ、native save/cancel/failure/同名別path、downloadファイルを開き直した値照合、通常幅/640px/テーマの視認、2,000×30性能、別製品AIの取込み前全行データ確認。C1 foundation判定・H1/overall acceptanceはpending、保護PR #1はDraft、merge/releaseなし。
