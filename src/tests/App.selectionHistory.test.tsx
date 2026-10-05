@@ -41,6 +41,33 @@ afterEach(() => {
 });
 
 describe("App and Glide selection history with only the canvas renderer mocked", () => {
+  it("shows one selected cell outside existing data without inventing statistics", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: t("openSample") }));
+    await waitFor(() => expect(editor().getCellContent([0, 1])).toMatchObject({ data: "100" }));
+    act(() =>
+      editor().onGridSelectionChange?.({
+        rows: CompactSelection.empty(),
+        columns: CompactSelection.empty(),
+        current: {
+          cell: [3, 4],
+          range: { x: 3, y: 4, width: 1, height: 1 },
+          rangeStack: [],
+        },
+      }),
+    );
+    expect(screen.getByText(t("selectedRange", { rows: 1, cols: 1 }))).toBeInTheDocument();
+    expect(editor().getCellContent([3, 4])).toMatchObject({ data: "" });
+    expect(screen.queryByText(/合計/)).not.toBeInTheDocument();
+    act(() =>
+      editor().onGridSelectionChange?.({
+        rows: CompactSelection.empty().add(4),
+        columns: CompactSelection.empty(),
+      }),
+    );
+    expect(screen.getByText(t("selectedRange", { rows: 1, cols: 3 }))).toBeInTheDocument();
+    expect(screen.queryByText(/合計/)).not.toBeInTheDocument();
+  });
   it.each(["rows", "columns"] as const)(
     "preserves exact %s markers and excludes gaps through Clear, Undo, Clear and Redo",
     async (axis) => {

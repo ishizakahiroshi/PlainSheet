@@ -18,7 +18,7 @@ PlainSheet opens CSV and other plain text table files as a clean editable sheet,
 - Filtering does not remove rows from saved output. Sorting changes saved row order, matching the existing behavior. Moving a column changes saved column order and carries its width with it. Undo restores data, column widths and exact row/column selections for these edits. Selection statistics exclude unselected gaps and hidden rows.
 - A browser reload/close warns conservatively while editing. The app's own title-bar close asks before discarding pending changes. **OS/menu/Alt+F4 close protection is not verified**; save before using those paths.
 
-The Linux packaging selector has been repaired, and Windows/macOS/Linux build and staging succeeded for the intermediate candidate `e326df7`. Further selection-history fixes are undergoing checks on their own commit. Real-screen/Windows/IME/performance acceptance is still pending. Passing automated checks is not a release-readiness claim. See the [progress and validation records](docs/bot/excel-like-ux-overhaul/PROGRESS.md) and [representative local acceptance checklist](docs/manual-check-excel-like-ux.md).
+The Linux packaging selector has been repaired. CI and validation results apply to their specific commits; see the [progress and validation records](docs/bot/excel-like-ux-overhaul/PROGRESS.md) for the checked source. Real-screen/Windows/IME/performance acceptance is still pending. Passing automated checks is not a release-readiness claim. See the [representative local acceptance checklist](docs/manual-check-excel-like-ux.md).
 
 ## Features
 

@@ -202,3 +202,10 @@
 - 履歴でexact行列配列を保存・deep clone・復元。AppからGlideのマーカーを制御し、選択解除も反映する。StatusBarの寸法・統計はexact選択と表示行の交差から計算する。
 - 実App + 実Glide wrapperを組み合わせ、DataEditor描画だけを模擬した新しい結合回帰を追加。行/列のClear→Undo→Clear→Undo→Redoでマーカーとgap値を確認し、1/100/2の不連続行集計が3・2×3になることを確認。
 - 新候補sourceのローカル `bun run test`: 24 files / 189 tests、exit0。lint / Web buildもexit0。Windows候補再buildと、新SHAのCI・dots再レビューを別途確定する。実IME/native I/O/OS操作、visual/performanceは未検収。
+
+### 2026-10-05 04:57 UTC — 最終表示指摘の修正
+
+- dotsが `2786035a00cb5f0397dc6524916ff19686942ab3` の全51ファイル/今回増分と189tests/lint/型検査/buildを再確認し、既報P1/P2とREADMEのP3解消を確認。追加P3: 表の外の空セルD5の選択寸法が0×0になること。
+- 選択寸法は空セルを含む矩形/選択マーカーから、値の統計は実データと表示行から別に計算。実App+Glideの回帰でD5の1×1、virtual行ヘッダーの1×3、空統計を確認。
+- 新候補sourceの24 files / 190 tests、lint成功。対象2ファイルの独立レビューに追加blockerなし。Windows native再buildは同じsourceから実行。新commitのCI/dots確認結果はPRの検証コメントへ記録する。
+- ブラウザ部分操作・実機未検収の境界は維持。C1の方式判定や全体受入は保留、merge/tag/releaseを行わない。

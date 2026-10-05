@@ -1,4 +1,5 @@
 import { selectionIndexes } from "../lib/gridOperations";
+import { normalizeRange } from "../lib/clipboard";
 import { t } from "../lib/i18n";
 import type { CellValue, Range, Selection, SheetMeta } from "../types/sheet";
 
@@ -51,8 +52,19 @@ export function StatusBar({
     selectedRowIndexes,
     selectedColumnIndexes,
   );
-  const selectedRows = indexes.rows.length;
-  const selectedCols = indexes.columns.length;
+  const normalized = normalizeRange(selectedRange);
+  // Empty editable cells still occupy a selected area; statistics alone are data-bounded.
+  const selectedRows =
+    selectedRowIndexes.length > 0
+      ? selectedRowIndexes.filter((row) => !visibleSourceRows || visibleSourceRows.includes(row))
+          .length
+      : visibleSourceRows
+        ? indexes.rows.length
+        : normalized.endRow - normalized.startRow + 1;
+  const selectedCols =
+    selectedColumnIndexes.length > 0
+      ? selectedColumnIndexes.length
+      : normalized.endCol - normalized.startCol + 1;
   const stats = calculateSelectionStats(
     rows,
     selectedRange,
