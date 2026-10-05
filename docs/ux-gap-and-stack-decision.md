@@ -32,7 +32,7 @@
 
 ローカルテスト成功は C1 の画面検証成功を意味しない。文字コード変換を含む Windows Tauri の読み書き結果、実際の IME 体感、約 40 操作、負荷時の手触りをこのテスト数で代替しない。
 
-初回 head の PR CI: [Tauri Build / 37254444488](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37254444488)。02:13 UTC 時点で実行中。workflow は Linux / Windows / macOS の各 job で `bun install --frozen-lockfile`、`bun run lint`、`bun run test` を実行し、続いて Tauri build を実施する。フロントエンド build は Tauri 設定の `beforeBuildCommand` を別途確認して判定する。workflow 名だけをもって全検証 PASS としない。最終 docs head の CI / review 結果は PR で確認する。
+初回 head の PR CI: [Tauri Build / 37254444488](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37254444488)。02:13 UTC 時点で実行中。workflow は Linux / Windows / macOS の各 job で `bun install --frozen-lockfile`、`bun run lint`、`bun run test` を実行し、続いて Tauri build を実施する。Tauri 設定の `beforeBuildCommand: bun run build` も確認済み。workflow 名だけをもって全検証 PASS としない。最終 docs head の CI / review 結果は PR で確認する。
 
 ## 42 操作の記録と再開時の確認方法
 
@@ -107,3 +107,13 @@ Vite の起動時間と test 実行時間は上の基準の測定値ではない
 ## Rollback
 
 この PR は docs のみ。close すれば develop への実装変更はない。merge / release はしていない。
+
+## 追加停止: 同じ CI 失敗が 2 回、修正は許可範囲外
+
+02:21 UTC 確認。初回 head `64640094…` の [run 37254444488](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37254444488) と次 head `052c465…` の [run 37254711195](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37254711195) の Linux job が、どちらも Tauri build 成功後の `Stage release files (Linux)` で exit 2。初回 run は failure、次 run 全体は確認時点でまだ実行中だが、同じ Linux step の失敗は両方で確定している。
+
+ログでは lowercase `plainsheet` の生成が成功した後、既存 workflow が `set -euo pipefail` 下で `bin=$(ls -1 "$rel/PlainSheet" "$rel/plainsheet" 2>/dev/null | head -n1)` を実行して停止している。一時ディレクトリに合成の lowercase 空ファイルだけを置いた同じ selector の再現でも exit 2。候補片方が存在しないと `ls` の失敗が pipeline に伝わる。コードの build 失敗とは区別する。
+
+修正対象は変更禁止の `.github/workflows/tauri-release.yml`。停止条件 1 と 2 が追加で成立し、条件 6 とともに停止を維持する。workflow は修正していない。次の実装には UI の検証に加え、この既存 workflow の所有者側修正または明示的な範囲変更が必要。
+
+`e45bafe56e67689f17e1740e101198f60f92a962` でローカル test / lint / build を再実行して全て exit 0（110 tests）。これは Linux 梱包 CI の成功や C1 UI 合格を意味しない。最終 exact-head の CI と独立レビューは PR に記録する。

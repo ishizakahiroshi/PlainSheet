@@ -3,14 +3,14 @@
 - repo: `ishizakahiroshi/PlainSheet`
 - base: `develop`
 - 作業 branch: `bot/20261005-004-excel-like-ux`
-- 更新日時: 2026-10-05 02:19 UTC
+- 更新日時: 2026-10-05 02:21 UTC
 - 受付済み。同一案件番号の既存 PR / 作業 branch との衝突なし（開始時検索）。
 - 固定指示 `README.md` と `REVIEW.md` を SHA `037c29ea4649efc81acc8f28824dca3df08e7450` で全読了。
 - C1 から直列実施。各工程は PR CI と別担当レビューで判定。merge / release はしない。
 
 | 工程 | 担当 | 状態 | 証跡・残件・次の一手 |
 |---|---|---|---|
-| C1 UX 差分監査と基盤判定 | dot | STOP・未完了 | 停止条件 6。実画面が開けず 42 操作・3 基準は未判定。[停止記録](../../ux-gap-and-stack-decision.md) |
+| C1 UX 差分監査と基盤判定 | dot | STOP・未完了 | 停止条件 1・2・6。CI の Linux 梱包が 2 回同理由で失敗、workflow 修正は範囲外。実画面も未検証。[停止記録](../../ux-gap-and-stack-decision.md) |
 | C2 編集の核 | dot | pending | C1 判定後 |
 | C3 選択とナビゲーション | dot | pending | C2 後 |
 | C4 列・行の操作 | dot | pending | C3 後 |
@@ -28,7 +28,7 @@
 - 読了した指示 SHA: `037c29ea4649efc81acc8f28824dca3df08e7450`
 - 作業開始 develop SHA: `037c29ea4649efc81acc8f28824dca3df08e7450`
 - 実 code SHA: `037c29ea4649efc81acc8f28824dca3df08e7450`（開始時。oracle との差分は指示 docs 3 件のみ）
-- review 済み SHA: `052c465c048e57cb995bb81d0a0f29e2c7d1b06c`（停止記録のみ。UI 未検証）
+- review 済み SHA: `e45bafe56e67689f17e1740e101198f60f92a962`（停止記録と追記を別担当が再確認、修正要求なし。UI 未検証）
 - 初回 docs commit: `64640094ef74412247836eff93209782cce78677`
 - Draft PR: https://github.com/ishizakahiroshi/PlainSheet/pull/1
 - 初回 PR CI: https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37254444488 （02:13 UTC: 実行中。最終 head の結果は PR を参照）
@@ -79,3 +79,14 @@
 - 保存済み test / lint / build / dev ログを独立照合。reviewer は実 UI、依存取得、HTTP check を再実行していない。元実行の exit code は作業担当の記録。
 - exact-head CI `052c465…`: [run 37254711195](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37254711195)、02:18 UTC 時点で実行中。`.github/workflows/tauri-release.yml` の lint/test と `src-tauri/tauri.conf.json` の `beforeBuildCommand: bun run build` を確認済み。全成功の断定はしない。
 - この追記は記録のみ。最終 head は PR で検証し、旧 SHA の PASS を引き継がない。C1 は STOP のまま。持ち主の画面操作環境または手元検証が整うまで C2 以降は開始しない。
+
+### 2026-10-05 02:21 UTC — CI 失敗 2 回 / 範囲外修正のため停止を維持
+
+- 初回 head `64640094ef74412247836eff93209782cce78677`: [run 37254444488](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37254444488) は failure。Windows / macOS は success。Linux は frontend checks と Tauri build が success、その後の `Stage release files (Linux)` で exit 2。
+- 次 head `052c465c048e57cb995bb81d0a0f29e2c7d1b06c`: [run 37254711195](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37254711195) の Linux が同じ step / exit 2。02:21 UTC 時点で Windows は実行中、macOS は success。run 全体の完了は未確定だが、Linux の同理由失敗 2 回は確認済み。
+- 両ログで `Built application at: ~/work/PlainSheet/PlainSheet/src-tauri/target/release/plainsheet` の後、既存 workflow の `bin=$(ls -1 "$rel/PlainSheet" "$rel/plainsheet" 2>/dev/null | head -n1)` が `set -euo pipefail` 下で失敗。
+- 合成の空ファイル `plainsheet` 1 個だけを置いた一時ディレクトリで同じ selector を実行すると exit 2、lowercase ファイル存在確認は成功。存在しない uppercase 候補の `ls` 失敗が pipeline に伝わることを再現。repository のファイルは変更していない。
+- 停止条件 1（同理由 CI 失敗 2 回）と 2（修正対象 `.github/workflows/tauri-release.yml` が許可範囲外）に該当。workflow 修正・CI 再実行要求はしていない。C1 の実画面未確認による停止条件 6 も継続。
+- `e45bafe56e67689f17e1740e101198f60f92a962` でローカル test / lint / build を再実行: すべて exit 0、13 files / 110 tests。独立増分レビューも修正要求なし。CI [run 37254958985](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37254958985) は 02:21 UTC 時点で実行中であり、合格扱いにしない。
+- この最終停止記録の head は PR の最新 SHA を参照。docs 更新により自動開始する CI も、旧 head の結果から推定しない。CI の詳細結果と最終追記の独立確認は PR コメントへ追記する。
+- 次の一手: 許可された UI 操作環境に加え、依頼者による既存 workflow の修正、または当該ファイルだけを対象とする明示的な追加指示が必要。追加指示までは実装・workflow 修正に進まない。
