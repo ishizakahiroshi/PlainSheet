@@ -3,15 +3,15 @@
 - repo: `ishizakahiroshi/PlainSheet`
 - base: `develop`
 - 作業 branch: `bot/20261005-004-excel-like-ux`
-- 更新日時: 2026-10-05 02:21 UTC
+- 更新日時: 2026-10-05 02:30 UTC
 - 受付済み。同一案件番号の既存 PR / 作業 branch との衝突なし（開始時検索）。
 - 固定指示 `README.md` と `REVIEW.md` を SHA `037c29ea4649efc81acc8f28824dca3df08e7450` で全読了。
 - C1 から直列実施。各工程は PR CI と別担当レビューで判定。merge / release はしない。
 
 | 工程 | 担当 | 状態 | 証跡・残件・次の一手 |
 |---|---|---|---|
-| C1 UX 差分監査と基盤判定 | dot | STOP・未完了 | 停止条件 1・2・6。CI の Linux 梱包が 2 回同理由で失敗、workflow 修正は範囲外。実画面も未検証。[停止記録](../../ux-gap-and-stack-decision.md) |
-| C2 編集の核 | dot | pending | C1 判定後 |
+| C1 UX 差分監査と基盤判定 | dot | STOP・未完了 | 停止条件 1・2・6。CI の Linux 梱包が 2 回同理由で失敗、workflow 修正は範囲外。クラウド実画面は未検証、手元部分実測は下記。[停止記録](../../ux-gap-and-stack-decision.md) |
+| C2 編集の核 | dot | 未着手・停止 | 依頼者の最新指示どおり開始しない |
 | C3 選択とナビゲーション | dot | pending | C2 後 |
 | C4 列・行の操作 | dot | pending | C3 後 |
 | C5 データ操作 | dot | pending | C4 後 |
@@ -90,3 +90,29 @@
 - `e45bafe56e67689f17e1740e101198f60f92a962` でローカル test / lint / build を再実行: すべて exit 0、13 files / 110 tests。独立増分レビューも修正要求なし。CI [run 37254958985](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37254958985) は 02:21 UTC 時点で実行中であり、合格扱いにしない。
 - この最終停止記録の head は PR の最新 SHA を参照。docs 更新により自動開始する CI も、旧 head の結果から推定しない。CI の詳細結果と最終追記の独立確認は PR コメントへ追記する。
 - 次の一手: 許可された UI 操作環境に加え、依頼者による既存 workflow の修正、または当該ファイルだけを対象とする明示的な追加指示が必要。追加指示までは実装・workflow 修正に進まない。
+
+### 2026-10-05 02:30 UTC — 依頼者の手元 C1 部分実測 / 最新 CI 境界
+
+これは依頼者からの実画面観測報告であり、dot のクラウドブラウザによる再検証ではない。対象は `037c29e` の Web 版、Windows 標準 Chrome、既存 frozen lock、合成 sample。依頼者の手元部分実測は終了。C1 完了でも基盤維持 / 差し替え判定でもなく、基盤判定は保留、C2 は未着手のまま。
+
+確認済み（依頼者報告）:
+- F2 / ダブルクリックで既存値を保って編集、文字キー x で置換編集、Esc 取消。
+- Enter で B2→B3、Tab で B2→C2、Shift+Tab で C2→B2、通常矢印移動。
+- 名前ボックス B2 / A1:B2、列全体 B1:B10・行全体 A2:F2 の選択。
+- Ctrl+F 検索と Enter で次ヒット、2 値フィルタ、未保存表示、範囲統計。
+
+差分（依頼者報告。実装はしない）:
+- C2: B2 編集→End→追記→Shift+Enter は上移動せず編集欄に改行し、欄が残る。
+- C3: Ctrl+右は B2→N2（データ端 F2 超過）、Ctrl+下は A2→A18（データ端 A10 超過）。不正名 INVALID は Enter 後も欄に残る。Shift 選択の左 / 上で縮小せず拡大する例あり。Ctrl+A は実データ 10×6 に対して仮想空白を含む 18×14。
+- C5: 部署の営業 / 開発の 2 値フィルタで 5 行表示されるがヘッダー行も消え、状態バーは 10 行×6 列のまま。ポップアップに検索欄 / 値別件数がない。
+
+未確認: 実 IME、2,000×30 負荷、light / dark / system 比較、fill、列ドラッグ、ソート / フィルタ保存結果、Undo 等。これらと残り操作を部分結果から合格へ変換しない。全体の影響順位と 3 基準の判定は引き続き未完了。
+
+最新の完了済み CI 境界:
+- `181296621399bed5b56da2ecb2dbdbf439c61e9a` の [run 37255158631](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37255158631) は completed / failure。Windows・macOS は success、Ubuntu は frontend checks と Tauri build が success の後、Linux staging が exit 2。dot が API / raw log で確認し、依頼者も同じ終端状態を確認。古い SHA の PASS を代用しない。
+- 同 SHA の停止記録は独立レビュー済み、重大指摘なし。これは docs のレビューであり C1 / UX 合格ではない。この追記で生じる新しい docs head の CI 結果は別途 PR へ記録する。
+- 最初の 3 PR runs `37254444488 / 37254711195 / 37254958985`（heads `6464009 / 052c465 / e45bafe`）を比較し、すべて同じ Linux staging exit 2、frontend / Tauri build 成功、Windows / macOS 成功を確認。workflow blob は同一。
+- main の [2026-08-17 run 32029383313](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/32029383313)、[2026-09-06 run 34066294861](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/34066294861)、[2026-09-27 run 36332813977](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/36332813977) の生ログにも lowercase binary 生成後の同 selector / exit 2 がある。この docs PR による初発とは判断しない。現在列挙できた main 7 runs 中の最古の一致は 8 月 17 日であり、初発・導入 commit は未確定。以前の runs は lint / build で先に停止し、一部ログは 410 で取得不能。
+- 原因説明は shell-level の強い裏付けがある見立て。ログは stderr を捨てており「uppercase が無い」という明示エラーではない。別途合成 fixture で再現した結果と合わせて記録する。
+- Upload は public PR / 非 tag main では条件で skipped（成功した OS も同じ）。Release job は tag-only かつ build 成功に依存する。後続の artifact download / archive 検証 / SHA-256 / publish は未実行。すべての skipped を Linux 失敗だけが原因としない。
+- 停止条件 1・2・6 継続。必要な修正範囲は `.github/workflows/tauri-release.yml` の Linux binary selector と staging 検証。現在は禁止範囲なので変更も retry もしていない。追加指示までは実装しない。
