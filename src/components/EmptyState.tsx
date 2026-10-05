@@ -1,6 +1,6 @@
 import { FilePlus2, FolderOpen, TableProperties } from "lucide-react";
 import { t } from "../lib/i18n";
-import { fileNameFromPath } from "../hooks/useFile";
+import { fileNameFromPath, isTauriRuntime } from "../hooks/useFile";
 
 type EmptyStateProps = {
   onNew: () => void;
@@ -22,14 +22,16 @@ export function EmptyState({
       <div className="emptyState__content">
         <h1>{t("appName")}</h1>
         <p>{t("appSubtitle")}</p>
+        <p>{isTauriRuntime() ? t("appSaveHint") : t("browserSaveHint")}</p>
+        <p>{t("allFilesLocal")}</p>
         <div className="emptyState__actions">
           <button type="button" aria-label={t("newSheet")} onClick={onNew}>
             <FilePlus2 size={18} aria-hidden="true" />
             <span>{t("newSheet")}</span>
           </button>
-          <button type="button" aria-label={t("openCsv")} onClick={onOpen}>
+          <button type="button" aria-label={t("openTable")} onClick={onOpen}>
             <FolderOpen size={18} aria-hidden="true" />
-            <span>{t("openCsv")}</span>
+            <span>{t("openTable")}</span>
           </button>
           <button type="button" aria-label={t("openSample")} onClick={onSample}>
             <TableProperties size={18} aria-hidden="true" />

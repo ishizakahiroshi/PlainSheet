@@ -4,6 +4,22 @@ A local-first plain text spreadsheet editor for humans and AI.
 
 PlainSheet opens CSV and other plain text table files as a clean editable sheet, keeps the data local, and saves back to plain text instead of converting it to a binary spreadsheet format.
 
+## Browser and app editions
+
+- **Browser edition:** no installation for opening and editing files. **Download** / **Download as** create a copy; they never overwrite the opened file. A download-start notice does not prove that the browser finished saving the copy. Check the downloaded file before closing; unsaved-change protection remains active after editing. Browser output is UTF-8 or UTF-8 BOM; use the app for other encodings.
+- **Tauri app:** **Save** writes to the opened path; **Save as** chooses another destination. Cancelling or failing a save keeps changes unsaved. Saving captures the originating document, so switching to a same-name tab while writing does not redirect the write or mark that other document saved.
+- Both editions process file contents on the device and share editing operations. There is no server upload or AI API call.
+
+### Editing and data safety
+
+- Enter / Shift+Enter commit and move down / up; Tab / Shift+Tab move right / left. Alt+Enter inserts an in-cell newline. F2 keeps the value and places the caret at the end; typing replaces it; Esc cancels. Save commits an active editor first; finish an IME composition before saving. Real IME acceptance is still pending.
+- Ctrl+Arrow uses actual data runs, Ctrl+A selects actual data, and the name box accepts a cell/range. Right-clicking inside a selected range preserves that range. Ctrl+D / Ctrl+R fill from its first row / column.
+- Filtered copy, paste, clear, search and replacement target visible rows. A multi-row paste with too few visible destinations is rejected entirely. Clear filters to operate on every row. The first row is retained only when **Treat first row as header** is enabled; counts explicitly include that header.
+- Filtering does not remove rows from saved output. Sorting changes saved row order, matching the existing behavior. Moving a column changes saved column order and carries its width with it. Undo restores data, column widths and exact row/column selections for these edits. Selection statistics exclude unselected gaps and hidden rows.
+- A browser reload/close warns conservatively while editing. The app's own title-bar close asks before discarding pending changes. **OS/menu/Alt+F4 close protection is not verified**; save before using those paths.
+
+The Linux packaging selector has been repaired. CI and validation results apply to their specific commits; see the [progress and validation records](docs/bot/excel-like-ux-overhaul/PROGRESS.md) for the checked source. Real-screen/Windows/IME/performance acceptance is still pending. Passing automated checks is not a release-readiness claim. See the [representative local acceptance checklist](docs/manual-check-excel-like-ux.md).
+
 ## Features
 
 - Open CSV, TSV, Markdown Table, JSON array, and YAML list files

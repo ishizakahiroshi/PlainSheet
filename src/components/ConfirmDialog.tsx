@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { useDialogFocus } from "../hooks/useDialogFocus";
 import { t } from "../lib/i18n";
 
 type ConfirmDialogProps = {
@@ -10,6 +11,8 @@ type ConfirmDialogProps = {
 };
 
 export function ConfirmDialog({ open, title, message, onConfirm, onCancel }: ConfirmDialogProps) {
+  const dialog = useRef<HTMLElement>(null);
+  useDialogFocus(dialog, open);
   useEffect(() => {
     if (!open) {
       return;
@@ -31,6 +34,7 @@ export function ConfirmDialog({ open, title, message, onConfirm, onCancel }: Con
   return (
     <div className="modalBackdrop" role="presentation" onClick={onCancel}>
       <section
+        ref={dialog}
         className="modal"
         role="dialog"
         aria-modal="true"
@@ -43,7 +47,12 @@ export function ConfirmDialog({ open, title, message, onConfirm, onCancel }: Con
           <button type="button" aria-label={t("cancel")} onClick={onCancel}>
             {t("cancel")}
           </button>
-          <button className="dangerButton" type="button" aria-label={t("deleteAction")} onClick={onConfirm}>
+          <button
+            className="dangerButton"
+            type="button"
+            aria-label={t("deleteAction")}
+            onClick={onConfirm}
+          >
             {t("deleteAction")}
           </button>
         </div>

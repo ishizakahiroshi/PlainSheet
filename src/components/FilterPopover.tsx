@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../lib/i18n";
 import { uniqueColumnValues } from "../hooks/useFilter";
 import type { CellValue } from "../types/sheet";
@@ -18,9 +18,20 @@ type FilterPopoverProps = {
 };
 
 export function FilterPopover({ state, rows, selected, onApply, onClose }: FilterPopoverProps) {
-  const values = useMemo(
-    () => (state ? uniqueColumnValues(rows, state.col) : []),
-    [rows, state],
+  const values = useMemo(() => (state ? uniqueColumnValues(rows, state.col) : []), [rows, state]);
+  const [search, setSearch] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const counts = useMemo(() => {
+    const map = new Map<string, number>();
+    if (state)
+      for (const row of rows) {
+        const value = row[state.col] ?? "";
+        map.set(value, (map.get(value) ?? 0) + 1);
+      }
+    return map;
+  }, [rows, state]);
+  const shown = values.filter((value) =>
+    value.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
   );
   const [checked, setChecked] = useState<Set<string>>(new Set());
 
@@ -28,6 +39,8 @@ export function FilterPopover({ state, rows, selected, onApply, onClose }: Filte
     if (!state) {
       return;
     }
+    setSearch("");
+    inputRef.current?.focus();
     if (selected) {
       setChecked(new Set(selected));
     } else {
@@ -54,21 +67,54 @@ export function FilterPopover({ state, rows, selected, onApply, onClose }: Filte
     return null;
   }
 
-  const allSelected = values.length > 0 && values.every((value) => checked.has(value));
+  const allSelected = shown.length > 0 && shown.every((value) => checked.has(value));
 
   return (
     <div
       className="filterPopover"
       role="dialog"
       aria-label={t("filter")}
-      style={{ left: state.x, top: state.y }}
+      style={{
+        left: Math.max(8, Math.min(state.x, window.innerWidth - 280)),
+        top: Math.max(8, Math.min(state.y, window.innerHeight - 380)),
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        }
+      }}
     >
+      <input
+        ref={inputRef}
+        className="filterPopover__search"
+        aria-label={t("filterValuesSearch")}
+        placeholder={t("filterValuesSearch")}
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+      />
       <div className="filterPopover__actions">
         <button
           type="button"
-          onClick={() => setChecked(allSelected ? new Set() : new Set(values))}
+          onClick={() =>
+            setChecked((current) => {
+              const next = new Set(current);
+              shown.forEach((value) => {
+                if (allSelected) next.delete(value);
+                else next.add(value);
+              });
+              return next;
+            })
+          }
         >
-          {allSelected ? t("filterNone") : t("selectAllValues")}
+          {search
+            ? allSelected
+              ? t("clearShownValues")
+              : t("selectShownValues")
+            : allSelected
+              ? t("filterNone")
+              : t("selectAllValues")}
         </button>
         <button
           type="button"
@@ -81,12 +127,13 @@ export function FilterPopover({ state, rows, selected, onApply, onClose }: Filte
         </button>
       </div>
       <div className="filterPopover__list">
-        {values.map((value) => {
+        {shown.map((value) => {
           const label = value === "" ? t("filterBlank") : value;
           return (
-            <label key={value === "" ? "__blank__" : value} className="filterPopover__item">
+            <label key={value} className="filterPopover__item">
               <input
                 type="checkbox"
+                aria-label={t("filterValueCount", { value: label, count: counts.get(value) ?? 0 })}
                 checked={checked.has(value)}
                 onChange={(event) => {
                   setChecked((current) => {
@@ -101,6 +148,7 @@ export function FilterPopover({ state, rows, selected, onApply, onClose }: Filte
                 }}
               />
               <span title={label}>{label}</span>
+              <small>{counts.get(value) ?? 0}</small>
             </label>
           );
         })}
@@ -113,7 +161,7 @@ export function FilterPopover({ state, rows, selected, onApply, onClose }: Filte
           type="button"
           className="filterPopover__apply"
           onClick={() => {
-            if (checked.size === values.length) {
+            if (values.every((value) => checked.has(value))) {
               onApply(state.col, null);
             } else {
               onApply(state.col, checked);

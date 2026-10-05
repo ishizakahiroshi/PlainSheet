@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
@@ -10,6 +10,8 @@ import {
 } from "../lib/csv";
 import { parseTableText, serializeTableText, type SerializeOptions } from "../lib/formats";
 import { t } from "../lib/i18n";
+import { cloneRows } from "./useSheet";
+import type { SaveCompletion, SaveSnapshot } from "../lib/saveState";
 import type { CellValue, Delimiter, FileFormat, SheetMeta } from "../types/sheet";
 
 type UseFileOptions = {
@@ -19,11 +21,11 @@ type UseFileOptions = {
   // use updateMeta for that instead, otherwise every Ctrl+S wipes undo,
   // resets selection, and refits column widths.
   loadData: (rows: CellValue[][], meta: Partial<SheetMeta>) => void;
-  updateMeta: (meta: Partial<SheetMeta>) => void;
+  getDocumentId: () => string;
+  onSaved: (completion: SaveCompletion) => void;
   getRows: () => CellValue[][];
   getMeta: () => SheetMeta;
   onToast: (message: string) => void;
-  confirmDiscard: () => boolean;
   /** Called when a filesystem path is opened/saved (Tauri recent-files list). */
   onRecentPath?: (path: string) => void;
 };
@@ -36,29 +38,20 @@ type FileDropPayload =
 
 export function useFile({
   loadData,
-  updateMeta,
+  getDocumentId,
+  onSaved,
   getRows,
   getMeta,
   onToast,
-  confirmDiscard,
   onRecentPath,
 }: UseFileOptions) {
-  // Browser-only: handle returned by File System Access open/save pickers.
-  const fileHandleRef = useRef<FsFileHandle | null>(null);
+  const saveBusyRef = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const loadGenerationRef = useRef(0);
   const loadPathRef = useRef<(path: string) => Promise<void>>(async () => undefined);
-  const getMetaRef = useRef(getMeta);
-  const confirmDiscardRef = useRef(confirmDiscard);
   const onToastRef = useRef(onToast);
-  const onRecentPathRef = useRef(onRecentPath);
-  getMetaRef.current = getMeta;
-  confirmDiscardRef.current = confirmDiscard;
   onToastRef.current = onToast;
-  onRecentPathRef.current = onRecentPath;
-
-  const resetSaveTarget = useCallback(() => {
-    fileHandleRef.current = null;
-  }, []);
 
   const loadPath = useCallback(
     async (path: string) => {
@@ -98,13 +91,8 @@ export function useFile({
 
   const openFile = useCallback(async () => {
     try {
-      if (getMeta().dirty && !confirmDiscard()) {
-        return;
-      }
       if (!isTauriRuntime()) {
-        await openBrowserFile(loadData, onToast, (handle) => {
-          fileHandleRef.current = handle;
-        });
+        await openBrowserFile(loadData, onToast);
         return;
       }
       const path = await invoke<string | null>("open_file_dialog");
@@ -114,174 +102,108 @@ export function useFile({
     } catch {
       onToast(t("toastLoadFailed"));
     }
-  }, [confirmDiscard, getMeta, loadData, loadPath, onToast]);
+  }, [loadData, loadPath, onToast]);
 
-  const saveAs = useCallback(async () => {
-    try {
-      const currentMeta = getMeta();
+  const performSave = useCallback(
+    async (chooseName: boolean) => {
+      if (saveBusyRef.current) {
+        setSaveNotice(t("saving"));
+        return;
+      }
+      // Capture before any await: dialogs and I/O must never read another tab's live data.
+      const snapshot: SaveSnapshot = {
+        documentId: getDocumentId(),
+        rows: cloneRows(getRows()),
+        meta: { ...getMeta() },
+      };
+      const currentMeta = snapshot.meta;
       const defaultName = currentMeta.fileName ?? "untitled.csv";
-      if (!isTauriRuntime()) {
-        const fsWindow = fsAccessWindow();
-        if (fsWindow?.showSaveFilePicker) {
-          let handle: FsFileHandle;
-          try {
-            handle = await fsWindow.showSaveFilePicker({
-              suggestedName: defaultName,
-              types: saveFilePickerTypes(),
-            });
-          } catch {
+      saveBusyRef.current = true;
+      setSaving(true);
+      setSaveNotice(null);
+      try {
+        if (!isTauriRuntime()) {
+          const fileName = chooseName ? window.prompt(t("downloadAs"), defaultName) : defaultName;
+          if (!fileName) {
+            setSaveNotice(t("saveCancelled"));
             return;
           }
-          const format = formatFromPath(handle.name);
+          const format = chooseName ? formatFromPath(fileName) : (currentMeta.format ?? "csv");
           const delimiter =
             format === currentMeta.format ? currentMeta.delimiter : delimiterFromFormat(format);
           const content = serializeTableText(
-            getRows(),
+            snapshot.rows,
             format,
             delimiter,
             currentMeta.newline,
             serializeOptions(currentMeta),
           );
-          await writeFileHandle(handle, content);
-          fileHandleRef.current = handle;
-          updateMeta({
-            fileName: handle.name,
-            delimiter,
-            dirty: false,
-            format,
+          const encoding =
+            encodingForFormat(format, currentMeta.encoding) === "utf-8-bom" ? "utf-8-bom" : "utf-8";
+          downloadText((encoding === "utf-8-bom" ? "\uFEFF" : "") + content, fileName);
+          onSaved({
+            snapshot,
+            patch: { fileName, format, delimiter, encoding },
+            method: "download",
           });
-          onToast(t("toastSaved"));
+          setSaveNotice(t("browserDownloadNotice", { name: fileName }));
+          onToast(t("toastDownloadStarted"));
           return;
         }
-        const fileName = window.prompt("Save as", defaultName);
-        if (!fileName) {
+        const path =
+          chooseName || !currentMeta.filePath
+            ? await invoke<string | null>("save_file_dialog", { defaultName })
+            : currentMeta.filePath;
+        if (!path) {
+          setSaveNotice(t("saveCancelled"));
           return;
         }
-        const format = formatFromPath(fileName);
+        const format =
+          chooseName || !currentMeta.filePath
+            ? formatFromPath(path)
+            : (currentMeta.format ?? "csv");
         const delimiter =
           format === currentMeta.format ? currentMeta.delimiter : delimiterFromFormat(format);
+        const encoding = encodingForFormat(format, currentMeta.encoding);
         const content = serializeTableText(
-          getRows(),
+          snapshot.rows,
           format,
           delimiter,
           currentMeta.newline,
           serializeOptions(currentMeta),
         );
-        downloadText(content, fileName);
-        updateMeta({
-          fileName,
-          delimiter,
-          dirty: false,
-          format,
+        await invoke("write_file", { path, content, encoding });
+        onSaved({
+          snapshot,
+          patch: { filePath: path, fileName: fileNameFromPath(path), format, delimiter, encoding },
+          method: "direct",
         });
-        onToast(t("toastDownloadStarted"));
-        return;
+        onRecentPath?.(path);
+        setSaveNotice(t("savedFileNotice", { name: fileNameFromPath(path) }));
+        onToast(t("toastSaved"));
+      } catch (error) {
+        const message = saveErrorMessage(error);
+        setSaveNotice(message);
+        onToast(message);
+      } finally {
+        saveBusyRef.current = false;
+        setSaving(false);
       }
-      const path = await invoke<string | null>("save_file_dialog", { defaultName });
-      if (!path) {
-        return;
-      }
-      const format = formatFromPath(path);
-      const delimiter = format === currentMeta.format ? currentMeta.delimiter : delimiterFromFormat(format);
-      const encoding = encodingForFormat(format, currentMeta.encoding);
-      const content = serializeTableText(
-        getRows(),
-        format,
-        delimiter,
-        currentMeta.newline,
-        serializeOptions(currentMeta),
-      );
-      await invoke("write_file", { path, content, encoding });
-      updateMeta({
-        filePath: path,
-        fileName: fileNameFromPath(path),
-        delimiter,
-        encoding,
-        dirty: false,
-        format,
-      });
-      onRecentPath?.(path);
-      onToast(t("toastSaved"));
-    } catch (error) {
-      onToast(saveErrorMessage(error));
-    }
-  }, [getMeta, getRows, updateMeta, onToast, onRecentPath]);
+    },
+    [getDocumentId, getMeta, getRows, onSaved, onToast, onRecentPath],
+  );
 
-  const saveFile = useCallback(async () => {
-    try {
-      const currentMeta = getMeta();
-      if (!isTauriRuntime()) {
-        const content = serializeTableText(
-          getRows(),
-          currentMeta.format ?? "csv",
-          currentMeta.delimiter,
-          currentMeta.newline,
-          serializeOptions(currentMeta),
-        );
-        const handle = fileHandleRef.current;
-        if (handle && handle.name === currentMeta.fileName) {
-          if (typeof handle.queryPermission === "function") {
-            let permission = await handle.queryPermission({ mode: "readwrite" });
-            if (permission !== "granted" && typeof handle.requestPermission === "function") {
-              permission = await handle.requestPermission({ mode: "readwrite" });
-            }
-            if (permission !== "granted") {
-              await saveAs();
-              return;
-            }
-          }
-          await writeFileHandle(handle, content);
-          updateMeta({ dirty: false });
-          onToast(t("toastSaved"));
-          return;
-        }
-        if (fsAccessWindow()?.showSaveFilePicker) {
-          await saveAs();
-          return;
-        }
-        downloadText(content, currentMeta.fileName ?? "untitled.csv");
-        updateMeta({ dirty: false });
-        onToast(t("toastDownloadStarted"));
-        return;
-      }
-      if (!currentMeta.filePath) {
-        await saveAs();
-        return;
-      }
-      const format = currentMeta.format ?? "csv";
-      const encoding = encodingForFormat(format, currentMeta.encoding);
-      const content = serializeTableText(
-        getRows(),
-        format,
-        currentMeta.delimiter,
-        currentMeta.newline,
-        serializeOptions(currentMeta),
-      );
-      await invoke("write_file", {
-        path: currentMeta.filePath,
-        content,
-        encoding,
-      });
-      updateMeta({ encoding, dirty: false });
-      onRecentPath?.(currentMeta.filePath);
-      onToast(t("toastSaved"));
-    } catch (error) {
-      onToast(saveErrorMessage(error));
-    }
-  }, [getMeta, getRows, updateMeta, onToast, saveAs, onRecentPath]);
+  const saveAs = useCallback(() => performSave(true), [performSave]);
+  const saveFile = useCallback(() => performSave(false), [performSave]);
 
   const loadSample = useCallback(async () => {
     try {
-      if (getMeta().dirty && !confirmDiscard()) {
-        return;
-      }
       const response = await fetch(`${import.meta.env.BASE_URL}sample.csv`);
       if (!response.ok) {
         throw new Error("sample file is unavailable");
       }
       const content = await response.text();
       const rows = parseTableText(content, "csv", ",");
-      resetSaveTarget();
       loadData(rows, {
         fileName: "sample.csv",
         delimiter: ",",
@@ -293,7 +215,7 @@ export function useFile({
     } catch {
       onToast(t("toastLoadFailed"));
     }
-  }, [confirmDiscard, getMeta, loadData, onToast, resetSaveTarget]);
+  }, [loadData, onToast]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -302,15 +224,9 @@ export function useFile({
       };
       const handleDrop = (event: DragEvent) => {
         event.preventDefault();
-        if (getMetaRef.current().dirty && !confirmDiscardRef.current()) {
-          return;
-        }
         const file = event.dataTransfer?.files[0];
         if (file) {
-          // D&D has no writable handle — next Save will pick a location.
-          void loadBrowserFile(file, loadData, onToastRef.current, () => {
-            fileHandleRef.current = null;
-          });
+          void loadBrowserFile(file, loadData, onToastRef.current);
         }
       };
       window.addEventListener("dragover", handleDragOver);
@@ -326,9 +242,6 @@ export function useFile({
     listen<FileDropPayload>("tauri://drag-drop", (event) => {
       const path = extractDropPath(event.payload);
       if (!path) {
-        return;
-      }
-      if (getMetaRef.current().dirty && !confirmDiscardRef.current()) {
         return;
       }
       void loadPathRef.current(path);
@@ -352,15 +265,16 @@ export function useFile({
         unlisten();
       }
     };
-  }, [loadData, resetSaveTarget]);
+  }, [loadData]);
 
   return {
+    saving,
+    saveNotice,
     openFile,
     saveFile,
     saveAs,
     loadPath,
     loadSample,
-    resetSaveTarget,
   };
 }
 
@@ -410,7 +324,6 @@ function extractDropPath(payload: FileDropPayload): string | null {
 async function openBrowserFile(
   loadData: UseFileOptions["loadData"],
   onToast: UseFileOptions["onToast"],
-  onHandle: (handle: FsFileHandle | null) => void,
 ): Promise<void> {
   const fsWindow = fsAccessWindow();
   if (fsWindow?.showOpenFilePicker) {
@@ -423,7 +336,7 @@ async function openBrowserFile(
         return;
       }
       const file = await handle.getFile();
-      await loadBrowserFile(file, loadData, onToast, () => onHandle(handle));
+      await loadBrowserFile(file, loadData, onToast);
       return;
     } catch (error) {
       // User cancel → AbortError; fall through only for unexpected errors.
@@ -439,10 +352,11 @@ async function openBrowserFile(
   input.accept = ".csv,.tsv,.txt,.md,.markdown,.json,.yaml,.yml,text/csv,text/tab-separated-values";
   const file = await new Promise<File | null>((resolve) => {
     input.onchange = () => resolve(input.files?.[0] ?? null);
+    input.addEventListener("cancel", () => resolve(null), { once: true });
     input.click();
   });
   if (file) {
-    await loadBrowserFile(file, loadData, onToast, () => onHandle(null));
+    await loadBrowserFile(file, loadData, onToast);
   }
 }
 
@@ -450,7 +364,6 @@ async function loadBrowserFile(
   file: File,
   loadData: UseFileOptions["loadData"],
   onToast: UseFileOptions["onToast"],
-  onAdopt?: () => void,
 ): Promise<void> {
   try {
     const format = formatFromPath(file.name);
@@ -467,7 +380,6 @@ async function loadBrowserFile(
           onToast(t("toastLoading", { percent: Math.round(ratio * 100) }));
         },
       });
-      onAdopt?.();
       loadData(rows, {
         fileName: file.name,
         delimiter,
@@ -486,7 +398,6 @@ async function loadBrowserFile(
     content = content.replace(/^\uFEFF/, "");
     const delimiter = format === "tsv" ? "\t" : detectDelimiter(content);
     rows = parseTableText(content, format, delimiter);
-    onAdopt?.();
     loadData(rows, {
       fileName: file.name,
       delimiter,
@@ -518,29 +429,11 @@ function saveErrorMessage(error: unknown): string {
   return t("toastSaveFailed");
 }
 
-type FsPermissionMode = "read" | "readwrite";
-
-type FsWritable = {
-  write: (data: string | Blob) => Promise<void>;
-  close: () => Promise<void>;
-};
-
-type FsFileHandle = {
-  name: string;
-  createWritable: () => Promise<FsWritable>;
-  getFile?: () => Promise<File>;
-  queryPermission?: (descriptor?: { mode?: FsPermissionMode }) => Promise<PermissionState>;
-  requestPermission?: (descriptor?: { mode?: FsPermissionMode }) => Promise<PermissionState>;
-};
+type FsFileHandle = { name: string; getFile?: () => Promise<File> };
 
 type SaveFilePickerType = {
   description?: string;
   accept: Record<string, string[]>;
-};
-
-type SaveFilePickerOptions = {
-  suggestedName?: string;
-  types?: SaveFilePickerType[];
 };
 
 type OpenFilePickerOptions = {
@@ -549,7 +442,6 @@ type OpenFilePickerOptions = {
 };
 
 type FsWindow = Window & {
-  showSaveFilePicker?: (options?: SaveFilePickerOptions) => Promise<FsFileHandle>;
   showOpenFilePicker?: (options?: OpenFilePickerOptions) => Promise<FsFileHandle[]>;
 };
 
@@ -558,10 +450,7 @@ function fsAccessWindow(): FsWindow | null {
     return null;
   }
   const candidate = window as FsWindow;
-  if (
-    typeof candidate.showSaveFilePicker === "function" ||
-    typeof candidate.showOpenFilePicker === "function"
-  ) {
+  if (typeof candidate.showOpenFilePicker === "function") {
     return candidate;
   }
   return null;
@@ -587,17 +476,11 @@ function openFilePickerTypes(): SaveFilePickerType[] {
   return saveFilePickerTypes();
 }
 
-async function writeFileHandle(handle: FsFileHandle, content: string): Promise<void> {
-  const writable = await handle.createWritable();
-  await writable.write(content);
-  await writable.close();
-}
-
 function downloadText(content: string, fileName: string): void {
   const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
   link.download = fileName;
   link.click();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

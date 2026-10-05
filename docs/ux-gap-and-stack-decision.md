@@ -1,0 +1,260 @@
+# UX 差分監査と基盤判定 — #20261005-004
+
+## 結論: C1 停止・未完了、基盤判定は保留
+
+更新 02:30 UTC: 依頼者による Windows Chrome の部分実測が届いた。下記「依頼者の部分実測」に別記する。手元部分実測は終了し、C1 全体は未完了、C2 未着手。dot のクラウド実画面検証ができていないことと、依頼者の観測を区別する。
+
+2026-10-05 02:13 UTC。固定指示 SHA `037c29ea4649efc81acc8f28824dca3df08e7450` の C1 を開始したが、クラウド Chrome から Web 開発サーバーへ到達できない。起動は成功し、実行環境内の HTTP health check は 200 だった。ブラウザの結果は `net::ERR_BLOCKED_BY_CLIENT`。その理由を bot 判定やアプリ不具合とは断定しない。
+
+dot のクラウドでは操作画面に到達できておらず、02:13 UTC 時点の下表 42 項目はすべて「未実施・判定不能」。未実施を「Excel と違う」「無い」に変換しない。実画面を試さずに基盤維持または差し替えを推奨することはできない。C2 以降には進まない。
+
+固定指示の停止条件 6（持ち主の操作が必要）として停止。サポートされた画面操作環境を利用できるようにするか、依頼者による実画面検証が必要である。bind host、ブラウザのセキュリティ設定、ワークフロー、依存は変更していない。トンネルや外部サービスを追加していない。
+
+## 対象と検証範囲
+
+- 挙動 oracle: `c37b30064cb7a4abe4cda9bb3891a6f9c310de1d`
+- 開始 develop: `037c29ea4649efc81acc8f28824dca3df08e7450`
+- 初回 docs head / ローカル検証対象: `64640094ef74412247836eff93209782cce78677`
+- oracle から開始 develop への差分は指示 docs 3 件のみ。アプリコード、依存、ワークフローに変更なし。
+- [Draft PR #1](https://github.com/ishizakahiroshi/PlainSheet/pull/1)
+- [看板](bot/excel-like-ux-overhaul/PROGRESS.md)
+
+## 実施したコマンド
+
+| command | exit / 結果 |
+|---|---|
+| `node --version` | 0 / v24.19.0 |
+| `bun --version` | 0 / 1.3.14 |
+| `bun install --frozen-lockfile` | 0 / 310 packages、10.48 秒、既存 lockfile 保持 |
+| `bun run dev` | Vite 5.4.21 ready、308 ms。サーバー開始の確認であり終了コードは未確定 |
+| 開発サーバーへの HTTP health check | 0 / HTTP 200 |
+| `bun run test` | 0 / 13 files、110 tests PASS |
+| `bun run lint` | 0 / PASS |
+| `bun run build` | 0 / PASS。既存 Glide の PURE コメントと 500 kB 超 chunk の警告あり |
+
+ローカルテスト成功は C1 の画面検証成功を意味しない。文字コード変換を含む Windows Tauri の読み書き結果、実際の IME 体感、約 40 操作、負荷時の手触りをこのテスト数で代替しない。
+
+初回 head の PR CI: [Tauri Build / 37254444488](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37254444488)。02:13 UTC 時点で実行中。workflow は Linux / Windows / macOS の各 job で `bun install --frozen-lockfile`、`bun run lint`、`bun run test` を実行し、続いて Tauri build を実施する。Tauri 設定の `beforeBuildCommand: bun run build` も確認済み。workflow 名だけをもって全検証 PASS としない。最終 docs head の CI / review 結果は PR で確認する。
+
+## 42 操作の初期記録と確認方法（クラウド、02:13 UTC 時点）
+
+「予定」は実施結果ではない。画面確認を行った後に各行の判定を「Excel と同じ / 違う / 無い」で記録し、再現手順・データ・結果を追加する。テストだけで確認できない部分は画面操作を残す。
+
+| # | 操作 | クラウド確認（02:13 時点） | 確認方法（予定） | 差分があれば対応する工程 |
+|---|---|---|---|---|
+| 1 | 文字キーから置換編集 | 未実施・判定不能 | 画面: A1 を選択して既存値を上書き | C2 |
+| 2 | F2 で末尾編集 | 未実施・判定不能 | 画面: 値のある A1 で F2、末尾を追記 | C2 |
+| 3 | ダブルクリック編集 | 未実施・判定不能 | 画面: 既存値を保った編集開始 | C2 |
+| 4 | Enter 確定・下移動 | 未実施・判定不能 | 画面: 編集中 Enter 後のセル座標 | C2 |
+| 5 | Shift+Enter 確定・上移動 | 未実施・判定不能 | 画面: 編集中 Shift+Enter 後のセル座標 | C2 |
+| 6 | Tab 確定・右移動 | 未実施・判定不能 | 画面: 編集中 Tab 後のセル座標 | C2 |
+| 7 | Shift+Tab 確定・左移動 | 未実施・判定不能 | 画面: 編集中 Shift+Tab 後のセル座標 | C2 |
+| 8 | 矢印で移動 | 未実施・判定不能 | 画面: 非編集中の上下左右 | C3 |
+| 9 | Esc 取消 | 未実施・判定不能 | 画面: 編集前の値へ戻ること | C2 |
+| 10 | Delete 範囲クリア | 未実施・判定不能 | 画面: 2×2 選択の削除と Undo | C2 |
+| 11 | Ctrl+右 / 左 | 未実施・判定不能 | 画面: 連続データ端・空白の前後 | C3 |
+| 12 | Ctrl+下 / 上 | 未実施・判定不能 | 画面: 連続データ端・空白の前後 | C3 |
+| 13 | Shift+矢印 | 未実施・判定不能 | 画面: 選択範囲を拡大・縮小 | C3 |
+| 14 | Ctrl+Shift+矢印 | 未実施・判定不能 | 画面: データ端まで選択 | C3 |
+| 15 | Home | 未実施・判定不能 | 画面: 選択セルの行先頭へ移動 | C3 |
+| 16 | Ctrl+Home | 未実施・判定不能 | 画面: 先頭セルへ移動 | C3 |
+| 17 | End | 未実施・判定不能 | 画面: データ端ナビゲーション | C3 |
+| 18 | PageUp / PageDown | 未実施・判定不能 | 画面: 表示単位の移動 | C3 |
+| 19 | Ctrl+A | 未実施・判定不能 | 画面: 全選択 | C3 |
+| 20 | 列見出しクリック | 未実施・判定不能 | 画面: 列全体を選択 | C3 |
+| 21 | 行番号クリック | 未実施・判定不能 | 画面: 行全体を選択 | C3 |
+| 22 | Shift+列 / 行見出しクリック | 未実施・判定不能 | 画面: 列・行の選択範囲拡張 | C3 |
+| 23 | 名前ボックス | 未実施・判定不能 | 画面: C3 と A1:B2、無効参照入力 | C3 |
+| 24 | フィルハンドル・連番 | 未実施・判定不能 | 画面: 1,2 から 3,4,5 へドラッグ | C2 |
+| 25 | フィルハンドル・コピー | 未実施・判定不能 | 画面: 文字列のドラッグコピー | C2 |
+| 26 | Ctrl+D | 未実施・判定不能 | 画面: 下へ範囲コピーと 1 回の Undo | C2 |
+| 27 | Ctrl+R | 未実施・判定不能 | 画面: 右へ範囲コピーと 1 回の Undo | C2 |
+| 28 | Ctrl+C / Ctrl+V | 未実施・判定不能 | 画面: TSV 複数セルのコピー貼り付け | C2 |
+| 29 | 列境界ダブルクリック | 未実施・判定不能 | 画面: 長い値を含む列の自動幅 | C4 |
+| 30 | 列ドラッグ移動 | 未実施・判定不能 | 画面: 列順変更・保存内容・Undo | C4 |
+| 31 | 枠固定設定 | 未実施・判定不能 | 画面: メニューから設定しスクロール | C4 |
+| 32 | 枠固定解除 | 未実施・判定不能 | 画面: 同じ導線から解除 | C4 |
+| 33 | 昇順 / 降順ソート | 未実施・判定不能 | 画面: 見出し導線と保存後の行順 | C5 |
+| 34 | 値フィルタ | 未実施・判定不能 | 画面: 2 値選択・件数・検索・列印 | C5 |
+| 35 | フィルタ解除 | 未実施・判定不能 | 画面: 1 クリック解除と元の順序 | C5 |
+| 36 | Ctrl+F / Enter | 未実施・判定不能 | 画面: 入力中の強調と次のヒット | C5 |
+| 37 | 置換 | 未実施・判定不能 | 画面: 単一・全置換と取消 / Undo | C5 |
+| 38 | Undo / Redo | 未実施・判定不能 | 画面: 打鍵・貼付け・フィルの往復 | C2 |
+| 39 | 日本語 IME 編集開始 / 確定 | 未実施・判定不能 | 画面: 実際の入力方式で変換確定 Enter、移動・文字の崩れ | C2 |
+| 40 | 2,000 行×30 列 | 未実施・判定不能 | 画面: 範囲選択・フィル・列移動・枠固定の体感と計測 | C1/C4 |
+| 41 | light / dark / system | 未実施・判定不能 | 画面: 選択色・罫線・フォントの視認性 | C7 |
+| 42 | 初見導線・状態表示 | 未実施・判定不能 | 画面: 空画面・ツールチップ・未保存・範囲統計 | C6/C7 |
+
+## 基盤維持の 3 基準
+
+| 基準 | 実測値 / 結果 | 判定 |
+|---|---|---|
+| IME の自然な編集開始・確定 | 実 IME 0 回。文字貼付け・合成 composition イベントによる代用なし | 未判定 |
+| 2,000×30 の範囲選択・フィル・列移動・枠固定 | 実 UI 操作 0 回。時間・引っかかりの測定なし | 未判定 |
+| 選択色・罫線・フォントを Excel 風へ調整できるか | light / dark の実画面比較 0 回。ソース上の theme 定義だけでは合格にしない | 未判定 |
+
+Vite の起動時間と test 実行時間は上の基準の測定値ではない。基盤判定は保留であり、差し替え推奨でも維持決定でもない。
+
+## 影響順の差分一覧
+
+全体版は未作成。初期監査では実操作で差分を確認できず、後述の手元報告も部分実測のため、全体の差分順位は未確定。再開時は初めて使う人の停止につながる差分、日常操作で繰り返し困る差分の順に整理する。上の対応工程は仕様から作った検証先であり、現在の不具合の断定ではない。ソート / フィルタ後の保存行順も未確認なので、C5 の維持条件をまだ決めない。
+
+## 再開に必要なこと
+
+1. 対象 SHA の Web 版を、実際の画面操作ができるサポートされた環境で開く。
+2. 合成データだけを使い、42 操作の結果・画面証跡・影響順位を記録する。
+3. 日本語 IME と 2,000×30 の性能を実測する。Windows Tauri と実 IME の体感は実行者・環境を明記し、未確認なら残す。
+4. 3 基準の維持 / 差し替え判定、PR の exact-SHA CI、独立レビューが揃ってから C2 へ進む。差し替え推奨の場合は別途停止し実装しない。
+
+## Rollback
+
+この PR は docs のみ。close すれば develop への実装変更はない。merge / release はしていない。
+
+## 追加停止: 同じ CI 失敗が 2 回、修正は許可範囲外
+
+02:21 UTC 確認。初回 head `64640094…` の [run 37254444488](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37254444488) と次 head `052c465…` の [run 37254711195](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37254711195) の Linux job が、どちらも Tauri build 成功後の `Stage release files (Linux)` で exit 2。初回 run は failure、次 run 全体は確認時点でまだ実行中だが、同じ Linux step の失敗は両方で確定している。
+
+ログでは lowercase `plainsheet` の生成が成功した後、既存 workflow が `set -euo pipefail` 下で `bin=$(ls -1 "$rel/PlainSheet" "$rel/plainsheet" 2>/dev/null | head -n1)` を実行して停止している。一時ディレクトリに合成の lowercase 空ファイルだけを置いた同じ selector の再現でも exit 2。候補片方が存在しないと `ls` の失敗が pipeline に伝わる。コードの build 失敗とは区別する。
+
+修正対象は変更禁止の `.github/workflows/tauri-release.yml`。停止条件 1 と 2 が追加で成立し、条件 6 とともに停止を維持する。workflow は修正していない。次の実装には UI の検証に加え、この既存 workflow の所有者側修正または明示的な範囲変更が必要。
+
+`e45bafe56e67689f17e1740e101198f60f92a962` でローカル test / lint / build を再実行して全て exit 0（110 tests）。これは Linux 梱包 CI の成功や C1 UI 合格を意味しない。最終 exact-head の CI と独立レビューは PR に記録する。
+
+## 依頼者の部分実測（2026-10-05 02:30 UTC 受領記録）
+
+出所: 依頼者の手元報告。Web app SHA `037c29e`、Windows 標準 Chrome、既存 frozen lock、合成 sample。dot のブラウザでの追試ではない。手元部分実測は終了しており、C1 完了・基盤維持 / 差し替え判定には変換しない。C2 は開始しない。
+
+| 対応する初期検証項目 | 手元報告の結果 | 境界 |
+|---|---|---|
+| 1 / 2 / 3 / 9 | 文字キー x で置換、F2 / double-click は既存値保持、Esc 取消 | この sample 上の観測 |
+| 4 / 6 / 7 / 8 | Enter B2→B3、Tab B2→C2、Shift+Tab C2→B2、通常矢印移動 | 他の境界・実 IME は未確認 |
+| 5 | B2 編集→End→追記→Shift+Enter は上移動せず改行、編集欄が残る | C2 差分 |
+| 11 / 12 | Ctrl+右 B2→N2（データ端 F2 超過）、Ctrl+下 A2→A18（端 A10 超過） | C3 差分。Ctrl+左 / 上の結果は報告なし |
+| 13 | Shift 選択の左 / 上で縮小せず拡大する例 | C3 差分。全パターンを確認したものではない |
+| 19 | Ctrl+A は実データ 10×6 に対して仮想空白を含む 18×14 | C3 差分 |
+| 20 / 21 | 列全体 B1:B10、行全体 A2:F2 を実画面で選択 | Shift+見出し拡張は未確認 |
+| 23 | 名前ボックス B2 / A1:B2 は動作、不正名 INVALID は Enter 後も残る | C3 の不正入力復帰に差分 |
+| 34 | 営業 / 開発の 2 値で 5 行表示。ただしヘッダーも消え、状態バーは 10×6 のまま。検索欄・値別件数なし | C5 差分。保存結果・解除後順序は未確認 |
+| 36 | Ctrl+F、Enter で次ヒットを実画面で確認 | 全検索オプションの検証ではない |
+| 42 | 未保存表示と範囲統計を確認 | ツールバー全 tooltip・翻訳等の全件合格ではない |
+
+未確認: 実 IME、2,000×30 負荷、light / dark / system 比較、fill、列ドラッグ、ソート / フィルタ保存結果、Undo 等。基盤 3 基準は依然すべて最終判定不能。保存順の挙動 oracle も未確定。
+
+最新の確定 CI 境界は `181296621399bed5b56da2ecb2dbdbf439c61e9a` / [run 37255158631](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37255158631): overall failure、Windows / macOS success、Ubuntu は build 成功後 Linux staging exit 2。依頼者の報告と dot の raw log / API 確認が一致している。古い PASS は代用しない。
+
+既存 main の同じ staging failure については [看板](bot/excel-like-ux-overhaul/PROGRESS.md) の 02:30 記録に比較結果と限界を記した。初発・導入 commit は未確定。必要な workflow 修正は依然許可範囲外で、停止条件 1・2・6 を維持する。
+
+## 4 導線の再評価（2026-10-05 02:40 UTC、読み取りのみ）
+
+想定する利用者は「初めて CSV を編集する人」と「Excel の操作を期待する人」。優先順位は **保存先・非表示セルへの誤書き込みリスク → 選択範囲の一貫性 → フィルタ状態と復帰 → 外観** とする。これは C1 の部分再評価であり、実装開始指示ではない。C1 基盤判定保留、C2 未着手、CI 停止を維持する。
+
+証拠を分ける:
+- **手元観測**: 前節の依頼者による Windows Chrome / app `037c29e` / 合成 sample の部分実測。dot の追試ではない。
+- **ソース仮説**: `src/` は oracle `c37b300…` と同じ。今回の読み取りによる失敗可能性・設計評価であり、以下の追加操作はまだ実施していない。ソースに処理があることだけで画面上の成功・失敗を確定しない。
+
+### 優先度と 4 つの導線
+
+「今直す」は、再開が認められた場合の実害優先順位。仮説項目は先に再現確認する。新たに必要な変更範囲が各 C の許可ファイルを超える場合、現指示の範囲変更なしには着手しない。
+
+| 導線 | 今直す / 先に確かめる | 後でよい | 維持する候補 |
+|---|---|---|---|
+| 1. 開く→編集→保存 | **ソース仮説**: タブ共通の書込 handle と名前だけの照合で、別フォルダの同名ファイルへ誤保存する可能性。編集中 Ctrl+S が未確定値を確定せず旧値を保存する可能性。失敗通知が短く、保存失敗の継続状態・再試行先が分かりにくい | ツールバーの全面再編、Excel リボン風の装飾 | 新規 / 開く / サンプル、ラベル付き保存 / 名前を付けて保存、未保存表示、閉じる確認。確認済み F2 / double-click / 文字置換 / Esc / Enter / Tab は崩さない |
+| 2. 複数選択→コピー / 貼付け→Undo | **手元観測**: Shift の逆方向選択が縮まず拡大。**ソース仮説**: 右クリックで既存範囲が単セルになり、Copy / Cut / Clear の対象がキー操作と違う。フィルタ中の複数行 paste が非表示の元行へ書く可能性。誤操作の回復を Undo 1 回で確認する | AI コピー等の名称・配置変更、ショートカット装飾 | 既存 TSV キー操作と Undo / Redo の可否表示・履歴。回復の実証はまだないため完全合格とはしない |
+| 3. 列幅 / 列順 | **ソース仮説**: 手動幅が paste / 行挿入で再計算され、データ Undo で元幅へ戻らない。普段の作業が再調整の繰り返しになるか確認 | 列移動の実装判断は、現 UI の期待と未接続箇所を確認後。グリッド交換理由に直結させない | 幅ドラッグ、全列自動幅、メニューの単列自動幅は対象が違う。入口が複数という理由だけで削除しない |
+| 4. 絞り込み→検索→解除 | **手元観測**: ヘッダー消失、5 行表示でも状態バー 10×6。**ソース仮説**: 検索 / 全置換が非表示行も対象で範囲表示がない。既存条件の再編集・一括解除の導線が弱い。表示対象・件数・復帰と保存行順を先に明確にする | 値別件数の装飾、細部の色寄せ。候補が多ければ値検索の優先度は上がる | 検索件数、前 / 次ヒット、Esc 終了の設計。Ctrl+F / Enter 次ヒットは手元で確認済み |
+
+### 根拠と再現前の仮説
+
+- 保存先: `src/hooks/useFile.ts:46–47,105–107,221–235` の handle と名前照合、`src/App.tsx:159–172,232–237` のタブ復元を照合。別フォルダの同名ファイルでの挙動は未再現。
+- 未確定保存: `src/App.tsx:633–645` の Ctrl+S と `src/components/FormulaBar.tsx:83–101` の blur / Enter commit。イベント順序やグリッド編集を含め、実操作で確認するまではデータ損失と断定しない。
+- 保存復旧: `src/App.tsx:135–144` と `src/hooks/useFile.ts:205–207,268–269` の通知。Web 保存は `useFile.ts:210–245` で handle / 保存先選択 / download fallback に分岐し、常に download-only とは扱わない。
+- 選択と右クリック: `src/App.tsx:424–449,839–857`。範囲を保つかを画面で比較する。逆方向選択は `useSelection.ts:28–32`、`App.tsx:771–776`、`GlideSheet.tsx:345–374` の正規化・active cell 復元も原因候補。
+- フィルタ paste: `src/components/GlideSheet.tsx:502–508` → `src/App.tsx:780–783` → `src/hooks/useSheet.ts:178–189`。開始行だけの source 変換と連続書込が、飛び飛びの表示行に対してどう働くか未再現。Cut / コピーの元データ矩形も `App.tsx:322–369` で確認対象。
+- 幅の再計算 / Undo: `src/hooks/useSheet.ts:44–59,178–189`、`src/hooks/useHistory.ts:15–18`。列順変更は `GlideSheet.tsx:485–540` に `onColumnMoved` の接続がない。これは現 app の未接続であって、Glide に実現能力がないという証拠ではない。
+- フィルタ状態 / 検索範囲: `src/hooks/useFilter.ts:12–30`、`src/App.tsx:826–832`、`268–270,587–607`。解除 / 再編集導線は `App.tsx:880–892` と `ContextMenu.tsx:141–147`。非表示ヒットへの移動は `GlideSheet.tsx:142–149,312–325` も確認対象。
+
+### 発見しやすさ・状態表示・メニュー依存
+
+初期画面の New / Open / Sample（`EmptyState.tsx:25–37`）とラベル付き Open / Save / Save As（`Toolbar.tsx:63–74`）は初心者の入口として維持候補。未保存の title / status 表示と閉じる確認も存在する。表示される state が保存・選択・フィルタの実対象と一致するかを、装飾より優先する。
+
+一方、Cut / Paste はキー・右クリックへの依存が強く、通常コピーと同じ関数を呼ぶ「AI コピー」の名称は用途の誤認候補。行列挿入 / 削除の上段入口に対し、sort / filter は列メニューに寄る。フィルタ中の構造操作は context menu では disabled、toolbar では押した後に拒否通知となるため、入口ごとの状態を揃える余地がある（`Toolbar.tsx:99–123`、`App.tsx:465–491,723`、`ContextMenu.tsx:170–189`）。いずれも今回の実測ではなく、ソース上の画面設計評価。
+
+### 手元で追加する最小 6 操作（未実施）
+
+使い捨ての合成 CSV コピーだけで行う。元ファイルに対して試さない。1 操作で想定外の結果が出たら、値・対象範囲・保存先を記録し、続けて上書きしない。
+
+1. セル内容欄に未確定の値を入力し、Enter せず Ctrl+S。保存されたファイルを開き直し、値と未保存表示を確認。必要ならセル内編集でも同じ比較。
+2. 別フォルダにある同名 CSV を 2 つ開く。先のタブだけを編集・保存して、両ファイルを開き直し保存先を確認。
+3. 2×2 を選択し、範囲内を右クリックして Copy→空き位置へ Paste→Undo 1 回→Redo。Ctrl+C の結果と対象範囲を比較。
+4. 非連続の元行が残るフィルタにして 2 行を Paste。解除して表示行・非表示だった行を確認し、Undo で回復を確認。
+5. フィルタで隠れた行だけにある語を検索 / 全置換。解除して変更対象と Undo 回復を確認。これで「表示中だけ / 全データ」の範囲を確定する。
+6. 列幅を手動で変え、小さく Paste して Undo。幅が維持・回復するか確認。見出しドラッグも一度だけ試し、列が実際に移動した場合は保存 CSV の列順を比較。動かない場合は未接続の観測として残す。
+
+これら 6 操作は 4 導線の高リスク仮説を少ない試行で切り分けるためのリスト。C1 の全操作一覧の代わりではない。実 IME、2,000×30 の操作速度、light / dark を含む選択・罫線・フォントの確認は基盤判定の必須残件であり、後回しのまま合格にはできない。
+
+### 基盤と画面設計の切り分け
+
+保存先・未確定入力の commit、source / visible row 対応、選択の復元、フィルタの対象・件数・復旧導線は app / wrapper 側の責務候補。IME・負荷・描画の実測不足から、Glide 固有の限界はまだ確定していない。現状維持も差し替えも前提にせず、基盤判定は保留する。コード・依存・workflow・グリッドは変更していない。
+
+## U1 二つの版の再監査と共通仕様（2026-10-05 03:27 UTC）
+
+追加指示 `c22439b…` による再開。基盤は React / Glide / Tauri のまま、C1 基盤合否は未確定。以下は利用者調査や実画面再現ではなく、実装と独立した読み取りで確かめた経路・回帰試験計画。実装を一担当が所有し、レビューは別担当、実画面・Windows app・実 IME はローカル担当が受け持つ。
+
+| 場面 | 版 | 期待 / 共通仕様 | 現状と根拠 | 重大度 | 修正工程 / 確認担当 | 未確認 |
+|---|---|---|---|---|---|---|
+| 開く・5セル編集・保存・再読込 | 共通 | CSV/TSV の文字列値を保持。JSON/YAML/Markdown の既存変換規則は変えず限界を明示 | src/lib/formats.ts の既存変換が数値型等を文字列へ正規化する。無編集 byte 同一は保証しない | 高 | U2(C2)/U4、dot 回帰 / 手元画面 | 実データ・全形式完全保持 |
+| 同名2タブ / 非同期保存 | ブラウザ / app | Browser は download のみ。App は開始した文書 ID と path の snapshot を保存し、途中のタブ切替・編集で別文書を clean にしない | useFile.ts の保存後 updateMeta は active sheet を更新。Save As は dialog await 後に getRows。Browser handle はタブ共通で名前照合だけ | 最優先 | U2(C2)、deferred I/O 回帰 / 独立 review | OS dialog / 実書込 |
+| 未確定編集中 Ctrl+S | 共通 | 編集を先に確定するか、確定が必要と明示して保存しない。IME変換中の Enter は移動しない | App.tsx の Ctrl+S は編集状態を問わず saveFile。rowsRef は effect 更新 | 最優先 | U2(C2)、editor component と保存経路回帰 | 実 IME / native 操作 |
+| 2×2 右クリック・Copy/Paste/Undo | 共通 | 範囲内右クリックは範囲を維持。非表示行を含めず、変更は Undo 1 回 | rangeFromContextMenu は cell を常に単セル化。Glide の既定 delete はセルごとの edit callback | 高 | U2(C2/C3)、hook / component 回帰 | マウス実画面 |
+| 非連続フィルタ・Paste/Cut/Clear/Fill | 共通 | 表示 source-row mapping にだけ書込。表示行が足りなければ全体を拒否。保存は全行 | Paste は開始行だけ source 変換後に連続書込。source rectangle は隠れた行を含む。仮想行 fallback も危険 | 最優先 | U2(C2/C5)、本番 helper / app 経路回帰 | 実画面の全操作 |
+| フィルタ・検索/全置換・解除 | 共通 | フィルタ中の検索と置換は表示行だけ。ヘッダー保持は useHeaderRow の時だけ。表示/全件数・解除を明示 | useFilter は全行を同扱い。find/replace は sheet.rows 全体。状態バーは総数のみ | 高 | U2(C5)/U3、両 header 設定の回帰 | 実画面 / native |
+| 列幅・列移動・保存・Undo | 共通 | 手動幅を通常編集で保持。列移動は値と幅を移動し保存順も同じ。Undo は値・幅・選択を一緒に回復 | replaceRows が paste/clear の幅を再計算。履歴は rows/selection のみ。onColumnMoved 未接続 | 高 | U2(C4)、hook と保存順回帰 | ドラッグ / 2,000×30 |
+| 編集キー・選択・名前参照 | 共通 | Enter下 / Shift+Enter上 / Tab右 / Shift+Tab左。Alt+Enterでセル内改行。F2既存値 / 文字置換 / Esc取消。Ctrl端は実データ基準 | Glide 標準 overlay は Shift+Enter を確定しない。selectRange が active cell を終点へ強制、名前 invalid が残る | 高 | U2(C2/C3)、editor / selection 回帰 | 実 IME / GUI |
+| 初回画面・重要操作の発見・小画面 | 共通 | Browser download と app direct-save を明示。重要操作はラベル、icon-only は名前・focus tooltip。色以外で状態表示 | Toolbar の icon-only tooltip 不足、AI copy は通常コピーなのに Bot 表示、保存版の違い非表示 | 中 | U3(C6/C7)、DOM / CSS検査 / 手元画面 | テーマ / ズーム / 画面幅 |
+
+修正順: 保存文書 identity と非表示行保護 → 履歴/選択/編集キー → 件数・保存方式・復旧表示 → アイコンと導線。既存 sort は rows 自体を並べ替えるため、保存行順も変わる挙動を維持してヘルプに明示する。filter だけでは保存行を減らさない。設定形式、5形式、既存文字コード、F2/文字置換/Esc/Tab/TSV/Undo の互換を回帰で確認する。
+
+ブラウザ download の開始は保存先への書込完了を証明できない。元ファイルを書き換えず、download 開始と original 未変更を表示し、未保存変更の保護を維持する。App 保存は snapshot を直書きし、取消/失敗は clean にしない。同時保存は多重発火を抑止し、保存中編集・タブ切替後の完了は元文書にだけ反映する。
+
+追加停止条件は DUAL-EDITION-UX に従う。既知の packaging / browser 限界だけでは U2 を止めない。実画面・IME・native・性能をテストで代用して合格にしない。
+
+
+## U2 一次修正と回帰境界（03:40 UTC）
+
+| 困る作業 | 変更 | 得られる結果 | 確認 |
+|---|---|---|---|
+| 保存dialog/書込中のtab切替 | 文書ID/rows/meta snapshot、完了を文書別処理、同時保存抑止 | 別の同名tabへ誤保存/clean化しない | useFile deferred dialog/write、completedSaveMeta、useDocuments の実hook |
+| 編集未確定のCtrl+S | editor commitを登録し同期確定後にsnapshot。composition中は保存を待つ | 未確定値を黙って落とさない | App + FormulaBar + CellTextEditor DOM回帰。実IMEは未実施 |
+| フィルタ中の複数行貼付け/削除 | visible source index単位の書込、overflow全体拒否、範囲処理を一transaction | 隠れた元行を変更せずUndo1回 | production helpers、hook履歴、App配線。実canvas操作は未実施 |
+| 右クリックで処理範囲が変わる | 範囲内右クリックは選択保持、context clipboardとDeleteを共通処理 | 表示範囲と実対象が一致 | 2×2 Copy/Clear/UndoのApp回帰 |
+| 列幅/列順が戻らない | 幅を通常編集で維持、値/幅/選択/範囲を履歴へ、列移動接続 | 保存列順と表示列順を合わせUndoで回復 | column helper、serialization、useHistoryの実hook |
+| キー操作・IME確定が衝突 | Enter下/Shift+Enter上/Tab右/Shift+Tab左/Alt+Enter改行、composition guard | 編集と移動を区別 | DOM synthetic composition回帰。実IMEとは区別 |
+| Browserの保存成功誤認 | download-only、元ファイル未変更/開始通知、dirty保持 | 確認できない保存完了を表示しない | picker非呼出/anchor発火/取消の実hook |
+
+18 files / 146 tests、lint、build は一次修正に対して全 exit 0。最終review・exact-head CI・手元受入は別状態。保存エンコード/native、IME、2,000×30、テーマ画面、小画面は手元チェックリストへ残す。非同期clipboardの対象変化は処理を中止し、対象を選び直す通知を出す。
+
+
+## U3 導線・状態・アイコンの修正（04:06 UTC）
+
+| 困る作業 | 変更 | 得られる結果 | 確認 / 限界 |
+|---|---|---|---|
+| Browserで元ファイルへ保存したと思う | Download/Download as、元ファイル未変更、開始後の注意とdirty保護。AppはSave/Save as | 保存方式を技術選択なしで区別 | Toolbar/StatusBar/useFile/README。DOM回帰、実download完了は手元 |
+| 保存失敗や取消が一瞬で消える | 元文書snapshot、持続する保存結果/失敗/取消表示 | retry前に何が起きたか読める | hook成功/取消/例外/多重発火回帰。native実機未実施 |
+| filterの件数/対象/復帰が不明 | 件数（headerを含むと明示）、列印、全解除、値検索/件数、編集と解除を別項目。検索/置換はvisible scope | 非表示行を誤って対象としない | header ON/OFF、App paste/search/解除/Undo、値検索中choice保持回帰 |
+| アイコンの意味が同じに見える | File/Edit/Rows-and-columns/View grouping、Saveと別名を区別、行/列+追加削除記号、ClearはEraser、AI/Bot表現を通常Clipboardに | 実操作を予測しやすい | 既存lucideのみ、ラベル/name/keyboard tooltip DOM試験 |
+| キーボードで意味/戻り先が分からない | focus時tooltip、tab移動、menu上下/Esc、dialog focus trap/復帰、F2/Ctrl+D/R明示binding | mouseなしで操作名と対象を確認 | DOM/wrapper試験。実canvas/IMEは手元 |
+| narrow windowで操作が消える | min-width固定を外しtoolbar/検索/状態のwrap/scroll、dialog/popover最大寸法、theme変数とfocus輪郭 | 操作を削らず小窓に納める方針 | CSSソース確認のみ。640px/zoom/light/dark/systemは未実施 |
+
+### Native closeの別範囲
+
+`src-tauri/capabilities/default.json` は `core:window:allow-close` を許可し、`allow-destroy` は列挙しない。導入済み `@tauri-apps/api/window.js` の `onCloseRequested`（1632–1639行）はeventがpreventされない時に `this.destroy()` を呼ぶ。generated ACLのwindow defaultにもdestroyはない。したがって当該API listenerをそのまま導入する案は採用しない。試作は公開前に取り除き、capability/Rustは未変更。既存close commandを使うtitle-bar内の確認とbrowser beforeunload警告だけを今回修正した。
+
+OS/menu/Alt+F4での未保存保護は「失敗を実機再現した」という断定ではなく、今回の検証と修正の未達範囲。API+destroy案ならcapability追加を含む明示的な範囲/権限承認が必要。代替設計も含めowner側で検討し、実機検収までnative全終了経路を合格にしない。
+
+### ブランドと対象外ファイル
+
+`src-tauri/icons/icon.png` を実画像で確認。`assets/icon.svg` と `assets/icons/favicon.svg` は2列3行の表と青い選択セルで一貫する。UIは既存lucideの表/操作モチーフを使い、他社ロゴを複製しない。現在の `index.html` にはfavicon linkがない。既存SVGを参照するなら許可外 `index.html` が必要候補。今回はicon/assets/binary生成をしない。
+
+### 検証状態
+
+U3 sourceに19 files/159 tests、lint、build全exit0。U2の146件からkeyboard/unload/tab/filtered App配線と版別UI確認を拡張。実スクリーンショット、実IME、Windows Tauri I/O、2,000×30、theme/narrow-window目視は未実施。`docs/manual-check-excel-like-ux.md` に別担当の代表作業を記した。最終codeとreview SHA、CIの終端結果はPROGRESS/PRへ記録し、C1基盤判定と利用者受入を分ける。

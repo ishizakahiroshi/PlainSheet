@@ -5,6 +5,8 @@ import {
   ClipboardPaste,
   Columns3,
   Filter,
+  FilterX,
+  Eraser,
   Plus,
   Scissors,
   Snowflake,
@@ -40,6 +42,7 @@ type ContextMenuProps = {
   onSortAsc?: () => void;
   onSortDesc?: () => void;
   onFilter?: () => void;
+  onClearFilter?: () => void;
   onFreezeToHere?: () => void;
   onUnfreeze?: () => void;
   filterActive?: boolean;
@@ -70,6 +73,7 @@ export function ContextMenu({
   onSortAsc,
   onSortDesc,
   onFilter,
+  onClearFilter,
   onFreezeToHere,
   onUnfreeze,
   filterActive,
@@ -86,6 +90,7 @@ export function ContextMenu({
       }
       onClose();
     };
+    document.querySelector<HTMLButtonElement>(".contextMenu button:not(:disabled)")?.focus();
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
   }, [state, onClose]);
@@ -104,7 +109,7 @@ export function ContextMenu({
       icon: <ClipboardPaste size={15} aria-hidden="true" />,
       action: onPaste,
     },
-    { label: t("clearCells"), icon: <Trash2 size={15} aria-hidden="true" />, action: onClear },
+    { label: t("clearCells"), icon: <Eraser size={15} aria-hidden="true" />, action: onClear },
     {
       label: t("insertRowAbove"),
       icon: <Plus size={15} aria-hidden="true" />,
@@ -127,7 +132,13 @@ export function ContextMenu({
 
   const columnItems: MenuItem[] = [
     ...(onSortAsc
-      ? [{ label: t("sortAsc"), icon: <ArrowUpAZ size={15} aria-hidden="true" />, action: onSortAsc }]
+      ? [
+          {
+            label: t("sortAsc"),
+            icon: <ArrowUpAZ size={15} aria-hidden="true" />,
+            action: onSortAsc,
+          },
+        ]
       : []),
     ...(onSortDesc
       ? [
@@ -141,9 +152,18 @@ export function ContextMenu({
     ...(onFilter
       ? [
           {
-            label: filterActive ? t("filterClear") : t("filter"),
+            label: filterActive ? t("filterEdit") : t("filter"),
             icon: <Filter size={15} aria-hidden="true" />,
             action: onFilter,
+          },
+        ]
+      : []),
+    ...(filterActive && onClearFilter
+      ? [
+          {
+            label: t("filterClear"),
+            icon: <FilterX size={15} aria-hidden="true" />,
+            action: onClearFilter,
           },
         ]
       : []),
@@ -220,14 +240,42 @@ export function ContextMenu({
     },
   ];
 
-  const items = state.kind === "column" ? columnItems : state.kind === "row" ? rowItems : commonCellItems;
+  const items =
+    state.kind === "column" ? columnItems : state.kind === "row" ? rowItems : commonCellItems;
 
   return (
     <div
       className="contextMenu"
       role="menu"
-      aria-label={state.kind === "column" ? t("columnMenu") : state.kind === "row" ? t("rowMenu") : t("cellMenu")}
-      style={{ left: state.x, top: state.y }}
+      aria-label={
+        state.kind === "column"
+          ? t("columnMenu")
+          : state.kind === "row"
+            ? t("rowMenu")
+            : t("cellMenu")
+      }
+      style={{
+        left: Math.max(8, Math.min(state.x, window.innerWidth - 220)),
+        top: Math.max(8, Math.min(state.y, window.innerHeight - 350)),
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        }
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          event.stopPropagation();
+          const buttons = Array.from(
+            event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"),
+          );
+          const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+          buttons[
+            (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length
+          ]?.focus();
+        }
+      }}
     >
       {items.map((item) => (
         <button

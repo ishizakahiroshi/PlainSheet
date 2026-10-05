@@ -4,6 +4,17 @@ import { cloneRows } from "./useSheet";
 
 export const MAX_HISTORY = 50;
 
+export function cloneHistoryEntry(entry: HistoryEntry): HistoryEntry {
+  return {
+    rows: cloneRows(entry.rows),
+    selection: { ...entry.selection },
+    range: entry.range ? { ...entry.range } : null,
+    colWidths: entry.colWidths ? { ...entry.colWidths } : undefined,
+    selectedRows: entry.selectedRows ? [...entry.selectedRows] : undefined,
+    selectedColumns: entry.selectedColumns ? [...entry.selectedColumns] : undefined,
+  };
+}
+
 export function useHistory() {
   const [undoStack, setUndoStack] = useState<HistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<HistoryEntry[]>([]);
@@ -12,8 +23,12 @@ export function useHistory() {
   const undoRef = useRef<HistoryEntry[]>([]);
   const redoRef = useRef<HistoryEntry[]>([]);
 
-  function record(rows: HistoryEntry["rows"], selection: Selection): void {
-    const next = [...undoRef.current, { rows: cloneRows(rows), selection }].slice(
+  function record(
+    rows: HistoryEntry["rows"],
+    selection: Selection,
+    extra: Pick<HistoryEntry, "range" | "colWidths" | "selectedRows" | "selectedColumns"> = {},
+  ): void {
+    const next = [...undoRef.current, cloneHistoryEntry({ rows, selection, ...extra })].slice(
       Math.max(0, undoRef.current.length + 1 - MAX_HISTORY),
     );
     undoRef.current = next;
@@ -29,15 +44,12 @@ export function useHistory() {
       return null;
     }
     const nextUndo = stack.slice(0, -1);
-    const nextRedo = [
-      ...redoRef.current,
-      { rows: cloneRows(current.rows), selection: current.selection },
-    ];
+    const nextRedo = [...redoRef.current, cloneHistoryEntry(current)];
     undoRef.current = nextUndo;
     redoRef.current = nextRedo;
     setUndoStack(nextUndo);
     setRedoStack(nextRedo);
-    return { rows: cloneRows(previous.rows), selection: previous.selection };
+    return cloneHistoryEntry(previous);
   }
 
   function redo(current: HistoryEntry): HistoryEntry | null {
@@ -47,15 +59,12 @@ export function useHistory() {
       return null;
     }
     const nextRedo = stack.slice(0, -1);
-    const nextUndo = [
-      ...undoRef.current,
-      { rows: cloneRows(current.rows), selection: current.selection },
-    ];
+    const nextUndo = [...undoRef.current, cloneHistoryEntry(current)];
     redoRef.current = nextRedo;
     undoRef.current = nextUndo;
     setRedoStack(nextRedo);
     setUndoStack(nextUndo);
-    return { rows: cloneRows(nextEntry.rows), selection: nextEntry.selection };
+    return cloneHistoryEntry(nextEntry);
   }
 
   function reset(): void {
@@ -67,26 +76,14 @@ export function useHistory() {
 
   function snapshot(): { undo: HistoryEntry[]; redo: HistoryEntry[] } {
     return {
-      undo: undoRef.current.map((entry) => ({
-        rows: cloneRows(entry.rows),
-        selection: { ...entry.selection },
-      })),
-      redo: redoRef.current.map((entry) => ({
-        rows: cloneRows(entry.rows),
-        selection: { ...entry.selection },
-      })),
+      undo: undoRef.current.map(cloneHistoryEntry),
+      redo: redoRef.current.map(cloneHistoryEntry),
     };
   }
 
   function restore(undo: HistoryEntry[], redo: HistoryEntry[]): void {
-    const nextUndo = undo.map((entry) => ({
-      rows: cloneRows(entry.rows),
-      selection: { ...entry.selection },
-    }));
-    const nextRedo = redo.map((entry) => ({
-      rows: cloneRows(entry.rows),
-      selection: { ...entry.selection },
-    }));
+    const nextUndo = undo.map(cloneHistoryEntry);
+    const nextRedo = redo.map(cloneHistoryEntry);
     undoRef.current = nextUndo;
     redoRef.current = nextRedo;
     setUndoStack(nextUndo);

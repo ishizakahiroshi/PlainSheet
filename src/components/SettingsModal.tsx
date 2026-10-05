@@ -1,9 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { useDialogFocus } from "../hooks/useDialogFocus";
 import { t } from "../lib/i18n";
 import type { Encoding, Newline } from "../types/sheet";
 
 type SettingsModalProps = {
   open: boolean;
+  browser?: boolean;
   encoding: Encoding;
   newline: Newline;
   zebra: boolean;
@@ -25,6 +27,7 @@ type SettingsModalProps = {
 
 export function SettingsModal({
   open,
+  browser = false,
   encoding,
   newline,
   zebra,
@@ -43,6 +46,8 @@ export function SettingsModal({
   onUseHeaderRowChange,
   onClose,
 }: SettingsModalProps) {
+  const dialog = useRef<HTMLElement>(null);
+  useDialogFocus(dialog, open);
   useEffect(() => {
     if (!open) {
       return;
@@ -64,6 +69,7 @@ export function SettingsModal({
   return (
     <div className="modalBackdrop" role="presentation" onClick={onClose}>
       <section
+        ref={dialog}
         className="modal modal--wide"
         role="dialog"
         aria-modal="true"
@@ -71,6 +77,7 @@ export function SettingsModal({
         onClick={(event) => event.stopPropagation()}
       >
         <h2 id="settings-title">{t("settingsTitle")}</h2>
+        {browser && <p>{t("browserEncodingHint")}</p>}
         <div className="settingsGrid">
           <label>
             <span>{t("encoding")}</span>
@@ -81,9 +88,15 @@ export function SettingsModal({
             >
               <option value="utf-8">UTF-8</option>
               <option value="utf-8-bom">UTF-8 BOM</option>
-              <option value="cp932">Shift_JIS</option>
-              <option value="euc-jp">EUC-JP</option>
-              <option value="latin-1">Latin-1</option>
+              <option value="cp932" disabled={browser}>
+                Shift_JIS
+              </option>
+              <option value="euc-jp" disabled={browser}>
+                EUC-JP
+              </option>
+              <option value="latin-1" disabled={browser}>
+                Latin-1
+              </option>
             </select>
           </label>
           <label>

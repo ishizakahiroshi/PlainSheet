@@ -34,14 +34,17 @@ export function useSheet() {
       if (rowIndex >= currentRows.length && value === "") {
         return currentRows;
       }
-      const next = ensureSize(currentRows, rowIndex + 1, colIndex + 1);
+      if (rowIndex < 0 || colIndex < 0) return currentRows;
+      const next = cloneRows(currentRows);
+      while (next.length <= rowIndex) next.push([]);
+      while (next[rowIndex].length <= colIndex) next[rowIndex].push("");
       next[rowIndex][colIndex] = value;
-      return trimTrailingEmptyRows(next);
+      return next;
     });
     setMetaState((current) => ({ ...current, dirty: true }));
   }
 
-  function replaceRows(nextRows: CellValue[][], dirty = true, recalcWidths = true): void {
+  function replaceRows(nextRows: CellValue[][], dirty = true, recalcWidths = false): void {
     setRows(nextRows, dirty);
     // History restore keeps the user's manual column widths; only structural
     // edits (insert/delete/paste) re-fit them.
@@ -99,6 +102,14 @@ export function useSheet() {
       return copy;
     });
     replaceRows(next);
+    setColWidths((current) =>
+      Object.fromEntries(
+        Object.entries(current).map(([col, width]) => [
+          Number(col) >= target ? Number(col) + n : Number(col),
+          width,
+        ]),
+      ),
+    );
   }
 
   function insertColumn(index: number): void {
@@ -172,10 +183,14 @@ export function useSheet() {
     if (!changed) {
       return;
     }
-    replaceRows(trimTrailingEmptyRows(next));
+    replaceRows(next);
   }
 
-  function pasteGrid(startRow: number, startCol: number, grid: CellValue[][]): Exclude<Range, null> {
+  function pasteGrid(
+    startRow: number,
+    startCol: number,
+    grid: CellValue[][],
+  ): Exclude<Range, null> {
     const rowCount = Math.max(grid.length, 1);
     // reduce instead of Math.max(...spread): a huge pasted grid would exceed
     // the engine's call-argument limit and throw mid-paste.
@@ -186,7 +201,7 @@ export function useSheet() {
         next[startRow + rowOffset][startCol + colOffset] = grid[rowOffset][colOffset];
       }
     }
-    replaceRows(trimTrailingEmptyRows(next));
+    replaceRows(next);
     return {
       startRow,
       startCol,
@@ -240,6 +255,7 @@ export function useSheet() {
     autoFitColumns,
     autoFitColumn,
     setColumnWidth,
+    setColWidths,
     restoreState,
   };
 }

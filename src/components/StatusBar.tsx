@@ -1,5 +1,6 @@
-import { t } from "../lib/i18n";
+import { selectionIndexes } from "../lib/gridOperations";
 import { normalizeRange } from "../lib/clipboard";
+import { t } from "../lib/i18n";
 import type { CellValue, Range, Selection, SheetMeta } from "../types/sheet";
 
 type StatusBarProps = {
@@ -9,6 +10,10 @@ type StatusBarProps = {
   range: Range;
   meta: SheetMeta;
   zoom?: number;
+  visibleSourceRows?: number[] | null;
+  browser?: boolean;
+  selectedRowIndexes?: readonly number[];
+  selectedColumnIndexes?: readonly number[];
 };
 
 export type SelectionStats = {
@@ -20,7 +25,18 @@ export type SelectionStats = {
   min: string | null;
 };
 
-export function StatusBar({ rows, columnCount, selection, range, meta, zoom }: StatusBarProps) {
+export function StatusBar({
+  rows,
+  columnCount,
+  selection,
+  range,
+  meta,
+  zoom,
+  visibleSourceRows = null,
+  browser = false,
+  selectedRowIndexes = [],
+  selectedColumnIndexes = [],
+}: StatusBarProps) {
   const selectedRange =
     range ??
     ({
@@ -29,20 +45,47 @@ export function StatusBar({ rows, columnCount, selection, range, meta, zoom }: S
       endRow: selection.row,
       endCol: selection.col,
     } as const);
+  const indexes = selectionIndexes(
+    rows,
+    selectedRange,
+    visibleSourceRows,
+    selectedRowIndexes,
+    selectedColumnIndexes,
+  );
   const normalized = normalizeRange(selectedRange);
-  const selectedRows = normalized.endRow - normalized.startRow + 1;
-  const selectedCols = normalized.endCol - normalized.startCol + 1;
-  const stats = calculateSelectionStats(rows, selectedRange);
+  // Empty editable cells still occupy a selected area; statistics alone are data-bounded.
+  const selectedRows =
+    selectedRowIndexes.length > 0
+      ? selectedRowIndexes.filter((row) => !visibleSourceRows || visibleSourceRows.includes(row))
+          .length
+      : visibleSourceRows
+        ? indexes.rows.length
+        : normalized.endRow - normalized.startRow + 1;
+  const selectedCols =
+    selectedColumnIndexes.length > 0
+      ? selectedColumnIndexes.length
+      : normalized.endCol - normalized.startCol + 1;
+  const stats = calculateSelectionStats(
+    rows,
+    selectedRange,
+    selectedRowIndexes,
+    selectedColumnIndexes,
+    visibleSourceRows,
+  );
   const zoomPercent = zoom !== undefined ? Math.round(zoom * 100) : null;
 
   return (
     <footer className="statusBar">
-      <span>{t("rowsCols", { rows: rows.length, cols: columnCount })}</span>
+      <span>
+        {visibleSourceRows
+          ? t("filteredCount", { visible: visibleSourceRows.length, total: rows.length })
+          : t("rowsCols", { rows: rows.length, cols: columnCount })}
+      </span>
       <span>{t("selectedRange", { rows: selectedRows, cols: selectedCols })}</span>
       <span>{meta.encoding.toUpperCase()}</span>
       <span>{meta.newline}</span>
-      <span>{t("csvLabel", { delimiter: meta.delimiter === "\t" ? "TSV" : meta.delimiter })}</span>
-      <span>{meta.dirty ? t("unsaved") : t("saved")}</span>
+      <span>{t("formatLabel", { format: (meta.format ?? "csv").toUpperCase() })}</span>
+      <span>{meta.dirty ? t("unsaved") : browser ? t("originalUnchanged") : t("saved")}</span>
       {zoomPercent !== null ? <span>{t("zoomLabel", { percent: zoomPercent })}</span> : null}
       <span className="statusBar__stats">{formatStats(stats)}</span>
     </footer>
@@ -52,12 +95,15 @@ export function StatusBar({ rows, columnCount, selection, range, meta, zoom }: S
 export function calculateSelectionStats(
   rows: CellValue[][],
   range: Exclude<Range, null>,
+  selectedRows: readonly number[] = [],
+  selectedColumns: readonly number[] = [],
+  visible: readonly number[] | null = null,
 ): SelectionStats | null {
-  const normalized = normalizeRange(range);
+  const indexes = selectionIndexes(rows, range, visible, selectedRows, selectedColumns);
   const numbers: number[] = [];
   let count = 0;
-  for (let rowIndex = normalized.startRow; rowIndex <= normalized.endRow; rowIndex += 1) {
-    for (let colIndex = normalized.startCol; colIndex <= normalized.endCol; colIndex += 1) {
+  for (const rowIndex of indexes.rows) {
+    for (const colIndex of indexes.columns) {
       const value = rows[rowIndex]?.[colIndex] ?? "";
       if (value.trim() !== "") {
         count += 1;
