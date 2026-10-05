@@ -195,3 +195,25 @@ Vite の起動時間と test 実行時間は上の基準の測定値ではない
 ### 基盤と画面設計の切り分け
 
 保存先・未確定入力の commit、source / visible row 対応、選択の復元、フィルタの対象・件数・復旧導線は app / wrapper 側の責務候補。IME・負荷・描画の実測不足から、Glide 固有の限界はまだ確定していない。現状維持も差し替えも前提にせず、基盤判定は保留する。コード・依存・workflow・グリッドは変更していない。
+
+## U1 二つの版の再監査と共通仕様（2026-10-05 03:27 UTC）
+
+追加指示 `c22439b…` による再開。基盤は React / Glide / Tauri のまま、C1 基盤合否は未確定。以下は利用者調査や実画面再現ではなく、実装と独立した読み取りで確かめた経路・回帰試験計画。実装を一担当が所有し、レビューは別担当、実画面・Windows app・実 IME はローカル担当が受け持つ。
+
+| 場面 | 版 | 期待 / 共通仕様 | 現状と根拠 | 重大度 | 修正工程 / 確認担当 | 未確認 |
+|---|---|---|---|---|---|---|
+| 開く・5セル編集・保存・再読込 | 共通 | CSV/TSV の文字列値を保持。JSON/YAML/Markdown の既存変換規則は変えず限界を明示 | src/lib/formats.ts の既存変換が数値型等を文字列へ正規化する。無編集 byte 同一は保証しない | 高 | U2(C2)/U4、dot 回帰 / 手元画面 | 実データ・全形式完全保持 |
+| 同名2タブ / 非同期保存 | ブラウザ / app | Browser は download のみ。App は開始した文書 ID と path の snapshot を保存し、途中のタブ切替・編集で別文書を clean にしない | useFile.ts の保存後 updateMeta は active sheet を更新。Save As は dialog await 後に getRows。Browser handle はタブ共通で名前照合だけ | 最優先 | U2(C2)、deferred I/O 回帰 / 独立 review | OS dialog / 実書込 |
+| 未確定編集中 Ctrl+S | 共通 | 編集を先に確定するか、確定が必要と明示して保存しない。IME変換中の Enter は移動しない | App.tsx の Ctrl+S は編集状態を問わず saveFile。rowsRef は effect 更新 | 最優先 | U2(C2)、editor component と保存経路回帰 | 実 IME / native 操作 |
+| 2×2 右クリック・Copy/Paste/Undo | 共通 | 範囲内右クリックは範囲を維持。非表示行を含めず、変更は Undo 1 回 | rangeFromContextMenu は cell を常に単セル化。Glide の既定 delete はセルごとの edit callback | 高 | U2(C2/C3)、hook / component 回帰 | マウス実画面 |
+| 非連続フィルタ・Paste/Cut/Clear/Fill | 共通 | 表示 source-row mapping にだけ書込。表示行が足りなければ全体を拒否。保存は全行 | Paste は開始行だけ source 変換後に連続書込。source rectangle は隠れた行を含む。仮想行 fallback も危険 | 最優先 | U2(C2/C5)、本番 helper / app 経路回帰 | 実画面の全操作 |
+| フィルタ・検索/全置換・解除 | 共通 | フィルタ中の検索と置換は表示行だけ。ヘッダー保持は useHeaderRow の時だけ。表示/全件数・解除を明示 | useFilter は全行を同扱い。find/replace は sheet.rows 全体。状態バーは総数のみ | 高 | U2(C5)/U3、両 header 設定の回帰 | 実画面 / native |
+| 列幅・列移動・保存・Undo | 共通 | 手動幅を通常編集で保持。列移動は値と幅を移動し保存順も同じ。Undo は値・幅・選択を一緒に回復 | replaceRows が paste/clear の幅を再計算。履歴は rows/selection のみ。onColumnMoved 未接続 | 高 | U2(C4)、hook と保存順回帰 | ドラッグ / 2,000×30 |
+| 編集キー・選択・名前参照 | 共通 | Enter下 / Shift+Enter上 / Tab右 / Shift+Tab左。Alt+Enterでセル内改行。F2既存値 / 文字置換 / Esc取消。Ctrl端は実データ基準 | Glide 標準 overlay は Shift+Enter を確定しない。selectRange が active cell を終点へ強制、名前 invalid が残る | 高 | U2(C2/C3)、editor / selection 回帰 | 実 IME / GUI |
+| 初回画面・重要操作の発見・小画面 | 共通 | Browser download と app direct-save を明示。重要操作はラベル、icon-only は名前・focus tooltip。色以外で状態表示 | Toolbar の icon-only tooltip 不足、AI copy は通常コピーなのに Bot 表示、保存版の違い非表示 | 中 | U3(C6/C7)、DOM / CSS検査 / 手元画面 | テーマ / ズーム / 画面幅 |
+
+修正順: 保存文書 identity と非表示行保護 → 履歴/選択/編集キー → 件数・保存方式・復旧表示 → アイコンと導線。既存 sort は rows 自体を並べ替えるため、保存行順も変わる挙動を維持してヘルプに明示する。filter だけでは保存行を減らさない。設定形式、5形式、既存文字コード、F2/文字置換/Esc/Tab/TSV/Undo の互換を回帰で確認する。
+
+ブラウザ download の開始は保存先への書込完了を証明できない。元ファイルを書き換えず、download 開始と original 未変更を表示し、未保存変更の保護を維持する。App 保存は snapshot を直書きし、取消/失敗は clean にしない。同時保存は多重発火を抑止し、保存中編集・タブ切替後の完了は元文書にだけ反映する。
+
+追加停止条件は DUAL-EDITION-UX に従う。既知の packaging / browser 限界だけでは U2 を止めない。実画面・IME・native・性能をテストで代用して合格にしない。
