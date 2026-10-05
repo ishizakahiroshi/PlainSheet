@@ -32,6 +32,9 @@ type GlideSheetProps = {
   colWidths: ColumnWidthMap;
   selection: { row: number; col: number };
   range: Range;
+  /** Source-coordinate header axes, controlled together with the cell range. */
+  selectedRowIndexes?: readonly number[];
+  selectedColumnIndexes?: readonly number[];
   searchHits: Set<string>;
   activeSearchHit: string | null;
   scrollNonce: number;
@@ -117,6 +120,8 @@ export function GlideSheet({
   colWidths,
   selection,
   range,
+  selectedRowIndexes,
+  selectedColumnIndexes,
   searchHits,
   activeSearchHit,
   scrollNonce,
@@ -396,6 +401,19 @@ export function GlideSheet({
     }
     const col = Math.min(Math.max(0, selection.col), maxCol);
     const row = Math.min(Math.max(0, toVisibleRow(selection.row)), maxRow);
+    if (selectedRowIndexes?.length || selectedColumnIndexes?.length) {
+      let headerRows = CompactSelection.empty();
+      let headerColumns = CompactSelection.empty();
+      for (const sourceRow of selectedRowIndexes ?? []) {
+        const visibleRow = toVisibleRow(sourceRow);
+        if (visibleRow >= 0 && visibleRow <= maxRow) headerRows = headerRows.add(visibleRow);
+      }
+      for (const column of selectedColumnIndexes ?? []) {
+        if (column >= 0 && column <= maxCol) headerColumns = headerColumns.add(column);
+      }
+      setGridSelection({ rows: headerRows, columns: headerColumns });
+      return;
+    }
     let rect: { x: number; y: number; width: number; height: number };
     if (
       rangeStartRow !== undefined &&
@@ -422,7 +440,12 @@ export function GlideSheet({
     setGridSelection((previous) => {
       // App echoes the bounding range, but header selections can contain gaps.
       // Keep the original markers so an echo does not visually select those gaps.
-      if (!previous.current && rangeStartRow !== undefined) {
+      if (
+        selectedRowIndexes === undefined &&
+        selectedColumnIndexes === undefined &&
+        !previous.current &&
+        rangeStartRow !== undefined
+      ) {
         const selectedRows = compactToIndexes(previous.rows);
         const selectedCols = compactToIndexes(previous.columns);
         const rowEcho =
@@ -456,6 +479,8 @@ export function GlideSheet({
     columnCount,
     toVisibleRow,
     rowSourceIndexes,
+    selectedRowIndexes,
+    selectedColumnIndexes,
   ]);
 
   const handleFillPattern = useCallback(

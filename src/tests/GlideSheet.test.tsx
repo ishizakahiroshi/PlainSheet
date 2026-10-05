@@ -50,6 +50,34 @@ function setup(overrides: Partial<ComponentProps<typeof GlideSheet>> = {}) {
 }
 
 describe("production Glide wrapper with the canvas renderer mocked", () => {
+  it("restores exact controlled header markers and removes them when App switches to a rectangle", () => {
+    const range = { startRow: 0, startCol: 0, endRow: 2, endCol: 2 };
+    const { editor, view, props } = setup({
+      rows: [["a", "b", "c"], ["d"], ["e"]],
+      columnCount: 3,
+      range,
+      selectedRowIndexes: [0, 2],
+      selectedColumnIndexes: [],
+    });
+    expect([...editor().gridSelection!.rows]).toEqual([0, 2]);
+    view.rerender(<GlideSheet {...props} selectedRowIndexes={[]} selectedColumnIndexes={[]} />);
+    expect([...editor().gridSelection!.rows]).toEqual([]);
+    expect(editor().gridSelection!.current?.range).toEqual({ x: 0, y: 0, width: 3, height: 3 });
+    view.rerender(<GlideSheet {...props} selectedRowIndexes={[]} selectedColumnIndexes={[0, 2]} />);
+    expect([...editor().gridSelection!.columns]).toEqual([0, 2]);
+    expect(editor().gridSelection!.current).toBeUndefined();
+  });
+  it("restores source header axes through a filtered view without selecting hidden markers", () => {
+    const { editor } = setup({
+      rows: [["a"], ["b"]],
+      columnCount: 1,
+      rowSourceIndexes: [1, 3],
+      selection: { row: 1, col: 0 },
+      selectedRowIndexes: [1, 2, 3],
+      selectedColumnIndexes: [],
+    });
+    expect([...editor().gridSelection!.rows]).toEqual([0, 1]);
+  });
   it("synchronizes the application selection when search focuses a hit", () => {
     const rowsSelected = vi.fn();
     const columnsSelected = vi.fn();

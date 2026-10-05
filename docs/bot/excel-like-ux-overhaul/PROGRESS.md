@@ -194,3 +194,11 @@
 - 同じ統合sourceの `bun run test`: 22 files / 182 tests、exit0。`bun run lint`、`bun run build`: exit0。既存Rollup PURE/chunk警告あり。canvas/native/IMEの模擬回帰と実機確認を混同しない。
 - 作業担当とは別のローカルreviewerが19ファイルの全差分を確認し、header-context/filter-resetの最終修正まで確認。未解決のcode blockerなし。reviewer自身が書いたGlide/検索/IME差分は統合担当が別途全行確認。別製品AIの全PR差分レビューはpush後にdotsへ依頼する。
 - このcommitのSHAをcode/review対象として、PRのコメントへ同SHAのCIと最終Windows生成物の証跡を追記する。CI全成功・実機受入・配布可能はまだ宣言しない。
+
+### 2026-10-05 04:49 UTC — dots の追加レビュー指摘を修正
+
+- 中間候補 `e326df77d059f9fa9ae575768498b2987375583b` の [CI run 37264182445](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37264182445) は3OS成功。182 tests、native build、staging成功を確認。Linuxの既知exit2は解消。公開PRのUpload・非tagのReleaseはskipで、配布は行っていない。
+- dots別担当が全PR/増分レビューで追加P1/P2を再現: 不連続選択→Clear→Undo→Clearで隙間のセルを消す経路と、状態バーが隙間の値まで集計する経路。canvas描画だけを模擬した結合再現であり実画面ではない。中間候補のCI成功から受入完了を推定しない。
+- 履歴でexact行列配列を保存・deep clone・復元。AppからGlideのマーカーを制御し、選択解除も反映する。StatusBarの寸法・統計はexact選択と表示行の交差から計算する。
+- 実App + 実Glide wrapperを組み合わせ、DataEditor描画だけを模擬した新しい結合回帰を追加。行/列のClear→Undo→Clear→Undo→Redoでマーカーとgap値を確認し、1/100/2の不連続行集計が3・2×3になることを確認。
+- 新候補sourceのローカル `bun run test`: 24 files / 189 tests、exit0。lint / Web buildもexit0。Windows候補再buildと、新SHAのCI・dots再レビューを別途確定する。実IME/native I/O/OS操作、visual/performanceは未検収。

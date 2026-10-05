@@ -441,8 +441,18 @@ export default function App() {
     history.record(sheet.rows, selectionState.selection, {
       range: selectionState.range,
       colWidths: sheet.colWidths,
+      selectedRows,
+      selectedColumns,
     });
-  }, [history, selectionState.selection, selectionState.range, sheet.rows, sheet.colWidths]);
+  }, [
+    history,
+    selectionState.selection,
+    selectionState.range,
+    sheet.rows,
+    sheet.colWidths,
+    selectedRows,
+    selectedColumns,
+  ]);
 
   const replaceRowsFromHistory = (entry: HistoryEntry) => {
     sheet.restoreState(
@@ -451,8 +461,8 @@ export default function App() {
       entry.colWidths ?? sheet.colWidths,
     );
     selectionState.setSelectionRange(entry.selection, entry.range ?? null);
-    setSelectedRows([]);
-    setSelectedColumns([]);
+    setSelectedRows(entry.selectedRows ?? []);
+    setSelectedColumns(entry.selectedColumns ?? []);
   };
 
   const commitCell = (row: number, col: number, value: string, reselect: boolean) => {
@@ -767,6 +777,8 @@ export default function App() {
       selection: selectionState.selection,
       range: selectionState.range,
       colWidths: sheet.colWidths,
+      selectedRows,
+      selectedColumns,
     });
     if (previous) {
       replaceRowsFromHistory(previous);
@@ -779,6 +791,8 @@ export default function App() {
       selection: selectionState.selection,
       range: selectionState.range,
       colWidths: sheet.colWidths,
+      selectedRows,
+      selectedColumns,
     });
     if (next) {
       replaceRowsFromHistory(next);
@@ -1068,6 +1082,8 @@ export default function App() {
             }}
           />
           <GlideSheet
+            selectedRowIndexes={selectedRows}
+            selectedColumnIndexes={selectedColumns}
             key={`grid-${workspace.activeId}`}
             rows={displayRows}
             rowSourceIndexes={rowSourceIndexes}
@@ -1165,6 +1181,8 @@ export default function App() {
         />
       )}
       <StatusBar
+        selectedRowIndexes={selectedRows}
+        selectedColumnIndexes={selectedColumns}
         visibleSourceRows={rowSourceIndexes}
         browser={!isTauriRuntime()}
         rows={sheet.rows}

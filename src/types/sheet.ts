@@ -39,6 +39,8 @@ export type HistoryEntry = {
   selection: Selection;
   range?: Range;
   colWidths?: ColumnWidthMap;
+  selectedRows?: number[];
+  selectedColumns?: number[];
 };
 
 export type ColumnWidthMap = Record<number, number>;

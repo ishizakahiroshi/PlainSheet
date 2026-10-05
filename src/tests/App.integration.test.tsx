@@ -194,6 +194,15 @@ describe("production App wiring with a mocked canvas surface", () => {
       ["g", "h", "i"],
       ["j", "k", "l"],
     ]);
+    expect(grid().selectedRowIndexes).toEqual([0, 2]);
+    expect(grid().selectedColumnIndexes).toEqual([0, 2]);
+    act(() => grid().onClear?.());
+    expect(grid().rows).toEqual([
+      ["", "b", ""],
+      ["d", "e", "f"],
+      ["", "h", ""],
+      ["j", "k", "l"],
+    ]);
   });
   it("cancels asynchronous cut when exact selected rows change but their bounding range does not", async () => {
     await load();

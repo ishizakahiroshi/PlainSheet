@@ -1,6 +1,5 @@
-import { selectedSourceRows } from "../lib/gridOperations";
+import { selectionIndexes } from "../lib/gridOperations";
 import { t } from "../lib/i18n";
-import { normalizeRange } from "../lib/clipboard";
 import type { CellValue, Range, Selection, SheetMeta } from "../types/sheet";
 
 type StatusBarProps = {
@@ -12,6 +11,8 @@ type StatusBarProps = {
   zoom?: number;
   visibleSourceRows?: number[] | null;
   browser?: boolean;
+  selectedRowIndexes?: readonly number[];
+  selectedColumnIndexes?: readonly number[];
 };
 
 export type SelectionStats = {
@@ -32,6 +33,8 @@ export function StatusBar({
   zoom,
   visibleSourceRows = null,
   browser = false,
+  selectedRowIndexes = [],
+  selectedColumnIndexes = [],
 }: StatusBarProps) {
   const selectedRange =
     range ??
@@ -41,15 +44,21 @@ export function StatusBar({
       endRow: selection.row,
       endCol: selection.col,
     } as const);
-  const normalized = normalizeRange(selectedRange);
-  const selectedRows = visibleSourceRows
-    ? selectedSourceRows(rows.length, selectedRange, visibleSourceRows).length
-    : normalized.endRow - normalized.startRow + 1;
-  const selectedCols = normalized.endCol - normalized.startCol + 1;
-  const visibleSet = visibleSourceRows ? new Set(visibleSourceRows) : null;
-  const stats = calculateSelectionStats(
-    visibleSet ? rows.map((row, i) => (visibleSet.has(i) ? row : [])) : rows,
+  const indexes = selectionIndexes(
+    rows,
     selectedRange,
+    visibleSourceRows,
+    selectedRowIndexes,
+    selectedColumnIndexes,
+  );
+  const selectedRows = indexes.rows.length;
+  const selectedCols = indexes.columns.length;
+  const stats = calculateSelectionStats(
+    rows,
+    selectedRange,
+    selectedRowIndexes,
+    selectedColumnIndexes,
+    visibleSourceRows,
   );
   const zoomPercent = zoom !== undefined ? Math.round(zoom * 100) : null;
 
@@ -74,20 +83,15 @@ export function StatusBar({
 export function calculateSelectionStats(
   rows: CellValue[][],
   range: Exclude<Range, null>,
+  selectedRows: readonly number[] = [],
+  selectedColumns: readonly number[] = [],
+  visible: readonly number[] | null = null,
 ): SelectionStats | null {
-  const normalized = normalizeRange(range);
+  const indexes = selectionIndexes(rows, range, visible, selectedRows, selectedColumns);
   const numbers: number[] = [];
   let count = 0;
-  for (
-    let rowIndex = normalized.startRow;
-    rowIndex <= normalized.endRow && rowIndex < rows.length;
-    rowIndex += 1
-  ) {
-    for (
-      let colIndex = normalized.startCol;
-      colIndex <= normalized.endCol && colIndex < (rows[rowIndex]?.length ?? 0);
-      colIndex += 1
-    ) {
+  for (const rowIndex of indexes.rows) {
+    for (const colIndex of indexes.columns) {
       const value = rows[rowIndex]?.[colIndex] ?? "";
       if (value.trim() !== "") {
         count += 1;
