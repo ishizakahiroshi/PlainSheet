@@ -164,6 +164,11 @@ type StreamParseState = {
   quotedCell: boolean;
   justClosedQuote: boolean;
   endedWithRowBreak: boolean;
+  // A "\r" that landed on the last character of a chunk: the matching "\n"
+  // may arrive as the first character of the next chunk, so the row break is
+  // already emitted and the "\n" must be swallowed then instead of producing
+  // a phantom empty row.
+  pendingCR: boolean;
 };
 
 function createStreamState(): StreamParseState {
@@ -175,6 +180,7 @@ function createStreamState(): StreamParseState {
     quotedCell: false,
     justClosedQuote: false,
     endedWithRowBreak: false,
+    pendingCR: false,
   };
 }
 
@@ -204,7 +210,15 @@ export function feedCsvChunk(
     source = source.slice(1);
   }
 
-  for (let index = 0; index < source.length; index += 1) {
+  let startIndex = 0;
+  if (state.pendingCR) {
+    state.pendingCR = false;
+    if (source.charCodeAt(0) === 0x0a) {
+      startIndex = 1;
+    }
+  }
+
+  for (let index = startIndex; index < source.length; index += 1) {
     const char = source[index]!;
     const next = source[index + 1];
     state.endedWithRowBreak = false;
@@ -236,8 +250,13 @@ export function feedCsvChunk(
     }
 
     if (char === "\r" || char === "\n") {
-      if (char === "\r" && next === "\n") {
-        index += 1;
+      if (char === "\r") {
+        if (next === "\n") {
+          index += 1;
+        } else if (next === undefined) {
+          // The "\n" (if any) arrives with the next chunk; swallow it there.
+          state.pendingCR = true;
+        }
       }
       pushStreamRow(state);
       continue;

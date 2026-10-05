@@ -12,8 +12,10 @@ on:
     tags:
       - "v*"
 
+# Workflow-wide default is least privilege; the release job below elevates to
+# contents: write only where it publishes.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -31,11 +33,14 @@ jobs:
             os: macos
 
     steps:
-      - uses: actions/checkout@v4
+      # Pinned by commit SHA (tags are mutable). SHAs retrieved 2026-08-25.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
 
       - name: Install Linux dependencies
         if: matrix.os == 'linux'
@@ -122,7 +127,7 @@ jobs:
 
       - name: Upload build artifacts
         if: github.event.repository.private || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: plainsheet-${{ matrix.platform }}
           path: out/**
@@ -133,9 +138,16 @@ jobs:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    # Only the publishing job may write; a concurrency group also prevents two
+    # tag runs from racing `gh release upload --clobber` on the same release.
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist/assets
           merge-multiple: true

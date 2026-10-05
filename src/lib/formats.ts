@@ -162,7 +162,9 @@ function serializeMarkdownTable(
     return "";
   }
 
-  const columnCount = Math.max(...rows.map((row) => row.length), 1);
+  // reduce instead of Math.max(...spread): a ~125K-row sheet would exceed the
+  // engine's call-argument limit and throw on save.
+  const columnCount = rows.reduce((max, row) => Math.max(max, row.length), 1);
   const normalized = rows.map((row) =>
     Array.from({ length: columnCount }, (_, index) => escapeMarkdownCell(row[index] ?? "")),
   );

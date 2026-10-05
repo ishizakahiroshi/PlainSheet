@@ -74,7 +74,19 @@ fn decode_bytes(bytes: &[u8]) -> Result<DecodedText, String> {
         });
     }
 
+    // UTF-16 is not a supported save encoding; guessing at it below silently
+    // produced mojibake (BOM'd) or invisible NULs (BOM-less), so fail loudly.
+    if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]) {
+        return Err("UTF-16 files are not supported".to_string());
+    }
+
     if let Ok(content) = std::str::from_utf8(bytes) {
+        // NUL bytes in valid UTF-8 almost always mean UTF-16 without a BOM or
+        // binary data mislabeled with a table extension; either way the grid
+        // would show invisible garbage that Save would then write back.
+        if content.contains('\0') {
+            return Err("file contains NUL bytes".to_string());
+        }
         return Ok(DecodedText {
             content: content.to_string(),
             encoding: "utf-8".to_string(),

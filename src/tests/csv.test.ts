@@ -165,4 +165,41 @@ describe("stream CSV parse", () => {
     }
     expect(await parseCsvStream(chunks())).toEqual(parseCsv(text));
   });
+
+  it("does not insert a phantom row when a CRLF straddles a chunk boundary", async () => {
+    async function* chunks() {
+      yield "a\r";
+      yield "\nb";
+    }
+    const rows = await parseCsvStream(chunks());
+    expect(rows).toEqual(parseCsv("a\r\nb"));
+  });
+
+  it("treats a trailing CR at end of stream as a single row break", async () => {
+    async function* chunks() {
+      yield "a\r";
+    }
+    const rows = await parseCsvStream(chunks());
+    expect(rows).toEqual([["a"]]);
+  });
+
+  it("keeps two CRs across a chunk boundary as two breaks", async () => {
+    async function* chunks() {
+      yield "a\r";
+      yield "\rb";
+    }
+    const rows = await parseCsvStream(chunks());
+    expect(rows).toEqual([["a"], [""], ["b"]]);
+  });
+
+  it("matches parseCsv for CRLF content split at every offset", async () => {
+    const text = "id,name\r\n1,Doe\r\n2,Bob\r\n";
+    for (let cut = 1; cut < text.length; cut += 1) {
+      async function* chunks() {
+        yield text.slice(0, cut);
+        yield text.slice(cut);
+      }
+      expect(await parseCsvStream(chunks()), `cut at ${cut}`).toEqual(parseCsv(text));
+    }
+  });
 });

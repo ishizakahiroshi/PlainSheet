@@ -480,6 +480,10 @@ async function loadBrowserFile(
     }
 
     content = await file.text();
+    // Mirror the Rust decoder and the CSV parser: drop a leading UTF-8 BOM so
+    // BOM'd JSON/YAML load identically in the browser build instead of dying
+    // inside JSON.parse.
+    content = content.replace(/^\uFEFF/, "");
     const delimiter = format === "tsv" ? "\t" : detectDelimiter(content);
     rows = parseTableText(content, format, delimiter);
     onAdopt?.();

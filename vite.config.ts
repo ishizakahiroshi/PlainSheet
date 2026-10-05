@@ -13,7 +13,10 @@ export default defineConfig({
     // needs the server to listen on other interfaces. Do not add --host.
     host: "127.0.0.1",
     port: 1420,
-    strictPort: false,
+    // Fail fast when 1420 is taken. With strictPort disabled Vite silently
+    // moves to another port while Tauri still loads http://localhost:1420,
+    // so whatever else listens there renders inside the app's main window.
+    strictPort: true,
   },
   envPrefix: ["VITE_", "TAURI_"],
   build: {

@@ -177,7 +177,9 @@ export function useSheet() {
 
   function pasteGrid(startRow: number, startCol: number, grid: CellValue[][]): Exclude<Range, null> {
     const rowCount = Math.max(grid.length, 1);
-    const colCount = Math.max(...grid.map((row) => row.length), 1);
+    // reduce instead of Math.max(...spread): a huge pasted grid would exceed
+    // the engine's call-argument limit and throw mid-paste.
+    const colCount = grid.reduce((max, row) => Math.max(max, row.length), 1);
     const next = ensureSize(rows, startRow + rowCount, startCol + colCount);
     for (let rowOffset = 0; rowOffset < grid.length; rowOffset += 1) {
       for (let colOffset = 0; colOffset < grid[rowOffset].length; colOffset += 1) {

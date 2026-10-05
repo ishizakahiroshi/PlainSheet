@@ -51,6 +51,12 @@ export const BUFFER_COLS = 8;
 export const MIN_GRID_ROWS = 100000;
 export const MIN_GRID_COLS = 702; // up to column "ZZ"
 
+// Hard ceilings for parsed cell references (Excel parity). Without them a name
+// box jump like A99999999 flows into ensureSize and tries to materialize the
+// backing arrays for every skipped row.
+export const MAX_GRID_ROWS = 1048576;
+export const MAX_GRID_COLS = 16384;
+
 export const DEFAULT_META: SheetMeta = {
   encoding: "utf-8",
   newline: "LF",

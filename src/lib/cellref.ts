@@ -1,4 +1,5 @@
 import { columnName } from "./columns";
+import { MAX_GRID_COLS, MAX_GRID_ROWS } from "../types/sheet";
 
 export type CellRef =
   | { kind: "cell"; row: number; col: number }
@@ -13,6 +14,10 @@ export function columnIndexFromName(name: string): number | null {
   let value = 0;
   for (let i = 0; i < upper.length; i += 1) {
     value = value * 26 + (upper.charCodeAt(i) - 64);
+    // Bail out before Number precision loss on absurd names like ZZZZZZZZZZZ.
+    if (value > MAX_GRID_COLS) {
+      return null;
+    }
   }
   return value - 1;
 }
@@ -24,7 +29,7 @@ function parseSingleRef(text: string): { row: number; col: number } | null {
   }
   const col = columnIndexFromName(match[1]);
   const row = Number(match[2]) - 1;
-  if (col === null || !Number.isInteger(row) || row < 0) {
+  if (col === null || !Number.isInteger(row) || row < 0 || row >= MAX_GRID_ROWS) {
     return null;
   }
   return { row, col };

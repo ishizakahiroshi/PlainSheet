@@ -14,6 +14,12 @@ describe("columnIndexFromName", () => {
     expect(columnIndexFromName("1A")).toBeNull();
     expect(columnIndexFromName("A1")).toBeNull();
   });
+
+  it("accepts the Excel column ceiling and rejects anything beyond", () => {
+    expect(columnIndexFromName("XFD")).toBe(16383);
+    expect(columnIndexFromName("XFE")).toBeNull();
+    expect(columnIndexFromName("ZZZZZZZZZZZZ")).toBeNull();
+  });
 });
 
 describe("parseCellRef", () => {
@@ -37,5 +43,12 @@ describe("parseCellRef", () => {
     expect(parseCellRef("1A")).toBeNull();
     expect(parseCellRef("A1:B2:C3")).toBeNull();
     expect(parseCellRef("hello")).toBeNull();
+  });
+
+  it("rejects references beyond the grid ceilings instead of allocating them", () => {
+    expect(parseCellRef("A1048576")).toEqual({ kind: "cell", row: 1048575, col: 0 });
+    expect(parseCellRef("A1048577")).toBeNull();
+    expect(parseCellRef("A99999999")).toBeNull();
+    expect(parseCellRef("XFE1")).toBeNull();
   });
 });
