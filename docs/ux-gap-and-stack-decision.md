@@ -217,3 +217,18 @@ Vite の起動時間と test 実行時間は上の基準の測定値ではない
 ブラウザ download の開始は保存先への書込完了を証明できない。元ファイルを書き換えず、download 開始と original 未変更を表示し、未保存変更の保護を維持する。App 保存は snapshot を直書きし、取消/失敗は clean にしない。同時保存は多重発火を抑止し、保存中編集・タブ切替後の完了は元文書にだけ反映する。
 
 追加停止条件は DUAL-EDITION-UX に従う。既知の packaging / browser 限界だけでは U2 を止めない。実画面・IME・native・性能をテストで代用して合格にしない。
+
+
+## U2 一次修正と回帰境界（03:40 UTC）
+
+| 困る作業 | 変更 | 得られる結果 | 確認 |
+|---|---|---|---|
+| 保存dialog/書込中のtab切替 | 文書ID/rows/meta snapshot、完了を文書別処理、同時保存抑止 | 別の同名tabへ誤保存/clean化しない | useFile deferred dialog/write、completedSaveMeta、useDocuments の実hook |
+| 編集未確定のCtrl+S | editor commitを登録し同期確定後にsnapshot。composition中は保存を待つ | 未確定値を黙って落とさない | App + FormulaBar + CellTextEditor DOM回帰。実IMEは未実施 |
+| フィルタ中の複数行貼付け/削除 | visible source index単位の書込、overflow全体拒否、範囲処理を一transaction | 隠れた元行を変更せずUndo1回 | production helpers、hook履歴、App配線。実canvas操作は未実施 |
+| 右クリックで処理範囲が変わる | 範囲内右クリックは選択保持、context clipboardとDeleteを共通処理 | 表示範囲と実対象が一致 | 2×2 Copy/Clear/UndoのApp回帰 |
+| 列幅/列順が戻らない | 幅を通常編集で維持、値/幅/選択/範囲を履歴へ、列移動接続 | 保存列順と表示列順を合わせUndoで回復 | column helper、serialization、useHistoryの実hook |
+| キー操作・IME確定が衝突 | Enter下/Shift+Enter上/Tab右/Shift+Tab左/Alt+Enter改行、composition guard | 編集と移動を区別 | DOM synthetic composition回帰。実IMEとは区別 |
+| Browserの保存成功誤認 | download-only、元ファイル未変更/開始通知、dirty保持 | 確認できない保存完了を表示しない | picker非呼出/anchor発火/取消の実hook |
+
+18 files / 146 tests、lint、build は一次修正に対して全 exit 0。最終review・exact-head CI・手元受入は別状態。保存エンコード/native、IME、2,000×30、テーマ画面、小画面は手元チェックリストへ残す。非同期clipboardの対象変化は処理を中止し、対象を選び直す通知を出す。

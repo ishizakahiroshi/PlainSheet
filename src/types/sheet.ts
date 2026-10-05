@@ -9,14 +9,12 @@ export type Selection = {
   col: number;
 };
 
-export type Range =
-  | {
-      startRow: number;
-      startCol: number;
-      endRow: number;
-      endCol: number;
-    }
-  | null;
+export type Range = {
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
+} | null;
 
 export type Encoding = "utf-8" | "utf-8-bom" | "cp932" | "euc-jp" | "latin-1";
 export type Newline = "LF" | "CRLF";
@@ -39,6 +37,8 @@ export type SheetMeta = {
 export type HistoryEntry = {
   rows: CellValue[][];
   selection: Selection;
+  range?: Range;
+  colWidths?: ColumnWidthMap;
 };
 
 export type ColumnWidthMap = Record<number, number>;

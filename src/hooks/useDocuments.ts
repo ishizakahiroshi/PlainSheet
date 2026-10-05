@@ -9,6 +9,8 @@ import type {
 } from "../types/sheet";
 import { DEFAULT_META, EMPTY_SELECTION } from "../types/sheet";
 import { calculateColumnWidths } from "../lib/columnWidth";
+import { cloneHistoryEntry } from "./useHistory";
+import { completedSaveMeta, type SaveCompletion } from "../lib/saveState";
 import { cloneRows } from "./useSheet";
 
 export type DocumentSnapshot = {
@@ -35,10 +37,7 @@ function createId(): string {
 }
 
 function cloneHistory(entries: HistoryEntry[]): HistoryEntry[] {
-  return entries.map((entry) => ({
-    rows: cloneRows(entry.rows),
-    selection: { ...entry.selection },
-  }));
+  return entries.map(cloneHistoryEntry);
 }
 
 export function createDocument(
@@ -96,7 +95,11 @@ export function useDocuments(initial?: DocumentSnapshot) {
   }, []);
 
   const openDocument = useCallback(
-    (rows: CellValue[][], meta: Partial<SheetMeta>, live?: ActiveDocumentLive): DocumentSnapshot => {
+    (
+      rows: CellValue[][],
+      meta: Partial<SheetMeta>,
+      live?: ActiveDocumentLive,
+    ): DocumentSnapshot => {
       if (live) {
         captureActive(live);
       }
@@ -106,7 +109,7 @@ export function useDocuments(initial?: DocumentSnapshot) {
         );
         if (match) {
           setActiveId(match.id);
-          return match;
+          return match.id === activeIdRef.current && live ? { ...match, ...live } : match;
         }
       }
       const doc = createDocument(rows, meta);
@@ -130,43 +133,40 @@ export function useDocuments(initial?: DocumentSnapshot) {
     [captureActive],
   );
 
-  const switchTo = useCallback(
-    (id: string, live?: ActiveDocumentLive): DocumentSnapshot | null => {
-      if (id === activeIdRef.current) {
-        return documentsRef.current.find((doc) => doc.id === id) ?? null;
-      }
-      // Snapshot the live active doc before switching so we read the pre-capture list.
-      let frozen: DocumentSnapshot[] | null = null;
-      if (live) {
-        frozen = documentsRef.current.map((doc) =>
-          doc.id === activeIdRef.current
-            ? {
-                ...doc,
-                rows: cloneRows(live.rows),
-                meta: { ...live.meta },
-                colWidths: { ...live.colWidths },
-                selection: { ...live.selection },
-                range: live.range ? { ...live.range } : null,
-                history: {
-                  undo: cloneHistory(live.history.undo),
-                  redo: cloneHistory(live.history.redo),
-                },
-              }
-            : doc,
-        );
-        setDocuments(frozen);
-        documentsRef.current = frozen;
-      }
-      const source = frozen ?? documentsRef.current;
-      const target = source.find((doc) => doc.id === id);
-      if (!target) {
-        return null;
-      }
-      setActiveId(id);
-      return target;
-    },
-    [],
-  );
+  const switchTo = useCallback((id: string, live?: ActiveDocumentLive): DocumentSnapshot | null => {
+    if (id === activeIdRef.current) {
+      return documentsRef.current.find((doc) => doc.id === id) ?? null;
+    }
+    // Snapshot the live active doc before switching so we read the pre-capture list.
+    let frozen: DocumentSnapshot[] | null = null;
+    if (live) {
+      frozen = documentsRef.current.map((doc) =>
+        doc.id === activeIdRef.current
+          ? {
+              ...doc,
+              rows: cloneRows(live.rows),
+              meta: { ...live.meta },
+              colWidths: { ...live.colWidths },
+              selection: { ...live.selection },
+              range: live.range ? { ...live.range } : null,
+              history: {
+                undo: cloneHistory(live.history.undo),
+                redo: cloneHistory(live.history.redo),
+              },
+            }
+          : doc,
+      );
+      setDocuments(frozen);
+      documentsRef.current = frozen;
+    }
+    const source = frozen ?? documentsRef.current;
+    const target = source.find((doc) => doc.id === id);
+    if (!target) {
+      return null;
+    }
+    setActiveId(id);
+    return target;
+  }, []);
 
   const closeDocument = useCallback(
     (id: string, live?: ActiveDocumentLive): { closed: boolean; next: DocumentSnapshot | null } => {
@@ -232,7 +232,18 @@ export function useDocuments(initial?: DocumentSnapshot) {
     );
   }, []);
 
+  const completeSave = useCallback((completion: SaveCompletion) => {
+    setDocuments((current) =>
+      current.map((doc) =>
+        doc.id === completion.snapshot.documentId
+          ? { ...doc, meta: completedSaveMeta(doc.rows, doc.meta, completion) }
+          : doc,
+      ),
+    );
+  }, []);
+
   return {
+    completeSave,
     documents,
     activeId: active.id,
     active,

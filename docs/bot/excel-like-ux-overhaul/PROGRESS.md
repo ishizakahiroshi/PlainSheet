@@ -3,7 +3,7 @@
 - repo: `ishizakahiroshi/PlainSheet`
 - base: `develop`
 - 作業 branch: `bot/20261005-004-excel-like-ux`
-- 更新日時: 2026-10-05 03:23 UTC
+- 更新日時: 2026-10-05 03:40 UTC
 - 受付済み。同一案件番号の既存 PR / 作業 branch との衝突なし（開始時検索）。
 - 固定指示 `README.md` と `REVIEW.md` を SHA `037c29ea4649efc81acc8f28824dca3df08e7450` で全読了。
 - C1 から直列実施。各工程は PR CI と別担当レビューで判定。merge / release はしない。
@@ -15,8 +15,8 @@
 | 工程 | 旧工程対応 | 担当 | 現在の状態 / 次の確認 |
 |---|---|---|---|
 | U1 再監査 / 共通仕様 | C1 追補 | dot | ソース監査・共通仕様を記録。画面監査は未実施 |
-| U2 データ / 保存修正 | C2〜C5 | dot（単一実装担当） | 進行中（03:27 UTC開始）。非表示行・保存先・Undo・選択を優先 |
-| U3 アイコン / 導線 / 状態 | C6〜C7 | dot | U2 後。既存 lucide / CSS / 翻訳のみ |
+| U2 データ / 保存修正 | C2〜C5 | dot（単一実装担当） | 一次修正・回帰146件PASS。最終独立レビュー/U4待ち |
+| U3 アイコン / 導線 / 状態 | C6〜C7 | dot | 進行中（03:40 UTC開始）。既存 lucide / CSS / 翻訳のみ |
 | U4 検証 / 独立レビュー | C8 | dot + 別担当 reviewer | code SHA と review SHA を分け、最終差分を確認 |
 | U5 同じ PR へ提出 / 検収 | C8 / 手元受入 | dot / ローカル担当 | ブラウザ・Windows Tauri・実 IME・2,000×30・テーマは未実施を分離 |
 
@@ -153,3 +153,14 @@
 ### 2026-10-05 03:27 UTC — U1 ソース再監査 / U2 開始
 
 監査へ版別の期待・現状・根拠・重大度・旧C対応・確認担当・未確認を追記。別担当も非同期保存/clipboard の文書混同、filter source rectangle、history の幅欠落を重点確認。`273c622…` と同じ source で test/lint/build 全 exit 0（110 tests）、既存 PURE / chunk 警告。これから本番経路を通す回帰を追加して原因を修正する。GUI/実 IME は未確認。
+
+### 2026-10-05 03:40 UTC — U2 一次修正 / 静的検証 / U3 開始
+
+- 変更: src の保存 snapshot と文書別完了処理、browser download-only、編集確定境界、visible-row操作、選択保持、列移動と幅履歴、回帰テスト。Rust / workflow / 依存 / lockfile 差分なし。
+- 保存開始前に文書 ID / rows / meta を固定。別タブへの完了誤反映を防ぎ、保存中の編集を未保存として保持。browser は元ファイルを書換えず、download 開始後も未保存保護を維持する。
+- Filter Paste は表示行 mapping だけを更新し、行不足は全体拒否。Cut/Clear/Delete、bulk edit / fill と clipboard 待機中の tab / 範囲変更も保護。header は useHeaderRow の場合だけ保持。検索/置換を表示行に限定。
+- Enter / Shift+Enter / Tab / Shift+Tab、Alt+Enter、Esc と composition guard を共通化。Ctrl端/全選択は実データ基準。右クリック範囲保持、名前 invalid 復帰、列移動の値/幅/保存順とUndoを実装。
+- 同じ source の `bun run test`: exit 0、18 files / 146 tests。`bun run lint`: exit 0。`bun run build`: exit 0（既存 PURE / chunk 警告）。hook/component/App配線の試験であり、canvas renderer と native I/O は mock。実画面・実 IME・実 native の合格ではない。
+- 開発中に翻訳キー不足、テストの型注釈、CSV末尾改行の期待値を修正し、上記全検証を再実行。既存serializerの末尾改行規則は変更していない。
+- `273c622…` / run `37259331229` と `939b7ab…` / run `37259516185`: 両方 completed/failure、Windows/macOS success、Linux lowercase binary 生成後に同 selector/exit2。raw log 照合済み。追加指示どおり既知梱包問題と今回src検証を分離する。
+- 独立 reviewer は作業と別担当で危険経路を点検中。このU2 checkpointの code SHA、後続U3修正後の review SHA、exact-head CI は最終提出で明示する。U3は版表示、件数、clear、tooltip、keyboard、small-window、help を整える。

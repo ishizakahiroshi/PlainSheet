@@ -13,12 +13,15 @@ import {
   type Item,
   type Rectangle,
   type Theme,
+  type ProvideEditorComponent,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
 import { BUFFER_COLS, BUFFER_ROWS, MIN_GRID_COLS, MIN_GRID_ROWS } from "../types/sheet";
 import type { CellValue, ColumnWidthMap, Range } from "../types/sheet";
 import type { ContextMenuKind } from "./ContextMenu";
 import { columnName } from "../lib/columns";
+import { CellTextEditor, type RegisterEditorCommit } from "./CellTextEditor";
+import { dataEdge } from "../lib/gridOperations";
 import { fillSeries } from "../lib/autofill";
 
 type GlideSheetProps = {
@@ -46,8 +49,20 @@ type GlideSheetProps = {
   onPasteGrid: (startRow: number, startCol: number, grid: CellValue[][]) => void;
   onFill?: (updates: { row: number; col: number; value: string }[]) => void;
   onCut?: () => void;
-  onOpenContextMenu: (kind: ContextMenuKind, row: number, col: number, x: number, y: number) => void;
-  onHeaderMenuClick?: (col: number, bounds: { x: number; y: number; width: number; height: number }) => void;
+  onClear?: () => void;
+  onColumnMove?: (from: number, to: number) => void;
+  registerCommit?: RegisterEditorCommit;
+  onOpenContextMenu: (
+    kind: ContextMenuKind,
+    row: number,
+    col: number,
+    x: number,
+    y: number,
+  ) => void;
+  onHeaderMenuClick?: (
+    col: number,
+    bounds: { x: number; y: number; width: number; height: number },
+  ) => void;
 };
 
 const LIGHT_THEME: Partial<Theme> = {
@@ -119,6 +134,9 @@ export function GlideSheet({
   onPasteGrid,
   onFill,
   onCut,
+  onClear,
+  onColumnMove,
+  registerCommit,
   onOpenContextMenu,
   onHeaderMenuClick,
 }: GlideSheetProps) {
@@ -136,7 +154,7 @@ export function GlideSheet({
     if (map && visibleRow >= 0 && visibleRow < map.length) {
       return map[visibleRow]!;
     }
-    return visibleRow;
+    return map ? -1 : visibleRow;
   }, []);
 
   const toVisibleRow = useCallback((sourceRow: number): number => {
@@ -145,7 +163,7 @@ export function GlideSheet({
       return sourceRow;
     }
     const index = map.indexOf(sourceRow);
-    return index >= 0 ? index : sourceRow;
+    return index;
   }, []);
 
   const columns = useMemo<GridColumn[]>(
@@ -159,7 +177,9 @@ export function GlideSheet({
     [columnCount, colWidths],
   );
 
-  const rowCount = Math.max(rows.length + BUFFER_ROWS, MIN_GRID_ROWS);
+  const rowCount = rowSourceIndexes
+    ? Math.max(rows.length, 1)
+    : Math.max(rows.length + BUFFER_ROWS, MIN_GRID_ROWS);
   const rowHeight = Math.round(28 * zoom);
   const headerHeight = Math.round(32 * zoom);
   const fontSize = Math.max(11, Math.round(13 * zoom));
@@ -176,7 +196,7 @@ export function GlideSheet({
 
   const getRowThemeOverride = useCallback(
     (row: number): Partial<Theme> | undefined => {
-      if (headerHighlight && row === 0) {
+      if (headerHighlight && toSourceRow(row) === 0) {
         return {
           bgCell: theme === "dark" ? "#2d3844" : "#dde5ee",
           textDark: theme === "dark" ? "#edf2f7" : "#18212f",
@@ -189,7 +209,7 @@ export function GlideSheet({
       }
       return undefined;
     },
-    [headerHighlight, zebra, theme],
+    [headerHighlight, zebra, theme, toSourceRow],
   );
 
   const getCellContent = useCallback(
@@ -200,10 +220,11 @@ export function GlideSheet({
         kind: GridCellKind.Text,
         data,
         displayData: data,
-        allowOverlay: true,
+        allowOverlay: toSourceRow(row) >= 0,
+        readonly: toSourceRow(row) < 0,
       };
     },
-    [rows],
+    [rows, toSourceRow],
   );
 
   const onCellEdited = useCallback(
@@ -211,14 +232,16 @@ export function GlideSheet({
       if (newValue.kind !== GridCellKind.Text) {
         return;
       }
-      onEdit(toSourceRow(cell[1]), cell[0], newValue.data);
+      const sourceRow = toSourceRow(cell[1]);
+      if (sourceRow >= 0) onEdit(sourceRow, cell[0], newValue.data);
     },
     [onEdit, toSourceRow],
   );
 
   const handleGridSelectionChange = useCallback(
     (next: GridSelection) => {
-      const maxRow = Math.max(0, rows.length + BUFFER_ROWS - 1);
+      if (rowSourceIndexes && rows.length === 0) return;
+      const maxRow = Math.max(0, rows.length + (rowSourceIndexes ? 0 : BUFFER_ROWS) - 1);
       const maxCol = Math.max(0, columnCount + BUFFER_COLS - 1);
 
       const selectedRows = compactToIndexes(next.rows).filter((index) => index <= maxRow);
@@ -253,11 +276,11 @@ export function GlideSheet({
           const first = selectedCols[0]!;
           const last = selectedCols[selectedCols.length - 1]!;
           onSelectionChange(
-            { row: 0, col: first },
+            { row: toSourceRow(0), col: first },
             {
-              startRow: 0,
+              startRow: toSourceRow(0),
               startCol: first,
-              endRow: Math.max(0, rows.length - 1),
+              endRow: toSourceRow(Math.max(0, rows.length - 1)),
               endCol: last,
             },
           );
@@ -271,7 +294,11 @@ export function GlideSheet({
         setGridSelection({
           columns: CompactSelection.empty(),
           rows: CompactSelection.empty(),
-          current: { cell: [col, row], range: { x: col, y: row, width: 1, height: 1 }, rangeStack: [] },
+          current: {
+            cell: [col, row],
+            range: { x: col, y: row, width: 1, height: 1 },
+            rangeStack: [],
+          },
         });
         onSelectionChange({ row: toSourceRow(row), col }, null);
         return;
@@ -289,7 +316,15 @@ export function GlideSheet({
             };
       onSelectionChange({ row: toSourceRow(row), col }, rangeValue);
     },
-    [onSelectionChange, onRowsSelected, onColumnsSelected, rows.length, columnCount, toSourceRow],
+    [
+      onSelectionChange,
+      onRowsSelected,
+      onColumnsSelected,
+      rows.length,
+      columnCount,
+      toSourceRow,
+      rowSourceIndexes,
+    ],
   );
 
   const highlightRegions = useMemo<Highlight[]>(() => {
@@ -316,6 +351,7 @@ export function GlideSheet({
     }
     const [sourceRow, col] = hit.split(":").map(Number);
     const row = toVisibleRow(sourceRow);
+    if (row < 0) return;
     setGridSelection({
       columns: CompactSelection.empty(),
       rows: CompactSelection.empty(),
@@ -329,6 +365,7 @@ export function GlideSheet({
       return;
     }
     const row = toVisibleRow(focusCell.row);
+    if (row < 0) return;
     const col = focusCell.col;
     setGridSelection({
       columns: CompactSelection.empty(),
@@ -343,8 +380,12 @@ export function GlideSheet({
   const rangeEndRow = range?.endRow;
   const rangeEndCol = range?.endCol;
   useEffect(() => {
-    const maxRow = Math.max(0, rows.length + BUFFER_ROWS - 1);
+    const maxRow = Math.max(0, rows.length + (rowSourceIndexes ? 0 : BUFFER_ROWS) - 1);
     const maxCol = Math.max(0, columnCount + BUFFER_COLS - 1);
+    if (toVisibleRow(selection.row) < 0) {
+      setGridSelection(EMPTY_SELECTION);
+      return;
+    }
     const col = Math.min(Math.max(0, selection.col), maxCol);
     const row = Math.min(Math.max(0, toVisibleRow(selection.row)), maxRow);
     let rect: { x: number; y: number; width: number; height: number };
@@ -356,7 +397,10 @@ export function GlideSheet({
     ) {
       const startRow = Math.min(toVisibleRow(rangeStartRow), toVisibleRow(rangeEndRow));
       const startCol = Math.min(rangeStartCol, rangeEndCol);
-      const endRow = Math.min(Math.max(toVisibleRow(rangeStartRow), toVisibleRow(rangeEndRow)), maxRow);
+      const endRow = Math.min(
+        Math.max(toVisibleRow(rangeStartRow), toVisibleRow(rangeEndRow)),
+        maxRow,
+      );
       const endCol = Math.min(Math.max(rangeStartCol, rangeEndCol), maxCol);
       rect = {
         x: startCol,
@@ -382,6 +426,7 @@ export function GlideSheet({
     rows.length,
     columnCount,
     toVisibleRow,
+    rowSourceIndexes,
   ]);
 
   const handleFillPattern = useCallback(
@@ -452,25 +497,76 @@ export function GlideSheet({
 
   const handleKeyDownCapture = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
-      if (!onCut) {
-        return;
-      }
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "x") {
-        return;
-      }
       const target = event.target;
       if (
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
         (target instanceof HTMLElement && target.isContentEditable)
-      ) {
+      )
+        return;
+      const mod = event.ctrlKey || event.metaKey;
+      if (mod && event.key.toLowerCase() === "x" && onCut) {
+        event.preventDefault();
+        event.stopPropagation();
+        onCut();
         return;
       }
+      const current = gridSelection.current;
+      if (!current || rows.length === 0 || columnCount === 0) return;
+      if (mod && event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        event.stopPropagation();
+        handleGridSelectionChange({
+          ...EMPTY_SELECTION,
+          current: {
+            cell: [0, 0],
+            range: { x: 0, y: 0, width: columnCount, height: rows.length },
+            rangeStack: [],
+          },
+        });
+        return;
+      }
+      const directions: Record<string, { row: number; col: number }> = {
+        ArrowUp: { row: -1, col: 0 },
+        ArrowDown: { row: 1, col: 0 },
+        ArrowLeft: { row: 0, col: -1 },
+        ArrowRight: { row: 0, col: 1 },
+      };
+      if (!(mod && directions[event.key]) && event.key !== "Home" && event.key !== "End") return;
       event.preventDefault();
       event.stopPropagation();
-      onCut();
+      const anchor = { row: current.cell[1], col: current.cell[0] };
+      const rect = current.range;
+      const start = event.shiftKey
+        ? {
+            row: anchor.row === rect.y ? rect.y + rect.height - 1 : rect.y,
+            col: anchor.col === rect.x ? rect.x + rect.width - 1 : rect.x,
+          }
+        : anchor;
+      const next =
+        event.key === "Home"
+          ? { row: mod ? 0 : start.row, col: 0 }
+          : event.key === "End"
+            ? { row: mod ? rows.length - 1 : start.row, col: columnCount - 1 }
+            : dataEdge(rows, start, directions[event.key]);
+      const cell: Item = event.shiftKey ? current.cell : [next.col, next.row];
+      const range = event.shiftKey
+        ? {
+            x: Math.min(anchor.col, next.col),
+            y: Math.min(anchor.row, next.row),
+            width: Math.abs(anchor.col - next.col) + 1,
+            height: Math.abs(anchor.row - next.row) + 1,
+          }
+        : { x: next.col, y: next.row, width: 1, height: 1 };
+      handleGridSelectionChange({ ...EMPTY_SELECTION, current: { cell, range, rangeStack: [] } });
+      ref.current?.scrollTo(next.col, next.row);
     },
-    [onCut],
+    [onCut, gridSelection, rows, columnCount, handleGridSelectionChange],
+  );
+
+  const textEditor = useCallback<ProvideEditorComponent<GridCell>>(
+    (props) => <CellTextEditor {...props} registerCommit={registerCommit} />,
+    [registerCommit],
   );
 
   const rowMarkerTheme = useMemo(
@@ -493,6 +589,30 @@ export function GlideSheet({
         getRowThemeOverride={getRowThemeOverride}
         getCellContent={getCellContent}
         onCellEdited={onCellEdited}
+        provideEditor={(cell) =>
+          cell.kind === GridCellKind.Text ? { editor: textEditor } : undefined
+        }
+        onCellsEdited={(items) => {
+          const updates = items.flatMap((item) =>
+            item.value.kind === GridCellKind.Text && toSourceRow(item.location[1]) >= 0
+              ? [
+                  {
+                    row: toSourceRow(item.location[1]),
+                    col: item.location[0],
+                    value: item.value.data,
+                  },
+                ]
+              : [],
+          );
+          if (onFill) onFill(updates);
+          else updates.forEach((update) => onEdit(update.row, update.col, update.value));
+          return true;
+        }}
+        onDelete={() => {
+          onClear?.();
+          return false;
+        }}
+        onColumnMoved={onColumnMove}
         getCellsForSelection={true}
         fillHandle={true}
         onFillPattern={handleFillPattern}
@@ -512,7 +632,7 @@ export function GlideSheet({
         onColumnResize={(_column, newSize, colIndex) => onColumnResize(colIndex, newSize)}
         onCellContextMenu={(cell, event) => {
           event.preventDefault();
-          const maxRow = Math.max(0, rows.length + BUFFER_ROWS - 1);
+          const maxRow = Math.max(0, rows.length + (rowSourceIndexes ? 0 : BUFFER_ROWS) - 1);
           const maxCol = Math.max(0, columnCount + BUFFER_COLS - 1);
           const visibleRow = Math.min(cell[1], maxRow);
           onOpenContextMenu(
@@ -525,7 +645,13 @@ export function GlideSheet({
         }}
         onHeaderContextMenu={(colIndex, event) => {
           event.preventDefault();
-          onOpenContextMenu("column", 0, colIndex, event.bounds.x, event.bounds.y + event.bounds.height);
+          onOpenContextMenu(
+            "column",
+            0,
+            colIndex,
+            event.bounds.x,
+            event.bounds.y + event.bounds.height,
+          );
         }}
         onHeaderMenuClick={(colIndex, bounds: Rectangle) => {
           onHeaderMenuClick?.(colIndex, bounds);

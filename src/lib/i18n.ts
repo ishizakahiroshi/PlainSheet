@@ -2,6 +2,35 @@ export type Locale = "ja" | "en";
 
 const dictionaries = {
   ja: {
+    finishComposition: "日本語の変換を確定してから保存してください",
+    clipboardContextChanged: "対象が変わったため書き込みを中止しました。範囲を選び直してください",
+    filteredPasteOverflow: "表示行が足りません。貼り付けは行わず、非表示行を保護しました",
+    hiddenReference: "指定セルは非表示です。フィルタを解除してください",
+    invalidReference: "参照が無効です。元の範囲へ戻しました",
+    saving: "保存中…",
+    download: "ダウンロード",
+    downloadAs: "別名でダウンロード",
+    saveCancelled: "保存をキャンセルしました。変更は未保存のままです",
+    browserDownloadNotice:
+      "{name} のダウンロードを開始しました。元ファイルは変更されません。保存されたコピーを確認してください",
+    savedFileNotice: "{name} に保存しました。保存中の追加変更があれば未保存のままです",
+    browserEdition: "ブラウザ版 · ダウンロード保存",
+    appEdition: "アプリ版 · ファイルへ保存",
+    browserSaveHint: "端末内で編集し、コピーをダウンロードします。元ファイルには上書きしません。",
+    appSaveHint: "編集した内容を開いたファイルへ保存します。別名保存で保存先を変えられます。",
+    originalUnchanged: "元ファイル未変更",
+    filteredCount: "表示 {visible} / 全 {total} 行",
+    filterActiveLabel: "絞り込み中",
+    searchVisibleScope: "検索・置換の対象: 表示中の行のみ",
+    searchAllScope: "検索・置換の対象: 全データ",
+    filterValuesSearch: "値を検索",
+    editNavigationHelp:
+      "Enter: 下 / Shift+Enter: 上 / Tab: 右 / Shift+Tab: 左 / Alt+Enter: セル内改行 / Esc: 取消",
+    sortSaveHelp:
+      "並べ替え・列移動は保存順も変更します。フィルタは表示だけを絞り、保存は全行です。Undoで戻せます。",
+    browserEncodingHint:
+      "ブラウザの出力はUTF-8です。その他の文字コードはアプリ版を使ってください。",
+    copyPlainText: "表をコピー",
     appName: "PlainSheet",
     appSubtitle: "CSVをそのまま編集するローカルファーストな表エディタ",
     newFile: "新規",
@@ -77,8 +106,10 @@ const dictionaries = {
     toastSearchDone: "{count} 件置換しました",
     toastClipboardUnavailable: "クリップボードを利用できません",
     toastSaveFailed: "保存に失敗しました",
-    toastSaveFailedEncoding: "選択中の文字コードで表現できない文字があります。UTF-8 で保存してください",
-    toastFilterBlocksRowOps: "フィルタ中は行・列の挿入/削除ができません。フィルタを解除してください",
+    toastSaveFailedEncoding:
+      "選択中の文字コードで表現できない文字があります。UTF-8 で保存してください",
+    toastFilterBlocksRowOps:
+      "フィルタ中は行・列の挿入/削除ができません。フィルタを解除してください",
     toastLoading: "読み込み中… {percent}%",
     confirmUnsaved: "未保存の変更があります。破棄して続行しますか？",
     confirmCloseTab: "未保存の変更があります。このタブを閉じますか？",
@@ -130,6 +161,36 @@ const dictionaries = {
     windowClose: "閉じる",
   },
   en: {
+    finishComposition: "Finish the input composition before saving.",
+    clipboardContextChanged: "The target changed. Nothing was written. Select the range again.",
+    filteredPasteOverflow:
+      "Not enough visible rows. Nothing was pasted; hidden rows are protected.",
+    hiddenReference: "That cell is hidden. Clear the filter first.",
+    invalidReference: "Invalid reference. Restored the current range.",
+    saving: "Saving…",
+    download: "Download",
+    downloadAs: "Download as",
+    saveCancelled: "Save cancelled. Changes remain unsaved.",
+    browserDownloadNotice:
+      "Download started: {name}. The original file is unchanged. Check the downloaded copy.",
+    savedFileNotice: "Saved to {name}. Any edits made during saving remain unsaved.",
+    browserEdition: "Browser · download a copy",
+    appEdition: "App · save to file",
+    browserSaveHint:
+      "Edit on this device and download a copy. The original file is never overwritten.",
+    appSaveHint: "Save edits to the opened file. Use Save as to choose another destination.",
+    originalUnchanged: "Original unchanged",
+    filteredCount: "Showing {visible} of {total} rows",
+    filterActiveLabel: "Filtered",
+    searchVisibleScope: "Search and replace: visible rows only",
+    searchAllScope: "Search and replace: all data",
+    filterValuesSearch: "Search values",
+    editNavigationHelp:
+      "Enter: down / Shift+Enter: up / Tab: right / Shift+Tab: left / Alt+Enter: line break / Esc: cancel",
+    sortSaveHelp:
+      "Sorting and moving columns change the saved order. Filtering changes only the view; saving includes all rows. Undo restores changes.",
+    browserEncodingHint: "Browser downloads use UTF-8. Use the app for other encodings.",
+    copyPlainText: "Copy table",
     appName: "PlainSheet",
     appSubtitle: "A local-first table editor that keeps CSV as plain text",
     newFile: "New",

@@ -28,8 +28,14 @@ export function useSelection() {
   function selectRange(nextRange: Exclude<Range, null>): void {
     const normalized = normalizeRange(nextRange);
     setAnchor({ row: normalized.startRow, col: normalized.startCol });
-    setSelectionState({ row: normalized.endRow, col: normalized.endCol });
+    setSelectionState({ row: normalized.startRow, col: normalized.startCol });
     setRange(normalized);
+  }
+
+  function setSelectionRange(next: Selection, nextRange: Range): void {
+    setSelectionState(next);
+    setAnchor(next);
+    setRange(nextRange);
   }
 
   function selectRow(row: number, colCount: number): void {
@@ -73,6 +79,7 @@ export function useSelection() {
     range,
     selectCell,
     selectRange,
+    setSelectionRange,
     selectRow,
     selectColumn,
     moveSelection,

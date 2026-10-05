@@ -1,3 +1,13 @@
+import { flushSync } from "react-dom";
+import type { RegisterEditorCommit } from "./components/CellTextEditor";
+import {
+  clearVisibleRange,
+  pasteIntoView,
+  selectedSourceRows,
+  moveColumn,
+  sameRows,
+} from "./lib/gridOperations";
+import { completedSaveMeta } from "./lib/saveState";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ContextMenu, type ContextMenuKind, type ContextMenuState } from "./components/ContextMenu";
@@ -18,21 +28,16 @@ import { parseClipboardText, rangeTsv, normalizeRange } from "./lib/clipboard";
 import { setLocale, t } from "./lib/i18n";
 import { parseCellRef } from "./lib/cellref";
 import { sortRows, type SortDirection } from "./lib/sort";
-import {
-  MAX_ZOOM,
-  MIN_ZOOM,
-  pushRecentFile,
-  ZOOM_STEP,
-} from "./lib/settings";
+import { MAX_ZOOM, MIN_ZOOM, pushRecentFile, ZOOM_STEP } from "./lib/settings";
 import { useDocuments, type ActiveDocumentLive, type DocumentSnapshot } from "./hooks/useDocuments";
-import { useFile } from "./hooks/useFile";
+import { isTauriRuntime, useFile } from "./hooks/useFile";
 import { useFilter } from "./hooks/useFilter";
 import { useHistory } from "./hooks/useHistory";
 import { useSelection, selectionToRange } from "./hooks/useSelection";
 import { useSettings } from "./hooks/useSettings";
 import { cloneRows } from "./hooks/useSheet";
 import { useSheet } from "./hooks/useSheet";
-import type { CellValue, Range, Selection, SheetMeta } from "./types/sheet";
+import type { CellValue, Range, Selection, SheetMeta, HistoryEntry } from "./types/sheet";
 
 type PendingConfirm = {
   action: () => void;
@@ -78,9 +83,20 @@ export default function App() {
   const selectionRef = useRef(selectionState.selection);
   const rangeRef = useRef(selectionState.range);
 
-  useEffect(() => {
-    rowsRef.current = sheet.rows;
-  }, [sheet.rows]);
+  const activeDocumentIdRef = useRef(workspace.activeId);
+  activeDocumentIdRef.current = workspace.activeId;
+  rowsRef.current = sheet.rows;
+  metaRef.current = sheet.meta;
+  colWidthsRef.current = sheet.colWidths;
+  selectionRef.current = selectionState.selection;
+  rangeRef.current = selectionState.range;
+  const editorCommitRef = useRef<(() => boolean) | null>(null);
+  const registerEditorCommit: RegisterEditorCommit = useCallback((commit) => {
+    editorCommitRef.current = commit;
+    return () => {
+      if (editorCommitRef.current === commit) editorCommitRef.current = null;
+    };
+  }, []);
   useEffect(() => {
     metaRef.current = sheet.meta;
     document.title = `${sheet.meta.dirty ? "● " : ""}${sheet.meta.fileName ?? t("appName")}`;
@@ -100,7 +116,9 @@ export default function App() {
   }, [settings.locale]);
 
   const [systemIsDark, setSystemIsDark] = useState(() =>
-    typeof window !== "undefined" ? window.matchMedia("(prefers-color-scheme: dark)").matches : false,
+    typeof window !== "undefined"
+      ? window.matchMedia("(prefers-color-scheme: dark)").matches
+      : false,
   );
   const effectiveTheme: "light" | "dark" =
     settings.theme === "system" ? (systemIsDark ? "dark" : "light") : settings.theme;
@@ -143,6 +161,15 @@ export default function App() {
       toastTimerRef.current = null;
     }, 2000);
   }, []);
+
+  const finishPendingEdit = useCallback(() => {
+    let ready = true;
+    flushSync(() => {
+      ready = editorCommitRef.current?.() ?? true;
+    });
+    if (!ready) showToast(t("finishComposition"));
+    return ready;
+  }, [showToast]);
 
   const getLive = useCallback((): ActiveDocumentLive => {
     const snap = history.snapshot();
@@ -189,6 +216,7 @@ export default function App() {
 
   const loadIntoWorkspace = useCallback(
     (rows: CellValue[][], meta: Partial<SheetMeta>) => {
+      if (!finishPendingEdit()) return;
       if (isBlankStarter()) {
         workspace.replaceActiveContent(rows, meta);
         sheet.loadData(rows, meta);
@@ -200,12 +228,28 @@ export default function App() {
       const doc = workspace.openDocument(rows, meta, getLive());
       applyDocument(doc);
     },
-    [isBlankStarter, sheet, history, selectionState, filter, workspace, getLive, applyDocument],
+    [
+      isBlankStarter,
+      sheet,
+      history,
+      selectionState,
+      filter,
+      workspace,
+      getLive,
+      applyDocument,
+      finishPendingEdit,
+    ],
   );
 
   const file = useFile({
     loadData: loadIntoWorkspace,
-    updateMeta: (meta) => sheet.setMeta(meta),
+    getDocumentId: () => activeDocumentIdRef.current,
+    onSaved: (completion) => {
+      workspace.completeSave(completion);
+      if (activeDocumentIdRef.current === completion.snapshot.documentId) {
+        sheet.setMeta(completedSaveMeta(rowsRef.current, metaRef.current, completion));
+      }
+    },
     getRows: () => rowsRef.current,
     getMeta: () => metaRef.current,
     onToast: showToast,
@@ -217,7 +261,13 @@ export default function App() {
     },
   });
 
+  const requestSave = (as = false) => {
+    if (!finishPendingEdit()) return;
+    void (as ? file.saveAs() : file.saveFile());
+  };
+
   const newFile = useCallback(() => {
+    if (!finishPendingEdit()) return;
     if (isBlankStarter()) {
       sheet.loadData([[""]], { fileName: undefined, format: "csv", delimiter: "," });
       history.reset();
@@ -227,26 +277,37 @@ export default function App() {
     }
     const doc = workspace.addBlankDocument(getLive());
     applyDocument(doc);
-  }, [isBlankStarter, sheet, history, selectionState, filter, workspace, getLive, applyDocument]);
+  }, [
+    isBlankStarter,
+    sheet,
+    history,
+    selectionState,
+    filter,
+    workspace,
+    getLive,
+    applyDocument,
+    finishPendingEdit,
+  ]);
 
   const switchTab = useCallback(
     (id: string) => {
+      if (!finishPendingEdit() || id === activeDocumentIdRef.current) return;
       const doc = workspace.switchTo(id, getLive());
       if (doc) {
         applyDocument(doc);
       }
     },
-    [workspace, getLive, applyDocument],
+    [workspace, getLive, applyDocument, finishPendingEdit],
   );
 
   const closeTab = useCallback(
     (id: string) => {
+      if (!finishPendingEdit()) return;
       const target = workspace.documents.find((doc) => doc.id === id);
       if (!target) {
         return;
       }
-      const dirty =
-        id === workspace.activeId ? sheet.meta.dirty : target.meta.dirty;
+      const dirty = id === workspace.activeId ? metaRef.current.dirty : target.meta.dirty;
       if (dirty && !window.confirm(t("confirmCloseTab"))) {
         return;
       }
@@ -255,19 +316,41 @@ export default function App() {
         applyDocument(result.next);
       }
     },
-    [workspace, sheet.meta.dirty, getLive, applyDocument],
+    [workspace, getLive, applyDocument, finishPendingEdit],
   );
 
-  const visibleRows = useMemo(() => filter.getVisibleRows(sheet.rows), [filter, sheet.rows]);
+  const visibleRows = useMemo(
+    () => filter.getVisibleRows(sheet.rows, settings.useHeaderRow),
+    [filter, sheet.rows, settings.useHeaderRow],
+  );
   const displayRows = useMemo(() => visibleRows.map((row) => row.values), [visibleRows]);
   const rowSourceIndexes = useMemo(
     () => (filter.hasFilters ? visibleRows.map((row) => row.sourceIndex) : null),
     [filter.hasFilters, visibleRows],
   );
 
+  useEffect(() => {
+    if (!rowSourceIndexes) return;
+    const point = selectionRef.current;
+    const range = rangeRef.current;
+    const missing =
+      !rowSourceIndexes.includes(point.row) ||
+      (range &&
+        (!rowSourceIndexes.includes(range.startRow) || !rowSourceIndexes.includes(range.endRow)));
+    const first = rowSourceIndexes[0] ?? 0;
+    if (missing && (point.row !== first || range !== null))
+      selectionState.setSelection({ row: first, col: point.col });
+  }, [rowSourceIndexes]);
+  const visibleMapRef = useRef(rowSourceIndexes);
+  visibleMapRef.current = rowSourceIndexes;
+  const visibleSet = useMemo(
+    () => (rowSourceIndexes ? new Set(rowSourceIndexes) : null),
+    [rowSourceIndexes],
+  );
+
   const searchHits = useMemo(
-    () => findSearchHits(sheet.rows, query, searchOptions),
-    [sheet.rows, query, searchOptions],
+    () => findSearchHits(sheet.rows, query, searchOptions, visibleSet),
+    [sheet.rows, query, searchOptions, visibleSet],
   );
   const searchHitSet = useMemo(
     () => new Set(searchHits.map((hit) => `${hit.row}:${hit.col}`)),
@@ -288,16 +371,24 @@ export default function App() {
     setSearchScrollNonce((nonce) => nonce + 1);
   }, [query, searchOptions]);
 
-  const currentValue = sheet.rows[selectionState.selection.row]?.[selectionState.selection.col] ?? "";
+  const currentValue =
+    sheet.rows[selectionState.selection.row]?.[selectionState.selection.col] ?? "";
   const selectedReference = referenceForSelection(selectionState.selection, selectionState.range);
 
   const recordBeforeChange = useCallback(() => {
-    history.record(sheet.rows, selectionState.selection);
-  }, [history, selectionState.selection, sheet.rows]);
+    history.record(sheet.rows, selectionState.selection, {
+      range: selectionState.range,
+      colWidths: sheet.colWidths,
+    });
+  }, [history, selectionState.selection, selectionState.range, sheet.rows, sheet.colWidths]);
 
-  const replaceRowsFromHistory = (entry: { rows: CellValue[][]; selection: Selection }) => {
-    sheet.replaceRows(entry.rows, true, false);
-    selectionState.setSelection(entry.selection);
+  const replaceRowsFromHistory = (entry: HistoryEntry) => {
+    sheet.restoreState(
+      entry.rows,
+      { ...sheet.meta, dirty: true },
+      entry.colWidths ?? sheet.colWidths,
+    );
+    selectionState.setSelectionRange(entry.selection, entry.range ?? null);
   };
 
   const commitCell = (row: number, col: number, value: string, reselect: boolean) => {
@@ -320,9 +411,15 @@ export default function App() {
   };
 
   const copySelection = async (overrideRange?: Exclude<Range, null>) => {
-    const selected = overrideRange ?? selectionToRange(selectionState.selection, selectionState.range);
+    const selected =
+      overrideRange ?? selectionToRange(selectionState.selection, selectionState.range);
     const normalized = normalizeRange(selected);
-    const text = rangeTsv(sheet.rows, selected);
+    const indexes = selectedSourceRows(sheet.rows.length, normalized, rowSourceIndexes);
+    if (indexes.length === 0) return false;
+    const text = rangeTsv(
+      indexes.map((index) => sheet.rows[index]),
+      { ...normalized, startRow: 0, endRow: indexes.length - 1 },
+    );
     if (!navigator.clipboard) {
       showToast(t("toastClipboardUnavailable"));
       return false;
@@ -331,7 +428,7 @@ export default function App() {
       await navigator.clipboard.writeText(text);
       showToast(
         t("toastCopiedRange", {
-          rows: normalized.endRow - normalized.startRow + 1,
+          rows: indexes.length,
           cols: normalized.endCol - normalized.startCol + 1,
         }),
       );
@@ -342,31 +439,50 @@ export default function App() {
     }
   };
 
-  const cutSelection = async (overrideRange?: Exclude<Range, null>) => {
-    const selected = overrideRange ?? selectionToRange(selectionState.selection, selectionState.range);
-    const ok = await copySelection(selected);
-    if (!ok) {
-      return;
-    }
-    const normalized = normalizeRange(selected);
-    let wouldChange = false;
-    for (let r = normalized.startRow; r <= normalized.endRow && !wouldChange; r += 1) {
-      const row = sheet.rows[r];
-      if (!row) {
-        continue;
-      }
-      for (let c = normalized.startCol; c <= normalized.endCol; c += 1) {
-        if ((row[c] ?? "") !== "") {
-          wouldChange = true;
-          break;
-        }
-      }
-    }
-    if (!wouldChange) {
-      return;
-    }
+  const clipboardContext = () => ({
+    documentId: activeDocumentIdRef.current,
+    rows: rowsRef.current,
+    selection: JSON.stringify([selectionRef.current, rangeRef.current]),
+    visible: visibleMapRef.current,
+  });
+  const clipboardContextValid = (context: ReturnType<typeof clipboardContext>) =>
+    context.documentId === activeDocumentIdRef.current &&
+    context.rows === rowsRef.current &&
+    context.selection === JSON.stringify([selectionRef.current, rangeRef.current]) &&
+    context.visible === visibleMapRef.current;
+
+  const clearSelectedCells = (overrideRange?: Exclude<Range, null>) => {
+    const selected =
+      overrideRange ?? selectionToRange(selectionState.selection, selectionState.range);
+    const next = clearVisibleRange(sheet.rows, selected, rowSourceIndexes);
+    if (sameRows(sheet.rows, next)) return;
     recordBeforeChange();
-    sheet.clearRange(selected);
+    sheet.replaceRows(next, true, false);
+  };
+
+  const cutSelection = async (overrideRange?: Exclude<Range, null>) => {
+    const context = clipboardContext();
+    const selected =
+      overrideRange ?? selectionToRange(selectionState.selection, selectionState.range);
+    if (!(await copySelection(selected))) return;
+    if (!clipboardContextValid(context)) {
+      showToast(t("clipboardContextChanged"));
+      return;
+    }
+    clearSelectedCells(selected);
+  };
+
+  const pasteGrid = (row: number, col: number, grid: CellValue[][]) => {
+    const pasted = pasteIntoView(sheet.rows, row, col, grid, rowSourceIndexes);
+    if (!pasted) {
+      showToast(t("filteredPasteOverflow"));
+      return;
+    }
+    if (!sameRows(sheet.rows, pasted.rows)) {
+      recordBeforeChange();
+      sheet.replaceRows(pasted.rows, true, false);
+    }
+    selectionState.selectRange(pasted.range);
   };
 
   const pasteClipboard = async (start?: { row: number; col: number }) => {
@@ -374,50 +490,51 @@ export default function App() {
       showToast(t("toastClipboardUnavailable"));
       return;
     }
+    const context = clipboardContext();
+    const selected = normalizeRange(
+      selectionToRange(selectionState.selection, selectionState.range),
+    );
+    const row = start?.row ?? selected.startRow;
+    const col = start?.col ?? selected.startCol;
     try {
       const text = await navigator.clipboard.readText();
-      const grid = parseClipboardText(text);
-      const row = start?.row ?? selectionState.selection.row;
-      const col = start?.col ?? selectionState.selection.col;
-      recordBeforeChange();
-      const pastedRange = sheet.pasteGrid(row, col, grid);
-      selectionState.selectRange(pastedRange);
-      const normalized = normalizeRange(pastedRange);
-      showToast(
-        t("toastPastedRange", {
-          rows: normalized.endRow - normalized.startRow + 1,
-          cols: normalized.endCol - normalized.startCol + 1,
-        }),
-      );
+      if (!clipboardContextValid(context)) {
+        showToast(t("clipboardContextChanged"));
+        return;
+      }
+      pasteGrid(row, col, parseClipboardText(text));
     } catch {
       showToast(t("toastClipboardUnavailable"));
     }
   };
 
-  const clearSelectedCells = (overrideRange?: Exclude<Range, null>) => {
-    const selected = overrideRange ?? selectionToRange(selectionState.selection, selectionState.range);
-    const normalized = normalizeRange(selected);
-    let wouldChange = false;
-    for (let r = normalized.startRow; r <= normalized.endRow && !wouldChange; r += 1) {
-      const row = sheet.rows[r];
-      if (!row) {
-        continue;
-      }
-      for (let c = normalized.startCol; c <= normalized.endCol; c += 1) {
-        if ((row[c] ?? "") !== "") {
-          wouldChange = true;
-          break;
-        }
-      }
-    }
-    if (!wouldChange) {
-      return;
-    }
-    recordBeforeChange();
-    sheet.clearRange(selected);
-  };
-
-  const openContextMenu = (kind: ContextMenuKind, row: number, col: number, x: number, y: number) => {
+  const openContextMenu = (
+    kind: ContextMenuKind,
+    row: number,
+    col: number,
+    x: number,
+    y: number,
+  ) => {
+    const selected = normalizeRange(
+      selectionToRange(selectionState.selection, selectionState.range),
+    );
+    const inside =
+      row >= selected.startRow &&
+      row <= selected.endRow &&
+      col >= selected.startCol &&
+      col <= selected.endCol;
+    if (kind === "cell" && !inside) selectionState.selectCell(row, col, false);
+    if (kind === "column")
+      selectionState.setSelectionRange(
+        { row: rowSourceIndexes?.[0] ?? 0, col },
+        {
+          startRow: rowSourceIndexes?.[0] ?? 0,
+          startCol: col,
+          endRow: rowSourceIndexes?.at(-1) ?? Math.max(0, sheet.rows.length - 1),
+          endCol: col,
+        },
+      );
+    if (kind === "row") selectionState.selectRow(row, sheet.columnCount);
     setContextMenu({ kind, row, col, x, y });
   };
 
@@ -441,25 +558,7 @@ export default function App() {
         endCol: Math.max(0, sheet.columnCount - 1),
       };
     }
-    return {
-      startRow: contextMenu.row,
-      startCol: contextMenu.col,
-      endRow: contextMenu.row,
-      endCol: contextMenu.col,
-    };
-  };
-
-  const selectContextCell = () => {
-    if (!contextMenu) {
-      return;
-    }
-    if (contextMenu.kind === "column") {
-      selectionState.selectColumn(contextMenu.col, Math.max(sheet.rows.length, 1));
-    } else if (contextMenu.kind === "row") {
-      selectionState.selectRow(contextMenu.row, Math.max(sheet.columnCount, 1));
-    } else {
-      selectionState.selectCell(contextMenu.row, contextMenu.col, false);
-    }
+    return selectionToRange(selectionState.selection, selectionState.range);
   };
 
   const ensureRowOpsAllowed = (): boolean => {
@@ -496,9 +595,7 @@ export default function App() {
       return;
     }
     const indexes =
-      selectedRows.length > 0
-        ? selectedRows
-        : [contextMenu?.row ?? selectionState.selection.row];
+      selectedRows.length > 0 ? selectedRows : [contextMenu?.row ?? selectionState.selection.row];
     setPendingConfirm({
       action: () => {
         recordBeforeChange();
@@ -538,14 +635,24 @@ export default function App() {
   };
 
   const runUndo = () => {
-    const previous = history.undo({ rows: sheet.rows, selection: selectionState.selection });
+    const previous = history.undo({
+      rows: sheet.rows,
+      selection: selectionState.selection,
+      range: selectionState.range,
+      colWidths: sheet.colWidths,
+    });
     if (previous) {
       replaceRowsFromHistory(previous);
     }
   };
 
   const runRedo = () => {
-    const next = history.redo({ rows: sheet.rows, selection: selectionState.selection });
+    const next = history.redo({
+      rows: sheet.rows,
+      selection: selectionState.selection,
+      range: selectionState.range,
+      colWidths: sheet.colWidths,
+    });
     if (next) {
       replaceRowsFromHistory(next);
     }
@@ -590,13 +697,15 @@ export default function App() {
       return;
     }
     let count = 0;
-    const next = sheet.rows.map((row) =>
-      row.map((cell) =>
-        cell.replace(matcher, () => {
-          count += 1;
-          return replacement;
-        }),
-      ),
+    const next = sheet.rows.map((row, rowIndex) =>
+      visibleSet && !visibleSet.has(rowIndex)
+        ? [...row]
+        : row.map((cell) =>
+            cell.replace(matcher, () => {
+              count += 1;
+              return replacement;
+            }),
+          ),
     );
     if (count === 0) {
       showToast(t("toastSearchDone", { count }));
@@ -609,6 +718,12 @@ export default function App() {
 
   const handleJump = (ref: ReturnType<typeof parseCellRef>) => {
     if (!ref) {
+      return;
+    }
+    const startRow = ref.kind === "cell" ? ref.row : ref.startRow;
+    const endRow = ref.kind === "cell" ? ref.row : ref.endRow;
+    if (visibleSet && (!visibleSet.has(startRow) || !visibleSet.has(endRow))) {
+      showToast(t("hiddenReference"));
       return;
     }
     if (ref.kind === "cell") {
@@ -626,7 +741,10 @@ export default function App() {
   };
 
   const adjustZoom = (delta: number) => {
-    const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round((settings.zoom + delta) * 10) / 10));
+    const next = Math.min(
+      MAX_ZOOM,
+      Math.max(MIN_ZOOM, Math.round((settings.zoom + delta) * 10) / 10),
+    );
     updateSettings({ zoom: next });
   };
 
@@ -639,17 +757,22 @@ export default function App() {
 
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "o") {
       event.preventDefault();
-      void file.openFile();
+      if (finishPendingEdit()) void file.openFile();
     } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
       event.preventDefault();
-      void file.saveFile();
+      requestSave(event.shiftKey);
     } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
       event.preventDefault();
       setSearchOpen(true);
     } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "h") {
       event.preventDefault();
       setSearchOpen(true);
-    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z" && !event.shiftKey && !editingText) {
+    } else if (
+      (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === "z" &&
+      !event.shiftKey &&
+      !editingText
+    ) {
       event.preventDefault();
       runUndo();
     } else if (
@@ -659,7 +782,11 @@ export default function App() {
     ) {
       event.preventDefault();
       runRedo();
-    } else if (!editingText && (event.ctrlKey || event.metaKey) && (event.key === "=" || event.key === "+")) {
+    } else if (
+      !editingText &&
+      (event.ctrlKey || event.metaKey) &&
+      (event.key === "=" || event.key === "+")
+    ) {
       event.preventDefault();
       adjustZoom(ZOOM_STEP);
     } else if (!editingText && (event.ctrlKey || event.metaKey) && event.key === "-") {
@@ -689,14 +816,16 @@ export default function App() {
 
   const hasData = sheet.rows.length > 0;
   const columnFilterSelected = filterPopover
-    ? filter.filters.get(filterPopover.col) ?? null
+    ? (filter.filters.get(filterPopover.col) ?? null)
     : null;
 
   return (
     <div className="appShell" onKeyDown={handleKeyDown}>
       <TitleBar meta={sheet.meta} />
       <TabBar
-        documents={workspace.documents}
+        documents={workspace.documents.map((doc) =>
+          doc.id === workspace.activeId ? { ...doc, meta: sheet.meta } : doc,
+        )}
         activeId={workspace.activeId}
         onSelect={switchTab}
         onClose={closeTab}
@@ -706,9 +835,11 @@ export default function App() {
         canUndo={history.canUndo}
         canRedo={history.canRedo}
         onNew={newFile}
-        onOpen={() => void file.openFile()}
-        onSave={() => void file.saveFile()}
-        onSaveAs={() => void file.saveAs()}
+        onOpen={() => {
+          if (finishPendingEdit()) void file.openFile();
+        }}
+        onSave={() => requestSave()}
+        onSaveAs={() => requestSave(true)}
         onSearch={() => setSearchOpen(true)}
         onUndo={runUndo}
         onRedo={runRedo}
@@ -724,6 +855,13 @@ export default function App() {
         onSettings={() => setSettingsOpen(true)}
         onHelp={() => setHelpOpen(true)}
       />
+      <div className="editionNotice" role="status">
+        <span>{isTauriRuntime() ? t("appSaveHint") : t("browserSaveHint")}</span>
+        {file.saveNotice ? <span className="saveNotice">{file.saveNotice}</span> : null}
+      </div>
+      <span id="cell-edit-help" className="srOnly">
+        {t("editNavigationHelp")}
+      </span>
       <SearchPanel
         open={searchOpen}
         query={query}
@@ -749,6 +887,20 @@ export default function App() {
             value={currentValue}
             onCommit={(row, col, value, reselect) => commitCell(row, col, value, reselect)}
             onJump={handleJump}
+            registerCommit={registerEditorCommit}
+            disabled={visibleSet !== null && !visibleSet.has(selectionState.selection.row)}
+            onMove={(row, col, dr, dc) => {
+              const nextRow = rowSourceIndexes
+                ? (rowSourceIndexes[
+                    Math.max(
+                      0,
+                      Math.min(rowSourceIndexes.length - 1, rowSourceIndexes.indexOf(row) + dr),
+                    )
+                  ] ?? row)
+                : Math.max(0, row + dr);
+              selectionState.selectCell(nextRow, Math.max(0, col + dc));
+              setFocusCell({ row: nextRow, col: Math.max(0, col + dc), nonce: Date.now() });
+            }}
           />
           <GlideSheet
             rows={displayRows}
@@ -767,25 +919,37 @@ export default function App() {
             freezeColumns={settings.freezeColumns}
             zoom={settings.zoom}
             onEdit={editCell}
-            onColumnResize={sheet.setColumnWidth}
-            onSelectionChange={(sel, range) => {
-              if (range) {
-                selectionState.selectRange(range);
-              } else {
-                selectionState.selectCell(sel.row, sel.col, false);
-              }
+            registerCommit={registerEditorCommit}
+            onClear={() => clearSelectedCells()}
+            onColumnMove={(from, to) => {
+              if (!ensureRowOpsAllowed()) return;
+              const moved = moveColumn(sheet.rows, sheet.colWidths, sheet.columnCount, from, to);
+              if (!moved) return;
+              recordBeforeChange();
+              sheet.replaceRows(moved.rows, true, false);
+              sheet.setColWidths(moved.widths);
+              selectionState.selectColumn(to, sheet.rows.length);
             }}
+            onColumnResize={sheet.setColumnWidth}
+            onSelectionChange={(sel, range) => selectionState.setSelectionRange(sel, range)}
             onRowsSelected={setSelectedRows}
             onColumnsSelected={setSelectedColumns}
-            onPasteGrid={(startRow, startCol, grid) => {
-              recordBeforeChange();
-              const pasted = sheet.pasteGrid(startRow, startCol, grid);
-              selectionState.selectRange(pasted);
-            }}
+            onPasteGrid={pasteGrid}
             onFill={(updates) => {
-              if (updates.length === 0) {
+              if (
+                updates.length === 0 ||
+                updates.some(
+                  (update) => update.row < 0 || (visibleSet && !visibleSet.has(update.row)),
+                )
+              ) {
                 return;
               }
+              if (
+                updates.every(
+                  (update) => (sheet.rows[update.row]?.[update.col] ?? "") === update.value,
+                )
+              )
+                return;
               recordBeforeChange();
               const next = cloneRows(sheet.rows);
               let maxRow = next.length;
@@ -797,12 +961,8 @@ export default function App() {
               while (next.length < maxRow) {
                 next.push(Array.from({ length: maxCol }, () => ""));
               }
-              for (const row of next) {
-                while (row.length < maxCol) {
-                  row.push("");
-                }
-              }
               for (const update of updates) {
+                while (next[update.row].length <= update.col) next[update.row].push("");
                 next[update.row]![update.col] = update.value;
               }
               sheet.replaceRows(next, true, false);
@@ -817,7 +977,9 @@ export default function App() {
       ) : (
         <EmptyState
           onNew={newFile}
-          onOpen={() => void file.openFile()}
+          onOpen={() => {
+            if (finishPendingEdit()) void file.openFile();
+          }}
           onSample={() => void file.loadSample()}
           recentFiles={settings.recentFiles}
           onOpenRecent={(path) => void file.loadPath(path)}
@@ -838,22 +1000,17 @@ export default function App() {
         onClose={() => setContextMenu(null)}
         onCut={() => {
           const range = rangeFromContextMenu();
-          selectContextCell();
           void cutSelection(range ?? undefined);
         }}
         onCopy={() => {
           const range = rangeFromContextMenu();
-          selectContextCell();
           void copySelection(range ?? undefined);
         }}
         onPaste={() => {
-          const menu = contextMenu;
-          selectContextCell();
-          void pasteClipboard(menu ? { row: menu.row, col: menu.col } : undefined);
+          void pasteClipboard();
         }}
         onClear={() => {
           const range = rangeFromContextMenu();
-          selectContextCell();
           clearSelectedCells(range ?? undefined);
         }}
         onInsertRowAbove={() => insertRow(0)}
@@ -881,10 +1038,6 @@ export default function App() {
           if (!contextMenu) {
             return;
           }
-          if (filter.filters.has(contextMenu.col)) {
-            filter.setColumnFilter(contextMenu.col, null);
-            return;
-          }
           setFilterPopover({
             col: contextMenu.col,
             x: contextMenu.x,
@@ -900,7 +1053,7 @@ export default function App() {
       />
       <FilterPopover
         state={filterPopover}
-        rows={sheet.rows}
+        rows={settings.useHeaderRow ? sheet.rows.slice(1) : sheet.rows}
         selected={columnFilterSelected}
         onApply={(col, allowed) => filter.setColumnFilter(col, allowed)}
         onClose={() => setFilterPopover(null)}
@@ -951,7 +1104,12 @@ function referenceForSelection(selection: Selection, range: Range): string {
 
 const SEARCH_HIT_CAP = 5000;
 
-function findSearchHits(rows: CellValue[][], query: string, options: SearchOptions): SearchHit[] {
+function findSearchHits(
+  rows: CellValue[][],
+  query: string,
+  options: SearchOptions,
+  visible: Set<number> | null = null,
+): SearchHit[] {
   const matcher = buildMatcher(query, options);
   if (!matcher) {
     return [];
@@ -959,6 +1117,7 @@ function findSearchHits(rows: CellValue[][], query: string, options: SearchOptio
 
   const hits: SearchHit[] = [];
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    if (visible && !visible.has(rowIndex)) continue;
     for (let colIndex = 0; colIndex < rows[rowIndex].length; colIndex += 1) {
       matcher.lastIndex = 0;
       if (matcher.test(rows[rowIndex][colIndex])) {

@@ -9,14 +9,19 @@ export type VisibleRow = {
   values: CellValue[];
 };
 
-export function applyFilters(rows: CellValue[][], filters: FilterMap): VisibleRow[] {
+export function applyFilters(
+  rows: CellValue[][],
+  filters: FilterMap,
+  headerRow = false,
+): VisibleRow[] {
   if (filters.size === 0) {
     return rows.map((values, sourceIndex) => ({ sourceIndex, values }));
   }
 
   return rows
     .map((values, sourceIndex) => ({ sourceIndex, values }))
-    .filter(({ values }) => {
+    .filter(({ values, sourceIndex }) => {
+      if (headerRow && sourceIndex === 0) return true;
       for (const [col, allowed] of filters) {
         if (allowed.size === 0) {
           return false;
@@ -66,7 +71,7 @@ export function useFilter() {
   const hasFilters = filters.size > 0;
 
   const getVisibleRows = useCallback(
-    (rows: CellValue[][]) => applyFilters(rows, filters),
+    (rows: CellValue[][], headerRow = false) => applyFilters(rows, filters, headerRow),
     [filters],
   );
 
