@@ -141,6 +141,7 @@ export function GlideSheet({
   onHeaderMenuClick,
 }: GlideSheetProps) {
   const ref = useRef<DataEditorRef>(null);
+  const f2EditingRef = useRef(false);
   const [gridSelection, setGridSelection] = useState<GridSelection>(EMPTY_SELECTION);
   const activeHitRef = useRef(activeSearchHit);
   activeHitRef.current = activeSearchHit;
@@ -504,6 +505,10 @@ export function GlideSheet({
         (target instanceof HTMLElement && target.isContentEditable)
       )
         return;
+      if (event.key === "F2") {
+        f2EditingRef.current = true;
+        return;
+      }
       const mod = event.ctrlKey || event.metaKey;
       if (mod && event.key.toLowerCase() === "x" && onCut) {
         event.preventDefault();
@@ -565,7 +570,13 @@ export function GlideSheet({
   );
 
   const textEditor = useCallback<ProvideEditorComponent<GridCell>>(
-    (props) => <CellTextEditor {...props} registerCommit={registerCommit} />,
+    (props) => (
+      <CellTextEditor
+        {...props}
+        isHighlighted={f2EditingRef.current ? false : props.isHighlighted}
+        registerCommit={registerCommit}
+      />
+    ),
     [registerCommit],
   );
 
@@ -588,6 +599,10 @@ export function GlideSheet({
         theme={gridTheme}
         getRowThemeOverride={getRowThemeOverride}
         getCellContent={getCellContent}
+        keybindings={{ activateCell: "F2| |Enter|shift+Enter", downFill: true, rightFill: true }}
+        onFinishedEditing={() => {
+          f2EditingRef.current = false;
+        }}
         onCellEdited={onCellEdited}
         provideEditor={(cell) =>
           cell.kind === GridCellKind.Text ? { editor: textEditor } : undefined

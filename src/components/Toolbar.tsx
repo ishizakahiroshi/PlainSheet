@@ -1,23 +1,31 @@
 import {
-  Bot,
   CircleHelp,
+  Clipboard,
   Columns3,
+  Download,
+  FileDown,
+  FilePenLine,
   FilePlus2,
   FolderOpen,
   Rows3,
   Redo2,
   Save,
-  SaveAll,
   Search,
   Settings,
-  Trash2,
   Undo2,
+  Minus,
+  Plus,
+  MoveHorizontal,
 } from "lucide-react";
 import { t } from "../lib/i18n";
+import { ActionButton } from "./ActionButton";
 
 type ToolbarProps = {
   canUndo: boolean;
   canRedo: boolean;
+  saving?: boolean;
+  browser?: boolean;
+  rowOpsDisabled?: boolean;
   onNew: () => void;
   onOpen: () => void;
   onSave: () => void;
@@ -30,104 +38,184 @@ type ToolbarProps = {
   onDeleteRow: () => void;
   onDeleteColumn: () => void;
   onAutoFit: () => void;
-  onAiCopy: () => void;
+  onCopy: () => void;
   onSettings: () => void;
   onHelp: () => void;
 };
 
-export function Toolbar({
-  canUndo,
-  canRedo,
-  onNew,
-  onOpen,
-  onSave,
-  onSaveAs,
-  onSearch,
-  onUndo,
-  onRedo,
-  onInsertRow,
-  onInsertColumn,
-  onDeleteRow,
-  onDeleteColumn,
-  onAutoFit,
-  onAiCopy,
-  onSettings,
-  onHelp,
-}: ToolbarProps) {
+export function Toolbar(p: ToolbarProps) {
+  const SaveIcon = p.browser ? Download : Save;
+  const SaveAsIcon = p.browser ? FileDown : FilePenLine;
+  const saveLabel = p.saving ? t("saving") : p.browser ? t("download") : t("save");
+  const saveAsLabel = p.browser ? t("downloadAs") : t("saveAs");
   return (
     <nav className="toolbar" aria-label={t("toolbarLabel")}>
-      <button className="toolbar__button" type="button" aria-label={t("newSheet")} onClick={onNew}>
-        <FilePlus2 size={16} aria-hidden="true" />
-        <span>{t("newFile")}</span>
-      </button>
-      <button className="toolbar__button" type="button" aria-label={t("open")} onClick={onOpen}>
-        <FolderOpen size={16} aria-hidden="true" />
-        <span>{t("open")}</span>
-      </button>
-      <button className="toolbar__button" type="button" aria-label={t("save")} onClick={onSave}>
-        <Save size={16} aria-hidden="true" />
-        <span>{t("save")}</span>
-      </button>
-      <button className="toolbar__button" type="button" aria-label={t("saveAs")} onClick={onSaveAs}>
-        <SaveAll size={16} aria-hidden="true" />
-        <span>{t("saveAs")}</span>
-      </button>
-      <div className="toolbar__separator" />
-      <button className="toolbar__button" type="button" aria-label={t("search")} onClick={onSearch}>
-        <Search size={16} aria-hidden="true" />
-        <span>{t("search")}</span>
-      </button>
-      <button
-        className="toolbar__iconButton"
-        type="button"
-        aria-label={t("undo")}
-        disabled={!canUndo}
-        onClick={onUndo}
-      >
-        <Undo2 size={16} aria-hidden="true" />
-      </button>
-      <button
-        className="toolbar__iconButton"
-        type="button"
-        aria-label={t("redo")}
-        disabled={!canRedo}
-        onClick={onRedo}
-      >
-        <Redo2 size={16} aria-hidden="true" />
-      </button>
-      <div className="toolbar__separator" />
-      <button className="toolbar__button" type="button" aria-label={t("insertRow")} onClick={onInsertRow}>
-        <Rows3 size={16} aria-hidden="true" />
-        <span>{t("insertRow")}</span>
-      </button>
-      <button className="toolbar__button" type="button" aria-label={t("insertColumn")} onClick={onInsertColumn}>
-        <Columns3 size={16} aria-hidden="true" />
-        <span>{t("insertColumn")}</span>
-      </button>
-      <button className="toolbar__button toolbar__button--danger" type="button" aria-label={t("deleteRow")} onClick={onDeleteRow}>
-        <Trash2 size={16} aria-hidden="true" />
-        <span>{t("deleteRow")}</span>
-      </button>
-      <button className="toolbar__button toolbar__button--danger" type="button" aria-label={t("deleteCol")} onClick={onDeleteColumn}>
-        <Trash2 size={16} aria-hidden="true" />
-        <span>{t("deleteCol")}</span>
-      </button>
-      <div className="toolbar__separator" />
-      <button className="toolbar__button" type="button" aria-label={t("autoFit")} onClick={onAutoFit}>
-        <Columns3 size={16} aria-hidden="true" />
-        <span>{t("autoFit")}</span>
-      </button>
-      <button className="toolbar__button" type="button" aria-label={t("aiCopy")} onClick={onAiCopy}>
-        <Bot size={16} aria-hidden="true" />
-        <span>{t("aiCopy")}</span>
-      </button>
-      <div className="toolbar__spacer" />
-      <button className="toolbar__iconButton" type="button" aria-label={t("settings")} onClick={onSettings}>
-        <Settings size={16} aria-hidden="true" />
-      </button>
-      <button className="toolbar__iconButton" type="button" aria-label={t("help")} onClick={onHelp}>
-        <CircleHelp size={16} aria-hidden="true" />
-      </button>
+      <div className="toolbar__group" role="group" aria-label={t("fileActions")}>
+        <ActionButton
+          className="toolbar__button"
+          type="button"
+          aria-label={t("newSheet")}
+          tooltip={t("newSheet")}
+          onClick={p.onNew}
+        >
+          <FilePlus2 size={16} aria-hidden="true" />
+          <span>{t("newFile")}</span>
+        </ActionButton>
+        <ActionButton
+          className="toolbar__button"
+          type="button"
+          aria-label={t("open")}
+          tooltip={`${t("open")} (Ctrl+O)`}
+          onClick={p.onOpen}
+        >
+          <FolderOpen size={16} aria-hidden="true" />
+          <span>{t("open")}</span>
+        </ActionButton>
+        <ActionButton
+          className="toolbar__button toolbar__button--primary"
+          type="button"
+          aria-label={saveLabel}
+          tooltip={`${saveLabel} (Ctrl+S)`}
+          disabled={p.saving}
+          onClick={p.onSave}
+        >
+          <SaveIcon size={16} aria-hidden="true" />
+          <span>{saveLabel}</span>
+        </ActionButton>
+        <ActionButton
+          className="toolbar__button"
+          type="button"
+          aria-label={saveAsLabel}
+          tooltip={`${saveAsLabel} (Ctrl+Shift+S)`}
+          disabled={p.saving}
+          onClick={p.onSaveAs}
+        >
+          <SaveAsIcon size={16} aria-hidden="true" />
+          <span>{saveAsLabel}</span>
+        </ActionButton>
+      </div>
+      <div className="toolbar__group" role="group" aria-label={t("editActions")}>
+        <ActionButton
+          className="toolbar__button"
+          type="button"
+          aria-label={t("search")}
+          tooltip={`${t("search")} (Ctrl+F)`}
+          onClick={p.onSearch}
+        >
+          <Search size={16} aria-hidden="true" />
+          <span>{t("search")}</span>
+        </ActionButton>
+        <ActionButton
+          className="toolbar__iconButton"
+          type="button"
+          aria-label={t("undo")}
+          tooltip={`${t("undo")} (Ctrl+Z)`}
+          disabled={!p.canUndo}
+          onClick={p.onUndo}
+        >
+          <Undo2 size={16} aria-hidden="true" />
+        </ActionButton>
+        <ActionButton
+          className="toolbar__iconButton"
+          type="button"
+          aria-label={t("redo")}
+          tooltip={`${t("redo")} (Ctrl+Y / Ctrl+Shift+Z)`}
+          disabled={!p.canRedo}
+          onClick={p.onRedo}
+        >
+          <Redo2 size={16} aria-hidden="true" />
+        </ActionButton>
+        <ActionButton
+          className="toolbar__button"
+          type="button"
+          aria-label={t("copyPlainText")}
+          tooltip={`${t("copyPlainText")} (Ctrl+C)`}
+          onClick={p.onCopy}
+        >
+          <Clipboard size={16} aria-hidden="true" />
+          <span>{t("copyPlainText")}</span>
+        </ActionButton>
+      </div>
+      <div className="toolbar__group" role="group" aria-label={t("structureActions")}>
+        <ActionButton
+          className="toolbar__button"
+          type="button"
+          aria-label={t("insertRow")}
+          tooltip={p.rowOpsDisabled ? t("toastFilterBlocksRowOps") : t("insertRow")}
+          disabled={p.rowOpsDisabled}
+          onClick={p.onInsertRow}
+        >
+          <Rows3 size={16} aria-hidden="true" />
+          <Plus size={11} aria-hidden="true" />
+          <span>{t("insertRow")}</span>
+        </ActionButton>
+        <ActionButton
+          className="toolbar__button"
+          type="button"
+          aria-label={t("insertColumn")}
+          tooltip={p.rowOpsDisabled ? t("toastFilterBlocksRowOps") : t("insertColumn")}
+          disabled={p.rowOpsDisabled}
+          onClick={p.onInsertColumn}
+        >
+          <Columns3 size={16} aria-hidden="true" />
+          <Plus size={11} aria-hidden="true" />
+          <span>{t("insertColumn")}</span>
+        </ActionButton>
+        <ActionButton
+          className="toolbar__button toolbar__button--danger"
+          type="button"
+          aria-label={t("deleteRow")}
+          tooltip={p.rowOpsDisabled ? t("toastFilterBlocksRowOps") : t("deleteRow")}
+          disabled={p.rowOpsDisabled}
+          onClick={p.onDeleteRow}
+        >
+          <Rows3 size={16} aria-hidden="true" />
+          <Minus size={11} aria-hidden="true" />
+          <span>{t("deleteRow")}</span>
+        </ActionButton>
+        <ActionButton
+          className="toolbar__button toolbar__button--danger"
+          type="button"
+          aria-label={t("deleteCol")}
+          tooltip={p.rowOpsDisabled ? t("toastFilterBlocksRowOps") : t("deleteCol")}
+          disabled={p.rowOpsDisabled}
+          onClick={p.onDeleteColumn}
+        >
+          <Columns3 size={16} aria-hidden="true" />
+          <Minus size={11} aria-hidden="true" />
+          <span>{t("deleteCol")}</span>
+        </ActionButton>
+      </div>
+      <div className="toolbar__group" role="group" aria-label={t("viewActions")}>
+        <ActionButton
+          className="toolbar__button"
+          type="button"
+          aria-label={t("autoFit")}
+          tooltip={t("autoFit")}
+          onClick={p.onAutoFit}
+        >
+          <MoveHorizontal size={16} aria-hidden="true" />
+          <span>{t("autoFit")}</span>
+        </ActionButton>
+        <ActionButton
+          className="toolbar__iconButton"
+          type="button"
+          aria-label={t("settings")}
+          tooltip={t("settings")}
+          onClick={p.onSettings}
+        >
+          <Settings size={16} aria-hidden="true" />
+        </ActionButton>
+        <ActionButton
+          className="toolbar__iconButton"
+          type="button"
+          aria-label={t("help")}
+          tooltip={t("help")}
+          onClick={p.onHelp}
+        >
+          <CircleHelp size={16} aria-hidden="true" />
+        </ActionButton>
+      </div>
     </nav>
   );
 }

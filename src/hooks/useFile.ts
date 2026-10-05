@@ -26,7 +26,6 @@ type UseFileOptions = {
   getRows: () => CellValue[][];
   getMeta: () => SheetMeta;
   onToast: (message: string) => void;
-  confirmDiscard: () => boolean;
   /** Called when a filesystem path is opened/saved (Tauri recent-files list). */
   onRecentPath?: (path: string) => void;
 };
@@ -44,28 +43,15 @@ export function useFile({
   getRows,
   getMeta,
   onToast,
-  confirmDiscard,
   onRecentPath,
 }: UseFileOptions) {
-  // Browser-only: handle returned by File System Access open/save pickers.
-  const fileHandleRef = useRef<FsFileHandle | null>(null);
   const saveBusyRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const loadGenerationRef = useRef(0);
   const loadPathRef = useRef<(path: string) => Promise<void>>(async () => undefined);
-  const getMetaRef = useRef(getMeta);
-  const confirmDiscardRef = useRef(confirmDiscard);
   const onToastRef = useRef(onToast);
-  const onRecentPathRef = useRef(onRecentPath);
-  getMetaRef.current = getMeta;
-  confirmDiscardRef.current = confirmDiscard;
   onToastRef.current = onToast;
-  onRecentPathRef.current = onRecentPath;
-
-  const resetSaveTarget = useCallback(() => {
-    fileHandleRef.current = null;
-  }, []);
 
   const loadPath = useCallback(
     async (path: string) => {
@@ -105,13 +91,8 @@ export function useFile({
 
   const openFile = useCallback(async () => {
     try {
-      if (getMeta().dirty && !confirmDiscard()) {
-        return;
-      }
       if (!isTauriRuntime()) {
-        await openBrowserFile(loadData, onToast, (handle) => {
-          fileHandleRef.current = handle;
-        });
+        await openBrowserFile(loadData, onToast);
         return;
       }
       const path = await invoke<string | null>("open_file_dialog");
@@ -121,7 +102,7 @@ export function useFile({
     } catch {
       onToast(t("toastLoadFailed"));
     }
-  }, [confirmDiscard, getMeta, loadData, loadPath, onToast]);
+  }, [loadData, loadPath, onToast]);
 
   const performSave = useCallback(
     async (chooseName: boolean) => {
@@ -157,8 +138,14 @@ export function useFile({
             currentMeta.newline,
             serializeOptions(currentMeta),
           );
-          downloadText((currentMeta.encoding === "utf-8-bom" ? "\uFEFF" : "") + content, fileName);
-          onSaved({ snapshot, patch: { fileName, format, delimiter }, method: "download" });
+          const encoding =
+            encodingForFormat(format, currentMeta.encoding) === "utf-8-bom" ? "utf-8-bom" : "utf-8";
+          downloadText((encoding === "utf-8-bom" ? "\uFEFF" : "") + content, fileName);
+          onSaved({
+            snapshot,
+            patch: { fileName, format, delimiter, encoding },
+            method: "download",
+          });
           setSaveNotice(t("browserDownloadNotice", { name: fileName }));
           onToast(t("toastDownloadStarted"));
           return;
@@ -211,16 +198,12 @@ export function useFile({
 
   const loadSample = useCallback(async () => {
     try {
-      if (getMeta().dirty && !confirmDiscard()) {
-        return;
-      }
       const response = await fetch(`${import.meta.env.BASE_URL}sample.csv`);
       if (!response.ok) {
         throw new Error("sample file is unavailable");
       }
       const content = await response.text();
       const rows = parseTableText(content, "csv", ",");
-      resetSaveTarget();
       loadData(rows, {
         fileName: "sample.csv",
         delimiter: ",",
@@ -232,7 +215,7 @@ export function useFile({
     } catch {
       onToast(t("toastLoadFailed"));
     }
-  }, [confirmDiscard, getMeta, loadData, onToast, resetSaveTarget]);
+  }, [loadData, onToast]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -241,15 +224,9 @@ export function useFile({
       };
       const handleDrop = (event: DragEvent) => {
         event.preventDefault();
-        if (getMetaRef.current().dirty && !confirmDiscardRef.current()) {
-          return;
-        }
         const file = event.dataTransfer?.files[0];
         if (file) {
-          // D&D has no writable handle — next Save will pick a location.
-          void loadBrowserFile(file, loadData, onToastRef.current, () => {
-            fileHandleRef.current = null;
-          });
+          void loadBrowserFile(file, loadData, onToastRef.current);
         }
       };
       window.addEventListener("dragover", handleDragOver);
@@ -265,9 +242,6 @@ export function useFile({
     listen<FileDropPayload>("tauri://drag-drop", (event) => {
       const path = extractDropPath(event.payload);
       if (!path) {
-        return;
-      }
-      if (getMetaRef.current().dirty && !confirmDiscardRef.current()) {
         return;
       }
       void loadPathRef.current(path);
@@ -291,7 +265,7 @@ export function useFile({
         unlisten();
       }
     };
-  }, [loadData, resetSaveTarget]);
+  }, [loadData]);
 
   return {
     saving,
@@ -301,7 +275,6 @@ export function useFile({
     saveAs,
     loadPath,
     loadSample,
-    resetSaveTarget,
   };
 }
 
@@ -351,7 +324,6 @@ function extractDropPath(payload: FileDropPayload): string | null {
 async function openBrowserFile(
   loadData: UseFileOptions["loadData"],
   onToast: UseFileOptions["onToast"],
-  onHandle: (handle: FsFileHandle | null) => void,
 ): Promise<void> {
   const fsWindow = fsAccessWindow();
   if (fsWindow?.showOpenFilePicker) {
@@ -364,7 +336,7 @@ async function openBrowserFile(
         return;
       }
       const file = await handle.getFile();
-      await loadBrowserFile(file, loadData, onToast, () => onHandle(handle));
+      await loadBrowserFile(file, loadData, onToast);
       return;
     } catch (error) {
       // User cancel → AbortError; fall through only for unexpected errors.
@@ -380,10 +352,11 @@ async function openBrowserFile(
   input.accept = ".csv,.tsv,.txt,.md,.markdown,.json,.yaml,.yml,text/csv,text/tab-separated-values";
   const file = await new Promise<File | null>((resolve) => {
     input.onchange = () => resolve(input.files?.[0] ?? null);
+    input.addEventListener("cancel", () => resolve(null), { once: true });
     input.click();
   });
   if (file) {
-    await loadBrowserFile(file, loadData, onToast, () => onHandle(null));
+    await loadBrowserFile(file, loadData, onToast);
   }
 }
 
@@ -391,7 +364,6 @@ async function loadBrowserFile(
   file: File,
   loadData: UseFileOptions["loadData"],
   onToast: UseFileOptions["onToast"],
-  onAdopt?: () => void,
 ): Promise<void> {
   try {
     const format = formatFromPath(file.name);
@@ -408,7 +380,6 @@ async function loadBrowserFile(
           onToast(t("toastLoading", { percent: Math.round(ratio * 100) }));
         },
       });
-      onAdopt?.();
       loadData(rows, {
         fileName: file.name,
         delimiter,
@@ -427,7 +398,6 @@ async function loadBrowserFile(
     content = content.replace(/^\uFEFF/, "");
     const delimiter = format === "tsv" ? "\t" : detectDelimiter(content);
     rows = parseTableText(content, format, delimiter);
-    onAdopt?.();
     loadData(rows, {
       fileName: file.name,
       delimiter,
@@ -459,29 +429,11 @@ function saveErrorMessage(error: unknown): string {
   return t("toastSaveFailed");
 }
 
-type FsPermissionMode = "read" | "readwrite";
-
-type FsWritable = {
-  write: (data: string | Blob) => Promise<void>;
-  close: () => Promise<void>;
-};
-
-type FsFileHandle = {
-  name: string;
-  createWritable: () => Promise<FsWritable>;
-  getFile?: () => Promise<File>;
-  queryPermission?: (descriptor?: { mode?: FsPermissionMode }) => Promise<PermissionState>;
-  requestPermission?: (descriptor?: { mode?: FsPermissionMode }) => Promise<PermissionState>;
-};
+type FsFileHandle = { name: string; getFile?: () => Promise<File> };
 
 type SaveFilePickerType = {
   description?: string;
   accept: Record<string, string[]>;
-};
-
-type SaveFilePickerOptions = {
-  suggestedName?: string;
-  types?: SaveFilePickerType[];
 };
 
 type OpenFilePickerOptions = {
@@ -490,7 +442,6 @@ type OpenFilePickerOptions = {
 };
 
 type FsWindow = Window & {
-  showSaveFilePicker?: (options?: SaveFilePickerOptions) => Promise<FsFileHandle>;
   showOpenFilePicker?: (options?: OpenFilePickerOptions) => Promise<FsFileHandle[]>;
 };
 
@@ -499,10 +450,7 @@ function fsAccessWindow(): FsWindow | null {
     return null;
   }
   const candidate = window as FsWindow;
-  if (
-    typeof candidate.showSaveFilePicker === "function" ||
-    typeof candidate.showOpenFilePicker === "function"
-  ) {
+  if (typeof candidate.showOpenFilePicker === "function") {
     return candidate;
   }
   return null;

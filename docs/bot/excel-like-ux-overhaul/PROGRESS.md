@@ -3,7 +3,7 @@
 - repo: `ishizakahiroshi/PlainSheet`
 - base: `develop`
 - 作業 branch: `bot/20261005-004-excel-like-ux`
-- 更新日時: 2026-10-05 03:40 UTC
+- 更新日時: 2026-10-05 04:06 UTC
 - 受付済み。同一案件番号の既存 PR / 作業 branch との衝突なし（開始時検索）。
 - 固定指示 `README.md` と `REVIEW.md` を SHA `037c29ea4649efc81acc8f28824dca3df08e7450` で全読了。
 - C1 から直列実施。各工程は PR CI と別担当レビューで判定。merge / release はしない。
@@ -16,9 +16,9 @@
 |---|---|---|---|
 | U1 再監査 / 共通仕様 | C1 追補 | dot | ソース監査・共通仕様を記録。画面監査は未実施 |
 | U2 データ / 保存修正 | C2〜C5 | dot（単一実装担当） | 一次修正・回帰146件PASS。最終独立レビュー/U4待ち |
-| U3 アイコン / 導線 / 状態 | C6〜C7 | dot | 進行中（03:40 UTC開始）。既存 lucide / CSS / 翻訳のみ |
-| U4 検証 / 独立レビュー | C8 | dot + 別担当 reviewer | code SHA と review SHA を分け、最終差分を確認 |
-| U5 同じ PR へ提出 / 検収 | C8 / 手元受入 | dot / ローカル担当 | ブラウザ・Windows Tauri・実 IME・2,000×30・テーマは未実施を分離 |
+| U3 アイコン / 導線 / 状態 | C6〜C7 | dot | 一次修正/静的検証済。画面受入は未実施 |
+| U4 検証 / 独立レビュー | C8 | dot + 別担当 reviewer | 進行中（04:06 UTC開始）。最終code SHAを別担当が確認 |
+| U5 同じ PR へ提出 / 検収 | C8 / 手元受入 | dot / ローカル担当 | READMEと版別10分チェックリストを準備。手元受入は未実施 |
 
 - 許可: src、公開 docs、README。依存 / lockfile、src-tauri、workflow、配布用アイコンは変更しない。merge / release / deploy しない。
 - 環境: Node v24.19.0、既存 Bun 1.3.14。`bun install --frozen-lockfile`: exit 0、Checked 313 installs / 366 packages / no changes。lockfile 差分なし。共有ツールを読むだけで追加インストールなし。
@@ -164,3 +164,15 @@
 - 開発中に翻訳キー不足、テストの型注釈、CSV末尾改行の期待値を修正し、上記全検証を再実行。既存serializerの末尾改行規則は変更していない。
 - `273c622…` / run `37259331229` と `939b7ab…` / run `37259516185`: 両方 completed/failure、Windows/macOS success、Linux lowercase binary 生成後に同 selector/exit2。raw log 照合済み。追加指示どおり既知梱包問題と今回src検証を分離する。
 - 独立 reviewer は作業と別担当で危険経路を点検中。このU2 checkpointの code SHA、後続U3修正後の review SHA、exact-head CI は最終提出で明示する。U3は版表示、件数、clear、tooltip、keyboard、small-window、help を整える。
+
+### 2026-10-05 04:06 UTC — U3 一次修正 / 指摘修正 / U4 開始
+
+- U2 code SHA: `d813e6b839544bb3950b97edda8e615f2a2ea592`。その CI run `37260396888` は completed/failure。Windows/macOS success、Linux 18 files/146 tests・Tauri build success後、同selectorでstaging exit2。raw log照合済み。今回U3の検証へ古いPASSを流用しない。
+- UI: Browser Download/Download as、App Save/Save as、持続する保存通知、未保存保護、filter件数/解除/対象表示、値検索と件数、範囲統計のvisible-row対応。Toolbarをファイル/編集/行列/表示へ分け、Bot/AIコピーを通常の表コピーへ。行と列の削除、clearとdeleteを区別。
+- ActionButtonはhoverとkeyboard focusで同じtooltip/accessible name。Tabの左右/Home/End、dialog focus trap/復帰、ContextMenu上下/Esc、同名tabの番号/path説明。CSSは狭幅の折返し/scroll、テーマ変数/focus/disabledを使用。実画面検証ではなくソース/DOM確認。
+- 別担当の指摘を修正: F2とCtrl+D/Rの実キーbinding、F2末尾指定、未確定editor/IMEを含むbrowser unload警告、tab復帰時のanchor/range保持、pristine Newで確定値を消さないこと、古いcanvas callbackから他tabへ書かないこと。対応する回帰を追加。
+- Native closeの一部は停止・別範囲: 現capabilityはallow-closeでallow-destroyなし。JS API onCloseRequestedは内部destroyを使うため、試作listenerは未公開のまま除去。既存close機能は維持し、アプリ内title-barボタンだけ確認を足して既存allow-closeを使う。OS/menu/Alt+F4保護は未確認。capability/Rust/window securityは変更していない。
+- ブランド監査: app icon PNGを視認、既存icon.svg/favicon.svgの2列3行と青セルのモチーフを照合。index.htmlにfavicon linkなし。参照追加は許可外index.htmlの候補として記録のみ。配布用binary/assets生成なし。
+- `bun run test`: exit0、19 files/159 tests。`bun run lint`: exit0。`bun run build`: exit0（既存PURE/chunk警告）。Browser download encodingの途中修正とfilter accessible-nameの試験指摘を直して再実行済み。native I/O/canvasはmock、実画面/IME/native/performanceは未実施。
+- READMEと `docs/manual-check-excel-like-ux.md` に両版の保存/操作/互換限界、約10分の代表検収、OS close/favicons/workflowの別範囲を記した。
+- このU3 commitをU4の独立review対象に渡し、code SHA/review SHAとexact-head CIの確定結果をPRへ記録する。手元担当の次の一手は、最終headを開いてBrowser版の合成CSVチェックから始めること。全体完了/配布可能とはしない。

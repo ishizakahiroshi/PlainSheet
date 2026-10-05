@@ -1,3 +1,4 @@
+import { selectedSourceRows } from "../lib/gridOperations";
 import { t } from "../lib/i18n";
 import { normalizeRange } from "../lib/clipboard";
 import type { CellValue, Range, Selection, SheetMeta } from "../types/sheet";
@@ -9,6 +10,8 @@ type StatusBarProps = {
   range: Range;
   meta: SheetMeta;
   zoom?: number;
+  visibleSourceRows?: number[] | null;
+  browser?: boolean;
 };
 
 export type SelectionStats = {
@@ -20,7 +23,16 @@ export type SelectionStats = {
   min: string | null;
 };
 
-export function StatusBar({ rows, columnCount, selection, range, meta, zoom }: StatusBarProps) {
+export function StatusBar({
+  rows,
+  columnCount,
+  selection,
+  range,
+  meta,
+  zoom,
+  visibleSourceRows = null,
+  browser = false,
+}: StatusBarProps) {
   const selectedRange =
     range ??
     ({
@@ -30,19 +42,29 @@ export function StatusBar({ rows, columnCount, selection, range, meta, zoom }: S
       endCol: selection.col,
     } as const);
   const normalized = normalizeRange(selectedRange);
-  const selectedRows = normalized.endRow - normalized.startRow + 1;
+  const selectedRows = visibleSourceRows
+    ? selectedSourceRows(rows.length, selectedRange, visibleSourceRows).length
+    : normalized.endRow - normalized.startRow + 1;
   const selectedCols = normalized.endCol - normalized.startCol + 1;
-  const stats = calculateSelectionStats(rows, selectedRange);
+  const visibleSet = visibleSourceRows ? new Set(visibleSourceRows) : null;
+  const stats = calculateSelectionStats(
+    visibleSet ? rows.map((row, i) => (visibleSet.has(i) ? row : [])) : rows,
+    selectedRange,
+  );
   const zoomPercent = zoom !== undefined ? Math.round(zoom * 100) : null;
 
   return (
     <footer className="statusBar">
-      <span>{t("rowsCols", { rows: rows.length, cols: columnCount })}</span>
+      <span>
+        {visibleSourceRows
+          ? t("filteredCount", { visible: visibleSourceRows.length, total: rows.length })
+          : t("rowsCols", { rows: rows.length, cols: columnCount })}
+      </span>
       <span>{t("selectedRange", { rows: selectedRows, cols: selectedCols })}</span>
       <span>{meta.encoding.toUpperCase()}</span>
       <span>{meta.newline}</span>
-      <span>{t("csvLabel", { delimiter: meta.delimiter === "\t" ? "TSV" : meta.delimiter })}</span>
-      <span>{meta.dirty ? t("unsaved") : t("saved")}</span>
+      <span>{t("formatLabel", { format: (meta.format ?? "csv").toUpperCase() })}</span>
+      <span>{meta.dirty ? t("unsaved") : browser ? t("originalUnchanged") : t("saved")}</span>
       {zoomPercent !== null ? <span>{t("zoomLabel", { percent: zoomPercent })}</span> : null}
       <span className="statusBar__stats">{formatStats(stats)}</span>
     </footer>
@@ -56,8 +78,16 @@ export function calculateSelectionStats(
   const normalized = normalizeRange(range);
   const numbers: number[] = [];
   let count = 0;
-  for (let rowIndex = normalized.startRow; rowIndex <= normalized.endRow; rowIndex += 1) {
-    for (let colIndex = normalized.startCol; colIndex <= normalized.endCol; colIndex += 1) {
+  for (
+    let rowIndex = normalized.startRow;
+    rowIndex <= normalized.endRow && rowIndex < rows.length;
+    rowIndex += 1
+  ) {
+    for (
+      let colIndex = normalized.startCol;
+      colIndex <= normalized.endCol && colIndex < (rows[rowIndex]?.length ?? 0);
+      colIndex += 1
+    ) {
       const value = rows[rowIndex]?.[colIndex] ?? "";
       if (value.trim() !== "") {
         count += 1;

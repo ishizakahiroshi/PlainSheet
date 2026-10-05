@@ -121,4 +121,69 @@ describe("production App wiring with a mocked canvas surface", () => {
     expect(grid().rows).toEqual([[""]]);
     expect(screen.getByText(t("clipboardContextChanged"))).toBeInTheDocument();
   });
+  it("warns on unload while a clean file has an uncommitted draft, including composition", async () => {
+    await load();
+    act(() => grid().onSelectionChange({ row: 1, col: 0 }, null));
+    const input = screen.getByRole("textbox", { name: t("formulaInput") });
+    fireEvent.focus(input);
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: "未確定" } });
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(grid().rows[1][0]).toBe("00123");
+  });
+  it("keeps a pending value in a pristine starter when New creates the next tab", async () => {
+    render(<App />);
+    fireEvent.click(screen.getAllByRole("button", { name: t("newSheet") })[0]);
+    const input = screen.getByRole("textbox", { name: t("formulaInput") });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "keep me" } });
+    fireEvent.click(screen.getByRole("button", { name: t("newTab") }));
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(grid().rows).toEqual([[""]]);
+    fireEvent.click(screen.getAllByRole("tab")[0]);
+    expect(grid().rows).toEqual([["keep me"]]);
+  });
+  it("preserves a backwards range anchor through a tab round trip and rejects stale canvas writes", async () => {
+    await load();
+    const selected = { row: 2, col: 1 };
+    const range = { startRow: 0, startCol: 0, endRow: 2, endCol: 1 };
+    act(() => grid().onSelectionChange(selected, range));
+    const oldPaste = grid().onPasteGrid;
+    const oldFill = grid().onFill;
+    fireEvent.click(screen.getByRole("button", { name: t("newTab") }));
+    act(() => {
+      oldPaste(0, 0, [["stale"]]);
+      oldFill?.([{ row: 0, col: 0, value: "stale" }]);
+    });
+    expect(grid().rows).toEqual([[""]]);
+    fireEvent.click(screen.getAllByRole("tab")[0]);
+    expect(grid().selection).toEqual(selected);
+    expect(grid().range).toEqual(range);
+  });
+  it("filters nonadjacent rows, protects hidden data for paste/search/replace, and clears from an explicit control", async () => {
+    await load();
+    act(() => grid().onHeaderMenuClick?.(1, { x: 0, y: 0, width: 50, height: 30 }));
+    fireEvent.click(screen.getByRole("menuitem", { name: t("filter") }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /B/ }));
+    fireEvent.click(screen.getByRole("button", { name: t("filterApply") }));
+    expect(grid().rowSourceIndexes).toEqual([0, 1, 3]);
+    act(() => grid().onPasteGrid(1, 0, [["first"], ["second"]]));
+    expect(grid().rows.map((row) => row[0])).toEqual(["name", "first", "second"]);
+    fireEvent.click(screen.getByRole("button", { name: t("search") }));
+    fireEvent.change(screen.getByRole("textbox", { name: t("findPlaceholder") }), {
+      target: { value: "hidden" },
+    });
+    expect(screen.getByRole("button", { name: t("replaceAll") })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: t("filterAll") }));
+    expect(grid().rows.map((row) => row[0])).toEqual(["name", "first", "hidden", "second"]);
+    fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+    expect(grid().rows.map((row) => row[0])).toEqual([
+      "name",
+      "00123",
+      "hidden",
+      "9007199254740993",
+    ]);
+  });
 });

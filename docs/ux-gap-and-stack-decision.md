@@ -232,3 +232,29 @@ Vite の起動時間と test 実行時間は上の基準の測定値ではない
 | Browserの保存成功誤認 | download-only、元ファイル未変更/開始通知、dirty保持 | 確認できない保存完了を表示しない | picker非呼出/anchor発火/取消の実hook |
 
 18 files / 146 tests、lint、build は一次修正に対して全 exit 0。最終review・exact-head CI・手元受入は別状態。保存エンコード/native、IME、2,000×30、テーマ画面、小画面は手元チェックリストへ残す。非同期clipboardの対象変化は処理を中止し、対象を選び直す通知を出す。
+
+
+## U3 導線・状態・アイコンの修正（04:06 UTC）
+
+| 困る作業 | 変更 | 得られる結果 | 確認 / 限界 |
+|---|---|---|---|
+| Browserで元ファイルへ保存したと思う | Download/Download as、元ファイル未変更、開始後の注意とdirty保護。AppはSave/Save as | 保存方式を技術選択なしで区別 | Toolbar/StatusBar/useFile/README。DOM回帰、実download完了は手元 |
+| 保存失敗や取消が一瞬で消える | 元文書snapshot、持続する保存結果/失敗/取消表示 | retry前に何が起きたか読める | hook成功/取消/例外/多重発火回帰。native実機未実施 |
+| filterの件数/対象/復帰が不明 | 件数（headerを含むと明示）、列印、全解除、値検索/件数、編集と解除を別項目。検索/置換はvisible scope | 非表示行を誤って対象としない | header ON/OFF、App paste/search/解除/Undo、値検索中choice保持回帰 |
+| アイコンの意味が同じに見える | File/Edit/Rows-and-columns/View grouping、Saveと別名を区別、行/列+追加削除記号、ClearはEraser、AI/Bot表現を通常Clipboardに | 実操作を予測しやすい | 既存lucideのみ、ラベル/name/keyboard tooltip DOM試験 |
+| キーボードで意味/戻り先が分からない | focus時tooltip、tab移動、menu上下/Esc、dialog focus trap/復帰、F2/Ctrl+D/R明示binding | mouseなしで操作名と対象を確認 | DOM/wrapper試験。実canvas/IMEは手元 |
+| narrow windowで操作が消える | min-width固定を外しtoolbar/検索/状態のwrap/scroll、dialog/popover最大寸法、theme変数とfocus輪郭 | 操作を削らず小窓に納める方針 | CSSソース確認のみ。640px/zoom/light/dark/systemは未実施 |
+
+### Native closeの別範囲
+
+`src-tauri/capabilities/default.json` は `core:window:allow-close` を許可し、`allow-destroy` は列挙しない。導入済み `@tauri-apps/api/window.js` の `onCloseRequested`（1632–1639行）はeventがpreventされない時に `this.destroy()` を呼ぶ。generated ACLのwindow defaultにもdestroyはない。したがって当該API listenerをそのまま導入する案は採用しない。試作は公開前に取り除き、capability/Rustは未変更。既存close commandを使うtitle-bar内の確認とbrowser beforeunload警告だけを今回修正した。
+
+OS/menu/Alt+F4での未保存保護は「失敗を実機再現した」という断定ではなく、今回の検証と修正の未達範囲。API+destroy案ならcapability追加を含む明示的な範囲/権限承認が必要。代替設計も含めowner側で検討し、実機検収までnative全終了経路を合格にしない。
+
+### ブランドと対象外ファイル
+
+`src-tauri/icons/icon.png` を実画像で確認。`assets/icon.svg` と `assets/icons/favicon.svg` は2列3行の表と青い選択セルで一貫する。UIは既存lucideの表/操作モチーフを使い、他社ロゴを複製しない。現在の `index.html` にはfavicon linkがない。既存SVGを参照するなら許可外 `index.html` が必要候補。今回はicon/assets/binary生成をしない。
+
+### 検証状態
+
+U3 sourceに19 files/159 tests、lint、build全exit0。U2の146件からkeyboard/unload/tab/filtered App配線と版別UI確認を拡張。実スクリーンショット、実IME、Windows Tauri I/O、2,000×30、theme/narrow-window目視は未実施。`docs/manual-check-excel-like-ux.md` に別担当の代表作業を記した。最終codeとreview SHA、CIの終端結果はPROGRESS/PRへ記録し、C1基盤判定と利用者受入を分ける。

@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronUp, Replace, X } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { ActionButton } from "./ActionButton";
 import { t } from "../lib/i18n";
 
 export type SearchOptions = {
@@ -9,6 +10,7 @@ export type SearchOptions = {
 
 type SearchPanelProps = {
   open: boolean;
+  filtered?: boolean;
   query: string;
   replacement: string;
   options: SearchOptions;
@@ -26,6 +28,7 @@ type SearchPanelProps = {
 
 export function SearchPanel({
   open,
+  filtered = false,
   query,
   replacement,
   options,
@@ -56,6 +59,9 @@ export function SearchPanel({
 
   return (
     <aside className="searchPanel" aria-label={t("search")}>
+      <span className="searchPanel__scope">
+        {filtered ? t("searchVisibleScope") : t("searchAllScope")}
+      </span>
       <input
         ref={findInputRef}
         aria-label={t("findPlaceholder")}
@@ -63,6 +69,10 @@ export function SearchPanel({
         placeholder={t("findPlaceholder")}
         onChange={(event) => onQueryChange(event.target.value)}
         onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+          }
           if (event.key === "Enter" && event.shiftKey) {
             onPrevious();
           } else if (event.key === "Enter") {
@@ -99,23 +109,57 @@ export function SearchPanel({
       <div className="searchPanel__count">
         {total === 0 ? t("noMatches") : t("matchCount", { current: current + 1, total })}
       </div>
-      <button type="button" className="toolbar__iconButton" aria-label={t("previous")} onClick={onPrevious}>
+      <ActionButton
+        type="button"
+        className="toolbar__iconButton"
+        aria-label={t("previous")}
+        tooltip={`${t("previous")} (Shift+Enter)`}
+        disabled={total === 0}
+        onClick={onPrevious}
+      >
         <ChevronUp size={16} aria-hidden="true" />
-      </button>
-      <button type="button" className="toolbar__iconButton" aria-label={t("next")} onClick={onNext}>
+      </ActionButton>
+      <ActionButton
+        type="button"
+        className="toolbar__iconButton"
+        aria-label={t("next")}
+        tooltip={`${t("next")} (Enter)`}
+        disabled={total === 0}
+        onClick={onNext}
+      >
         <ChevronDown size={16} aria-hidden="true" />
-      </button>
-      <button type="button" className="toolbar__button" aria-label={t("replace")} onClick={onReplace}>
+      </ActionButton>
+      <ActionButton
+        type="button"
+        className="toolbar__button"
+        aria-label={t("replace")}
+        tooltip={t("replace")}
+        disabled={total === 0}
+        onClick={onReplace}
+      >
         <Replace size={15} aria-hidden="true" />
         <span>{t("replace")}</span>
-      </button>
-      <button type="button" className="toolbar__button" aria-label={t("replaceAll")} onClick={onReplaceAll}>
+      </ActionButton>
+      <ActionButton
+        type="button"
+        className="toolbar__button"
+        aria-label={t("replaceAll")}
+        tooltip={t("replaceAll")}
+        disabled={total === 0}
+        onClick={onReplaceAll}
+      >
         <Replace size={15} aria-hidden="true" />
         <span>{t("replaceAll")}</span>
-      </button>
-      <button type="button" className="toolbar__iconButton" aria-label={t("close")} onClick={onClose}>
+      </ActionButton>
+      <ActionButton
+        type="button"
+        className="toolbar__iconButton"
+        aria-label={t("close")}
+        tooltip={`${t("close")} (Esc)`}
+        onClick={onClose}
+      >
         <X size={16} aria-hidden="true" />
-      </button>
+      </ActionButton>
     </aside>
   );
 }

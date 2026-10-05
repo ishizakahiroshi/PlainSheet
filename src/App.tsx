@@ -1,3 +1,5 @@
+import { FilterX } from "lucide-react";
+import { ActionButton } from "./components/ActionButton";
 import { flushSync } from "react-dom";
 import type { RegisterEditorCommit } from "./components/CellTextEditor";
 import {
@@ -91,6 +93,9 @@ export default function App() {
   selectionRef.current = selectionState.selection;
   rangeRef.current = selectionState.range;
   const editorCommitRef = useRef<(() => boolean) | null>(null);
+  const documentsRef = useRef(workspace.documents);
+  documentsRef.current = workspace.documents;
+  const closeApprovedRef = useRef(false);
   const registerEditorCommit: RegisterEditorCommit = useCallback((commit) => {
     editorCommitRef.current = commit;
     return () => {
@@ -140,7 +145,10 @@ export default function App() {
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!workspace.anyDirty && !metaRef.current.dirty) {
+      if (
+        closeApprovedRef.current ||
+        (!workspace.anyDirty && !metaRef.current.dirty && !editorCommitRef.current)
+      ) {
         return;
       }
       event.preventDefault();
@@ -187,12 +195,9 @@ export default function App() {
     (doc: DocumentSnapshot) => {
       sheet.restoreState(doc.rows, doc.meta, doc.colWidths);
       history.restore(doc.history.undo, doc.history.redo);
-      if (doc.range) {
-        selectionState.selectRange(doc.range);
-      } else {
-        selectionState.setSelection(doc.selection);
-      }
+      selectionState.setSelectionRange(doc.selection, doc.range);
       filter.clearAll();
+      setFocusCell(null);
       setSelectedRows([]);
       setSelectedColumns([]);
     },
@@ -200,19 +205,19 @@ export default function App() {
   );
 
   const isBlankStarter = useCallback(() => {
+    const rows = rowsRef.current;
+    const meta = metaRef.current;
     const emptyRows =
-      sheet.rows.length === 0 ||
-      (sheet.rows.length === 1 &&
-        (sheet.rows[0]?.length ?? 0) <= 1 &&
-        (sheet.rows[0]?.[0] ?? "") === "");
+      rows.length === 0 ||
+      (rows.length === 1 && (rows[0]?.length ?? 0) <= 1 && (rows[0]?.[0] ?? "") === "");
     return (
-      workspace.documents.length === 1 &&
-      !sheet.meta.dirty &&
-      !sheet.meta.filePath &&
-      !sheet.meta.fileName &&
+      documentsRef.current.length === 1 &&
+      !meta.dirty &&
+      !meta.filePath &&
+      !meta.fileName &&
       emptyRows
     );
-  }, [workspace.documents.length, sheet.meta, sheet.rows]);
+  }, []);
 
   const loadIntoWorkspace = useCallback(
     (rows: CellValue[][], meta: Partial<SheetMeta>) => {
@@ -253,7 +258,6 @@ export default function App() {
     getRows: () => rowsRef.current,
     getMeta: () => metaRef.current,
     onToast: showToast,
-    confirmDiscard: () => window.confirm(t("confirmUnsaved")),
     onRecentPath: (path) => {
       updateSettings((current) => ({
         recentFiles: pushRecentFile(current.recentFiles, path),
@@ -403,6 +407,7 @@ export default function App() {
   };
 
   const editCell = (row: number, col: number, value: string) => {
+    if (workspace.activeId !== activeDocumentIdRef.current || row < 0) return;
     const previousValue = sheet.rows[row]?.[col] ?? "";
     if (previousValue !== value) {
       recordBeforeChange();
@@ -473,6 +478,14 @@ export default function App() {
   };
 
   const pasteGrid = (row: number, col: number, grid: CellValue[][]) => {
+    if (
+      workspace.activeId !== activeDocumentIdRef.current ||
+      sheet.rows !== rowsRef.current ||
+      rowSourceIndexes !== visibleMapRef.current
+    ) {
+      showToast(t("clipboardContextChanged"));
+      return;
+    }
     const pasted = pasteIntoView(sheet.rows, row, col, grid, rowSourceIndexes);
     if (!pasted) {
       showToast(t("filteredPasteOverflow"));
@@ -815,13 +828,34 @@ export default function App() {
   };
 
   const hasData = sheet.rows.length > 0;
+  const filterValueRows = useMemo(
+    () => (settings.useHeaderRow ? sheet.rows.slice(1) : sheet.rows),
+    [settings.useHeaderRow, sheet.rows],
+  );
   const columnFilterSelected = filterPopover
     ? (filter.filters.get(filterPopover.col) ?? null)
     : null;
 
   return (
     <div className="appShell" onKeyDown={handleKeyDown}>
-      <TitleBar meta={sheet.meta} />
+      <TitleBar
+        meta={sheet.meta}
+        beforeClose={() => {
+          const dirty =
+            metaRef.current.dirty ||
+            documentsRef.current.some(
+              (doc) => doc.id !== activeDocumentIdRef.current && doc.meta.dirty,
+            );
+          if ((dirty || editorCommitRef.current) && !window.confirm(t("confirmUnsaved")))
+            return false;
+          closeApprovedRef.current = true;
+          return true;
+        }}
+        onCloseFailed={() => {
+          closeApprovedRef.current = false;
+          showToast(t("windowCloseFailed"));
+        }}
+      />
       <TabBar
         documents={workspace.documents.map((doc) =>
           doc.id === workspace.activeId ? { ...doc, meta: sheet.meta } : doc,
@@ -832,6 +866,9 @@ export default function App() {
         onNew={newFile}
       />
       <Toolbar
+        browser={!isTauriRuntime()}
+        saving={file.saving}
+        rowOpsDisabled={filter.hasFilters}
         canUndo={history.canUndo}
         canRedo={history.canRedo}
         onNew={newFile}
@@ -851,7 +888,7 @@ export default function App() {
           sheet.autoFitColumns();
           showToast(t("toastAutoFit"));
         }}
-        onAiCopy={() => void copySelection()}
+        onCopy={() => void copySelection()}
         onSettings={() => setSettingsOpen(true)}
         onHelp={() => setHelpOpen(true)}
       />
@@ -862,7 +899,27 @@ export default function App() {
       <span id="cell-edit-help" className="srOnly">
         {t("editNavigationHelp")}
       </span>
+      {filter.hasFilters && (
+        <div className="filterBar" role="status">
+          <strong>{t("filterActiveLabel")}</strong>
+          <span>
+            {t("filteredCount", { visible: displayRows.length, total: sheet.rows.length })}
+            {settings.useHeaderRow ? ` (${t("headerIncluded")})` : ""}
+          </span>
+          <ActionButton
+            className="toolbar__button"
+            type="button"
+            tooltip={t("filterAll")}
+            onClick={filter.clearAll}
+          >
+            <FilterX size={16} aria-hidden="true" />
+            {t("filterAll")}
+          </ActionButton>
+          <span>{t("toastFilterBlocksRowOps")}</span>
+        </div>
+      )}
       <SearchPanel
+        filtered={filter.hasFilters}
         open={searchOpen}
         query={query}
         replacement={replacement}
@@ -881,6 +938,7 @@ export default function App() {
       {hasData ? (
         <>
           <FormulaBar
+            key={`formula-${workspace.activeId}`}
             row={selectionState.selection.row}
             col={selectionState.selection.col}
             reference={selectedReference}
@@ -903,6 +961,7 @@ export default function App() {
             }}
           />
           <GlideSheet
+            key={`grid-${workspace.activeId}`}
             rows={displayRows}
             rowSourceIndexes={rowSourceIndexes}
             columnCount={sheet.columnCount}
@@ -924,7 +983,10 @@ export default function App() {
             onColumnMove={(from, to) => {
               if (!ensureRowOpsAllowed()) return;
               const moved = moveColumn(sheet.rows, sheet.colWidths, sheet.columnCount, from, to);
-              if (!moved) return;
+              if (!moved) {
+                if (from !== to) showToast(t("moveDataColumnsOnly"));
+                return;
+              }
               recordBeforeChange();
               sheet.replaceRows(moved.rows, true, false);
               sheet.setColWidths(moved.widths);
@@ -936,6 +998,14 @@ export default function App() {
             onColumnsSelected={setSelectedColumns}
             onPasteGrid={pasteGrid}
             onFill={(updates) => {
+              if (
+                workspace.activeId !== activeDocumentIdRef.current ||
+                sheet.rows !== rowsRef.current ||
+                rowSourceIndexes !== visibleMapRef.current
+              ) {
+                showToast(t("clipboardContextChanged"));
+                return;
+              }
               if (
                 updates.length === 0 ||
                 updates.some(
@@ -981,11 +1051,13 @@ export default function App() {
             if (finishPendingEdit()) void file.openFile();
           }}
           onSample={() => void file.loadSample()}
-          recentFiles={settings.recentFiles}
-          onOpenRecent={(path) => void file.loadPath(path)}
+          recentFiles={isTauriRuntime() ? settings.recentFiles : []}
+          onOpenRecent={isTauriRuntime() ? (path) => void file.loadPath(path) : undefined}
         />
       )}
       <StatusBar
+        visibleSourceRows={rowSourceIndexes}
+        browser={!isTauriRuntime()}
         rows={sheet.rows}
         columnCount={sheet.columnCount}
         selection={selectionState.selection}
@@ -997,6 +1069,9 @@ export default function App() {
         state={contextMenu}
         rowOpsDisabled={filter.hasFilters}
         filterActive={contextMenu ? filter.filters.has(contextMenu.col) : false}
+        onClearFilter={() => {
+          if (contextMenu) filter.setColumnFilter(contextMenu.col, null);
+        }}
         onClose={() => setContextMenu(null)}
         onCut={() => {
           const range = rangeFromContextMenu();
@@ -1053,7 +1128,7 @@ export default function App() {
       />
       <FilterPopover
         state={filterPopover}
-        rows={settings.useHeaderRow ? sheet.rows.slice(1) : sheet.rows}
+        rows={filterValueRows}
         selected={columnFilterSelected}
         onApply={(col, allowed) => filter.setColumnFilter(col, allowed)}
         onClose={() => setFilterPopover(null)}
@@ -1069,6 +1144,7 @@ export default function App() {
       <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
       <SettingsModal
         open={settingsOpen}
+        browser={!isTauriRuntime()}
         encoding={sheet.meta.encoding}
         newline={sheet.meta.newline}
         zebra={settings.zebra}

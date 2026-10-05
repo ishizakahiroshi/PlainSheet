@@ -1,4 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { useDialogFocus } from "../hooks/useDialogFocus";
+import { isTauriRuntime } from "../hooks/useFile";
 import { t } from "../lib/i18n";
 
 type HelpModalProps = {
@@ -8,7 +10,7 @@ type HelpModalProps = {
 
 const shortcuts = [
   ["Ctrl+O", "shortcutOpen"],
-  ["Ctrl+S", "shortcutSave"],
+  ["Ctrl+S / Ctrl+Shift+S", "shortcutSave"],
   ["Ctrl+F", "shortcutSearch"],
   ["Ctrl+H", "shortcutReplace"],
   ["Ctrl+A", "shortcutSelectAll"],
@@ -18,10 +20,14 @@ const shortcuts = [
   ["Delete", "shortcutClearCell"],
   ["Ctrl+Z / Ctrl+Y", "shortcutUndoRedo"],
   ["Name box + Enter", "shortcutJump"],
+  ["Ctrl+D / Ctrl+R", "shortcutFill"],
+  ["Enter / Shift+Enter / Tab / Shift+Tab / Alt+Enter", "editNavigationHelp"],
   ["Ctrl+= / Ctrl+- / Ctrl+0", "shortcutZoom"],
 ] as const;
 
 export function HelpModal({ open, onClose }: HelpModalProps) {
+  const dialog = useRef<HTMLElement>(null);
+  useDialogFocus(dialog, open);
   useEffect(() => {
     if (!open) {
       return;
@@ -43,6 +49,7 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
   return (
     <div className="modalBackdrop" role="presentation" onClick={onClose}>
       <section
+        ref={dialog}
         className="modal modal--wide"
         role="dialog"
         aria-modal="true"
@@ -50,6 +57,9 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
         onClick={(event) => event.stopPropagation()}
       >
         <h2 id="help-title">{t("helpTitle")}</h2>
+        <p>{isTauriRuntime() ? t("appSaveHint") : t("browserSaveHint")}</p>
+        <p>{t("sortSaveHelp")}</p>
+        <p>{t("searchScopeHelp")}</p>
         <table className="shortcutTable">
           <tbody>
             {shortcuts.map(([key, label]) => (

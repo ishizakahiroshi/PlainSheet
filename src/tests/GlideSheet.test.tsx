@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import type { DataEditor } from "@glideapps/glide-data-grid";
-import { CompactSelection } from "@glideapps/glide-data-grid";
+import { CompactSelection, GridCellKind, type Theme } from "@glideapps/glide-data-grid";
 import { GlideSheet } from "../components/GlideSheet";
 
 type EditorProps = ComponentProps<typeof DataEditor>;
@@ -61,6 +61,39 @@ describe("production Glide wrapper with the canvas renderer mocked", () => {
       { startRow: 0, startCol: 0, endRow: 1, endCol: 3 },
     );
   });
+  it("wires F2 and fill shortcuts and requests an end caret for F2", () => {
+    const { editor } = setup();
+    expect(editor().keybindings).toMatchObject({
+      activateCell: "F2| |Enter|shift+Enter",
+      downFill: true,
+      rightFill: true,
+    });
+    fireEvent.keyDown(screen.getByTestId("canvas-proxy"), { key: "F2" });
+    const value = {
+      kind: GridCellKind.Text as const,
+      data: "existing",
+      displayData: "existing",
+      allowOverlay: true,
+    };
+    const provided = editor().provideEditor?.(value);
+    if (!provided || typeof provided !== "object" || !("editor" in provided))
+      throw new Error("Text editor not supplied");
+    const Editor = provided.editor;
+    render(
+      <Editor
+        value={value}
+        onChange={vi.fn()}
+        onFinishedEditing={vi.fn()}
+        isHighlighted={true}
+        target={{ x: 0, y: 0, width: 100, height: 30 }}
+        forceEditMode={true}
+        theme={{} as Theme}
+      />,
+    );
+    const input = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(input.selectionStart).toBe(8);
+    expect(input.selectionEnd).toBe(8);
+  });
   it("preserves the active anchor when controlled selection echoes back from App", () => {
     const { editor, change, view, props } = setup();
     act(() =>
@@ -87,7 +120,7 @@ describe("production Glide wrapper with the canvas renderer mocked", () => {
       editor().onCellsEdited?.([
         {
           location: [0, 1],
-          value: { kind: cell.kind, data: "bad", displayData: "bad", allowOverlay: true } as never,
+          value: { kind: GridCellKind.Text, data: "bad", displayData: "bad", allowOverlay: true },
         },
       ]),
     );
