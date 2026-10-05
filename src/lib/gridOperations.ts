@@ -20,14 +20,38 @@ export function clearVisibleRange(
   rows: CellValue[][],
   range: Exclude<Range, null>,
   visible: readonly number[] | null,
+  exactRows: readonly number[] = [],
+  exactColumns: readonly number[] = [],
 ): CellValue[][] {
-  const r = normalizeRange(range);
+  const indexes = selectionIndexes(rows, range, visible, exactRows, exactColumns);
   const next = cloneRows(rows);
-  for (const row of selectedSourceRows(rows.length, r, visible)) {
-    for (let col = Math.max(0, r.startCol); col <= r.endCol && col < next[row].length; col += 1)
-      next[row][col] = "";
+  for (const row of indexes.rows) {
+    for (const col of indexes.columns) {
+      if (col < next[row].length) next[row][col] = "";
+    }
   }
   return next;
+}
+
+/** Header selections retain their gaps; explicit context-menu rectangles omit exact axes. */
+export function selectionIndexes(
+  rows: CellValue[][],
+  range: Exclude<Range, null>,
+  visible: readonly number[] | null,
+  exactRows: readonly number[] = [],
+  exactColumns: readonly number[] = [],
+): { rows: number[]; columns: number[] } {
+  const r = normalizeRange(range);
+  const sourceRows = selectedSourceRows(rows.length, r, visible);
+  const width = rows.reduce((max, row) => Math.max(max, row.length), 0);
+  const columns = Array.from(
+    { length: Math.max(0, Math.min(width - 1, r.endCol) - Math.max(0, r.startCol) + 1) },
+    (_, i) => Math.max(0, r.startCol) + i,
+  );
+  return {
+    rows: exactRows.length ? sourceRows.filter((row) => exactRows.includes(row)) : sourceRows,
+    columns: exactColumns.length ? columns.filter((col) => exactColumns.includes(col)) : columns,
+  };
 }
 
 /** Reject the complete paste if a filtered view has insufficient destinations. Never spill into hidden rows. */

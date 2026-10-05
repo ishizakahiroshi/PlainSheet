@@ -2,6 +2,9 @@ export type Locale = "ja" | "en";
 
 const dictionaries = {
   ja: {
+    limitedMatchCount: "{current} / {navigation} セル（全 {total} セル一致）",
+    limitedMatchScope:
+      "前後への移動・強調表示は先頭 {navigation} セルまで。全置換は一致した全 {total} セルが対象です。",
     filterValueCount: "{value}、{count}行",
     searchScopeHelp: "フィルタ中の検索・置換は表示行だけが対象です。解除後は全データが対象です。",
     moveDataColumnsOnly: "データのある列の範囲内へ移動してください",
@@ -178,6 +181,9 @@ const dictionaries = {
     windowClose: "閉じる",
   },
   en: {
+    limitedMatchCount: "{current} / {navigation} cells ({total} matching cells in total)",
+    limitedMatchScope:
+      "Navigation and highlighting cover the first {navigation} cells. Replace all targets all {total} matching cells.",
     filterValueCount: "{value}, {count} rows",
     searchScopeHelp:
       "Search and replace use visible rows while filtered; clear filters to target all data.",

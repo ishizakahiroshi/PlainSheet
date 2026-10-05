@@ -145,6 +145,10 @@ export function GlideSheet({
   const [gridSelection, setGridSelection] = useState<GridSelection>(EMPTY_SELECTION);
   const activeHitRef = useRef(activeSearchHit);
   activeHitRef.current = activeSearchHit;
+  const selectionChangeRef = useRef(onSelectionChange);
+  selectionChangeRef.current = onSelectionChange;
+  const headerSelectionRef = useRef({ onRowsSelected, onColumnsSelected });
+  headerSelectionRef.current = { onRowsSelected, onColumnsSelected };
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
   const sourceMapRef = useRef(rowSourceIndexes);
@@ -358,6 +362,9 @@ export function GlideSheet({
       rows: CompactSelection.empty(),
       current: { cell: [col, row], range: { x: col, y: row, width: 1, height: 1 }, rangeStack: [] },
     });
+    headerSelectionRef.current.onRowsSelected?.([]);
+    headerSelectionRef.current.onColumnsSelected?.([]);
+    selectionChangeRef.current({ row: sourceRow, col }, null);
     ref.current?.scrollTo(col, row);
   }, [scrollNonce, toVisibleRow]);
 
@@ -412,10 +419,31 @@ export function GlideSheet({
     } else {
       rect = { x: col, y: row, width: 1, height: 1 };
     }
-    setGridSelection({
-      columns: CompactSelection.empty(),
-      rows: CompactSelection.empty(),
-      current: { cell: [col, row], range: rect, rangeStack: [] },
+    setGridSelection((previous) => {
+      // App echoes the bounding range, but header selections can contain gaps.
+      // Keep the original markers so an echo does not visually select those gaps.
+      if (!previous.current && rangeStartRow !== undefined) {
+        const selectedRows = compactToIndexes(previous.rows);
+        const selectedCols = compactToIndexes(previous.columns);
+        const rowEcho =
+          selectedRows.length > 0 &&
+          rect.y === selectedRows[0] &&
+          rect.height === selectedRows.at(-1)! - selectedRows[0] + 1 &&
+          rect.x === 0 &&
+          rect.width === columnCount;
+        const columnEcho =
+          selectedCols.length > 0 &&
+          rect.x === selectedCols[0] &&
+          rect.width === selectedCols.at(-1)! - selectedCols[0] + 1 &&
+          rect.y === 0 &&
+          rect.height === rows.length;
+        if (rowEcho || columnEcho) return previous;
+      }
+      return {
+        columns: CompactSelection.empty(),
+        rows: CompactSelection.empty(),
+        current: { cell: [col, row], range: rect, rangeStack: [] },
+      };
     });
   }, [
     selection.row,

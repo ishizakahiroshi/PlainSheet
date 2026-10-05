@@ -82,6 +82,25 @@ describe("production cell editor", () => {
 });
 
 describe("production formula bar", () => {
+  it("leaves composition Enter and Escape to the IME in the name box", () => {
+    const jump = vi.fn();
+    render(
+      <FormulaBar row={1} col={1} reference="B2" value="x" onCommit={vi.fn()} onJump={jump} />,
+    );
+    const reference = screen.getByRole("textbox", { name: t("nameBox") });
+    fireEvent.focus(reference);
+    fireEvent.compositionStart(reference);
+    fireEvent.change(reference, { target: { value: "日本語" } });
+    fireEvent.keyDown(reference, { key: "Enter" });
+    fireEvent.keyDown(reference, { key: "Escape" });
+    expect(reference).toHaveValue("日本語");
+    expect(reference).toHaveAttribute("aria-invalid", "false");
+    expect(jump).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(reference);
+    fireEvent.change(reference, { target: { value: "C3" } });
+    fireEvent.keyDown(reference, { key: "Enter" });
+    expect(jump).toHaveBeenCalledWith({ kind: "cell", row: 2, col: 2 });
+  });
   it("restores an invalid reference and visibly marks it invalid", () => {
     render(<FormulaBar row={1} col={1} reference="B2" value="x" onCommit={vi.fn()} />);
     const reference = screen.getByRole("textbox", { name: t("nameBox") });

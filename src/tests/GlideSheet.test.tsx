@@ -50,6 +50,48 @@ function setup(overrides: Partial<ComponentProps<typeof GlideSheet>> = {}) {
 }
 
 describe("production Glide wrapper with the canvas renderer mocked", () => {
+  it("synchronizes the application selection when search focuses a hit", () => {
+    const rowsSelected = vi.fn();
+    const columnsSelected = vi.fn();
+    const { editor, change, view, props } = setup({
+      onRowsSelected: rowsSelected,
+      onColumnsSelected: columnsSelected,
+    });
+    view.rerender(<GlideSheet {...props} activeSearchHit="1:0" scrollNonce={1} />);
+    expect(editor().gridSelection?.current?.cell).toEqual([0, 1]);
+    expect(change).toHaveBeenLastCalledWith({ row: 1, col: 0 }, null);
+    expect(rowsSelected).toHaveBeenLastCalledWith([]);
+    expect(columnsSelected).toHaveBeenLastCalledWith([]);
+    view.rerender(
+      <GlideSheet
+        {...props}
+        selection={{ row: 1, col: 0 }}
+        activeSearchHit="1:0"
+        scrollNonce={1}
+      />,
+    );
+    expect(change).toHaveBeenCalledTimes(1);
+  });
+  it.each(["rows", "columns"] as const)(
+    "keeps disjoint %s selected when App echoes their bounding range",
+    (kind) => {
+      const { editor, change, view, props } = setup({
+        rows: [["a", "b", "c"], ["d"], ["e"]],
+        columnCount: 3,
+      });
+      act(() =>
+        editor().onGridSelectionChange?.({
+          rows: kind === "rows" ? CompactSelection.empty().add(0).add(2) : CompactSelection.empty(),
+          columns:
+            kind === "columns" ? CompactSelection.empty().add(0).add(2) : CompactSelection.empty(),
+        }),
+      );
+      const [selection, range] = change.mock.calls.at(-1)!;
+      view.rerender(<GlideSheet {...props} selection={selection} range={range} />);
+      expect(editor().gridSelection?.current).toBeUndefined();
+      expect([...editor().gridSelection![kind]]).toEqual([0, 2]);
+    },
+  );
   it("uses actual data runs for Ctrl+Arrow and actual data dimensions for Ctrl+A", () => {
     const { change } = setup();
     const canvas = screen.getByTestId("canvas-proxy");

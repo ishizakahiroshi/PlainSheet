@@ -102,8 +102,14 @@ jobs:
         run: |
           set -euo pipefail
           rel=src-tauri/target/release
-          bin=$(ls -1 "$rel/PlainSheet" "$rel/plainsheet" 2>/dev/null | head -n1)
-          test -n "$bin" || { echo "no built binary found"; exit 1; }
+          bin=""
+          for candidate in "$rel/PlainSheet" "$rel/plainsheet"; do
+            if [ -f "$candidate" ]; then
+              bin="$candidate"
+              break
+            fi
+          done
+          test -n "$bin" || { echo "no built binary found" >&2; exit 1; }
           pkg=PlainSheet-linux-x86_64
           mkdir -p out "staging/$pkg"
           cp "$bin" "out/$pkg"

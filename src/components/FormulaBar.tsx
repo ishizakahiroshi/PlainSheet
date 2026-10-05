@@ -39,6 +39,7 @@ export function FormulaBar({
   const target = useRef({ row, col });
   const focused = useRef(false);
   const refFocused = useRef(false);
+  const refComposing = useRef(false);
   const skipBlurCommit = useRef(false);
 
   useEffect(() => {
@@ -70,12 +71,22 @@ export function FormulaBar({
           setRefDraft(event.target.value);
           setRefInvalid(false);
         }}
+        onCompositionStart={() => {
+          refComposing.current = true;
+        }}
+        onCompositionEnd={() => {
+          refComposing.current = false;
+        }}
         onBlur={() => {
           refFocused.current = false;
           setRefDraft(reference);
           setRefInvalid(false);
         }}
         onKeyDown={(event) => {
+          if (refComposing.current || event.nativeEvent.isComposing || event.keyCode === 229) {
+            event.stopPropagation();
+            return;
+          }
           if (event.key === "Enter") {
             event.preventDefault();
             const parsed = parseCellRef(refDraft);

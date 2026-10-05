@@ -176,3 +176,21 @@
 - `bun run test`: exit0、19 files/159 tests。`bun run lint`: exit0。`bun run build`: exit0（既存PURE/chunk警告）。Browser download encodingの途中修正とfilter accessible-nameの試験指摘を直して再実行済み。native I/O/canvasはmock、実画面/IME/native/performanceは未実施。
 - READMEと `docs/manual-check-excel-like-ux.md` に両版の保存/操作/互換限界、約10分の代表検収、OS close/favicons/workflowの別範囲を記した。
 - このU3 commitをU4の独立review対象に渡し、code SHA/review SHAとexact-head CIの確定結果をPRへ記録する。手元担当の次の一手は、最終headを開いてBrowser版の合成CSVチェックから始めること。全体完了/配布可能とはしない。
+
+### 2026-10-05 — ローカル並列引き継ぎ / 追加承認
+
+- 依頼者が残りの修正・検証を承認。Linux workflow の binary selector、main window の終了保護に必要な最小 capability、既存 favicon の参照を追加許可範囲として扱う。merge / tag / release は行わない。
+- dots はアプリ・共有 Git・看板への書き込みを停止し、公開 head `21e7784efc6c25d8c7534fc8d73eccf139c140f1` の読み取り結果を引き渡した。未公開の6ファイルの試作はdots側に保持し、ローカル側は独立した差分を作成している。
+- ローカルの3担当で Linux 梱包、native 終了保護、独立 UX レビューを並列化。OS終了は先にpreventし、保存中・変換中・全タブの未保存状態を確認した後にdestroyする。権限追加はmainの `core:window:allow-destroy` のみ。
+- 追加指摘: 検索ヒットと操作対象のずれ、非連続の行列選択の中間セルへの誤操作、削除確認中の文書変更、5,000セル超の検索件数、検索・名前欄のIME確定キー。合成回帰を伴う修正中。
+- Windows native の初回 build は成功。ただし並行編集前の frontend を含むため、最終統合後に再buildする。実際のOS終了・IME・native I/Oの受入をこの成功から推定しない。
+- Chrome の実ページ操作では、sample の B2編集→EnterでB3、Undo1回でB2値復帰、検索「営業」3セル→C2の参照/値同期、Download開始通知と未保存保持を確認。captureScreenshotはtimeoutし、canvasの見た目・狭幅・テーマの視覚検収は未成立。downloadコピーの再読込も未確認。
+- 最終 test / lint / build、統合差分の独立レビュー、push後の同SHAのCI結果は次の追記で記録する。C1基盤判定・全体受入は引き続き保留。
+
+### 2026-10-05 04:34 UTC — 統合候補の静的検証 / 独立レビュー
+
+- 追加指摘を修正。飛び飛びの選択はcopy/cut/clearとセルメニューでも隙間を処理しない。別の行列ヘッダーのメニュー、参照移動、Undo、filterによる移動では古い選択を残さない。clipboard待機中のexact選択変更と、削除確認中の文書/行変更は中止する。
+- 検索一致総セル数と先頭5,000セルの移動対象を区別し、全置換の対象を説明。検索ヒットのsource座標を操作対象へ同期。検索/参照欄のIMEイベントを保護。
+- 同じ統合sourceの `bun run test`: 22 files / 182 tests、exit0。`bun run lint`、`bun run build`: exit0。既存Rollup PURE/chunk警告あり。canvas/native/IMEの模擬回帰と実機確認を混同しない。
+- 作業担当とは別のローカルreviewerが19ファイルの全差分を確認し、header-context/filter-resetの最終修正まで確認。未解決のcode blockerなし。reviewer自身が書いたGlide/検索/IME差分は統合担当が別途全行確認。別製品AIの全PR差分レビューはpush後にdotsへ依頼する。
+- このcommitのSHAをcode/review対象として、PRのコメントへ同SHAのCIと最終Windows生成物の証跡を追記する。CI全成功・実機受入・配布可能はまだ宣言しない。

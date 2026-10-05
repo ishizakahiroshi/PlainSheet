@@ -5,11 +5,13 @@ import type { RegisterEditorCommit } from "./components/CellTextEditor";
 import {
   clearVisibleRange,
   pasteIntoView,
-  selectedSourceRows,
+  selectionIndexes,
   moveColumn,
   sameRows,
 } from "./lib/gridOperations";
 import { completedSaveMeta } from "./lib/saveState";
+import { collectSearchMatches } from "./lib/search";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ContextMenu, type ContextMenuKind, type ContextMenuState } from "./components/ContextMenu";
@@ -45,11 +47,6 @@ type PendingConfirm = {
   action: () => void;
 } | null;
 
-type SearchHit = {
-  row: number;
-  col: number;
-};
-
 export default function App() {
   const sheet = useSheet();
   const selectionState = useSelection();
@@ -84,6 +81,10 @@ export default function App() {
   const colWidthsRef = useRef(sheet.colWidths);
   const selectionRef = useRef(selectionState.selection);
   const rangeRef = useRef(selectionState.range);
+  const selectedRowsRef = useRef(selectedRows);
+  const selectedColumnsRef = useRef(selectedColumns);
+  selectedRowsRef.current = selectedRows;
+  selectedColumnsRef.current = selectedColumns;
 
   const activeDocumentIdRef = useRef(workspace.activeId);
   activeDocumentIdRef.current = workspace.activeId;
@@ -96,6 +97,7 @@ export default function App() {
   const documentsRef = useRef(workspace.documents);
   documentsRef.current = workspace.documents;
   const closeApprovedRef = useRef(false);
+  const saveRequestsRef = useRef(0);
   const registerEditorCommit: RegisterEditorCommit = useCallback((commit) => {
     editorCommitRef.current = commit;
     return () => {
@@ -267,8 +269,60 @@ export default function App() {
 
   const requestSave = (as = false) => {
     if (!finishPendingEdit()) return;
-    void (as ? file.saveAs() : file.saveFile());
+    saveRequestsRef.current += 1;
+    void (as ? file.saveAs() : file.saveFile()).finally(() => {
+      saveRequestsRef.current -= 1;
+    });
   };
+
+  const approveWindowClose = useCallback(() => {
+    if (closeApprovedRef.current) return true;
+    if (saveRequestsRef.current > 0) {
+      showToast(t("saving"));
+      return false;
+    }
+    if (!finishPendingEdit()) return false;
+    const dirty =
+      metaRef.current.dirty ||
+      documentsRef.current.some((doc) => doc.id !== activeDocumentIdRef.current && doc.meta.dirty);
+    if (dirty && !window.confirm(t("confirmUnsaved"))) return false;
+    closeApprovedRef.current = true;
+    return true;
+  }, [finishPendingEdit, showToast]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    let closing = false;
+    const appWindow = getCurrentWindow();
+    void appWindow
+      .onCloseRequested(async (event) => {
+        // Prevent first, including repeated OS requests while destruction is pending.
+        event.preventDefault();
+        if (disposed || closing || !approveWindowClose()) return;
+        closing = true;
+        try {
+          await appWindow.destroy();
+        } catch {
+          closeApprovedRef.current = false;
+          showToast(t("windowCloseFailed"));
+        } finally {
+          closing = false;
+        }
+      })
+      .then((stop) => {
+        if (disposed) stop();
+        else unlisten = stop;
+      })
+      .catch(() => {
+        if (!disposed) showToast(t("windowCloseGuardFailed"));
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [approveWindowClose, showToast]);
 
   const newFile = useCallback(() => {
     if (!finishPendingEdit()) return;
@@ -342,8 +396,11 @@ export default function App() {
       (range &&
         (!rowSourceIndexes.includes(range.startRow) || !rowSourceIndexes.includes(range.endRow)));
     const first = rowSourceIndexes[0] ?? 0;
-    if (missing && (point.row !== first || range !== null))
+    if (missing && (point.row !== first || range !== null)) {
       selectionState.setSelection({ row: first, col: point.col });
+      setSelectedRows([]);
+      setSelectedColumns([]);
+    }
   }, [rowSourceIndexes]);
   const visibleMapRef = useRef(rowSourceIndexes);
   visibleMapRef.current = rowSourceIndexes;
@@ -352,10 +409,11 @@ export default function App() {
     [rowSourceIndexes],
   );
 
-  const searchHits = useMemo(
-    () => findSearchHits(sheet.rows, query, searchOptions, visibleSet),
+  const searchResult = useMemo(
+    () => collectSearchMatches(sheet.rows, buildMatcher(query, searchOptions), visibleSet),
     [sheet.rows, query, searchOptions, visibleSet],
   );
+  const searchHits = searchResult.hits;
   const searchHitSet = useMemo(
     () => new Set(searchHits.map((hit) => `${hit.row}:${hit.col}`)),
     [searchHits],
@@ -393,6 +451,8 @@ export default function App() {
       entry.colWidths ?? sheet.colWidths,
     );
     selectionState.setSelectionRange(entry.selection, entry.range ?? null);
+    setSelectedRows([]);
+    setSelectedColumns([]);
   };
 
   const commitCell = (row: number, col: number, value: string, reselect: boolean) => {
@@ -419,11 +479,22 @@ export default function App() {
     const selected =
       overrideRange ?? selectionToRange(selectionState.selection, selectionState.range);
     const normalized = normalizeRange(selected);
-    const indexes = selectedSourceRows(sheet.rows.length, normalized, rowSourceIndexes);
-    if (indexes.length === 0) return false;
+    const indexes = selectionIndexes(
+      sheet.rows,
+      normalized,
+      rowSourceIndexes,
+      overrideRange ? [] : selectedRows,
+      overrideRange ? [] : selectedColumns,
+    );
+    if (indexes.rows.length === 0 || indexes.columns.length === 0) return false;
     const text = rangeTsv(
-      indexes.map((index) => sheet.rows[index]),
-      { ...normalized, startRow: 0, endRow: indexes.length - 1 },
+      indexes.rows.map((row) => indexes.columns.map((col) => sheet.rows[row][col] ?? "")),
+      {
+        startCol: 0,
+        endCol: indexes.columns.length - 1,
+        startRow: 0,
+        endRow: indexes.rows.length - 1,
+      },
     );
     if (!navigator.clipboard) {
       showToast(t("toastClipboardUnavailable"));
@@ -433,8 +504,8 @@ export default function App() {
       await navigator.clipboard.writeText(text);
       showToast(
         t("toastCopiedRange", {
-          rows: indexes.length,
-          cols: normalized.endCol - normalized.startCol + 1,
+          rows: indexes.rows.length,
+          cols: indexes.columns.length,
         }),
       );
       return true;
@@ -447,19 +518,36 @@ export default function App() {
   const clipboardContext = () => ({
     documentId: activeDocumentIdRef.current,
     rows: rowsRef.current,
-    selection: JSON.stringify([selectionRef.current, rangeRef.current]),
+    selection: JSON.stringify([
+      selectionRef.current,
+      rangeRef.current,
+      selectedRowsRef.current,
+      selectedColumnsRef.current,
+    ]),
     visible: visibleMapRef.current,
   });
   const clipboardContextValid = (context: ReturnType<typeof clipboardContext>) =>
     context.documentId === activeDocumentIdRef.current &&
     context.rows === rowsRef.current &&
-    context.selection === JSON.stringify([selectionRef.current, rangeRef.current]) &&
+    context.selection ===
+      JSON.stringify([
+        selectionRef.current,
+        rangeRef.current,
+        selectedRowsRef.current,
+        selectedColumnsRef.current,
+      ]) &&
     context.visible === visibleMapRef.current;
 
   const clearSelectedCells = (overrideRange?: Exclude<Range, null>) => {
     const selected =
       overrideRange ?? selectionToRange(selectionState.selection, selectionState.range);
-    const next = clearVisibleRange(sheet.rows, selected, rowSourceIndexes);
+    const next = clearVisibleRange(
+      sheet.rows,
+      selected,
+      rowSourceIndexes,
+      overrideRange ? [] : selectedRows,
+      overrideRange ? [] : selectedColumns,
+    );
     if (sameRows(sheet.rows, next)) return;
     recordBeforeChange();
     sheet.replaceRows(next, true, false);
@@ -467,14 +555,12 @@ export default function App() {
 
   const cutSelection = async (overrideRange?: Exclude<Range, null>) => {
     const context = clipboardContext();
-    const selected =
-      overrideRange ?? selectionToRange(selectionState.selection, selectionState.range);
-    if (!(await copySelection(selected))) return;
+    if (!(await copySelection(overrideRange))) return;
     if (!clipboardContextValid(context)) {
       showToast(t("clipboardContextChanged"));
       return;
     }
-    clearSelectedCells(selected);
+    clearSelectedCells(overrideRange);
   };
 
   const pasteGrid = (row: number, col: number, grid: CellValue[][]) => {
@@ -496,6 +582,8 @@ export default function App() {
       sheet.replaceRows(pasted.rows, true, false);
     }
     selectionState.selectRange(pasted.range);
+    setSelectedRows([]);
+    setSelectedColumns([]);
   };
 
   const pasteClipboard = async (start?: { row: number; col: number }) => {
@@ -535,9 +623,17 @@ export default function App() {
       row >= selected.startRow &&
       row <= selected.endRow &&
       col >= selected.startCol &&
-      col <= selected.endCol;
-    if (kind === "cell" && !inside) selectionState.selectCell(row, col, false);
-    if (kind === "column")
+      col <= selected.endCol &&
+      (selectedRows.length === 0 || selectedRows.includes(row)) &&
+      (selectedColumns.length === 0 || selectedColumns.includes(col));
+    if (kind === "cell" && !inside) {
+      selectionState.selectCell(row, col, false);
+      setSelectedRows([]);
+      setSelectedColumns([]);
+    }
+    if (kind === "column") {
+      setSelectedRows([]);
+      setSelectedColumns([col]);
       selectionState.setSelectionRange(
         { row: rowSourceIndexes?.[0] ?? 0, col },
         {
@@ -547,7 +643,12 @@ export default function App() {
           endCol: col,
         },
       );
-    if (kind === "row") selectionState.selectRow(row, sheet.columnCount);
+    }
+    if (kind === "row") {
+      setSelectedRows([row]);
+      setSelectedColumns([]);
+      selectionState.selectRow(row, sheet.columnCount);
+    }
     setContextMenu({ kind, row, col, x, y });
   };
 
@@ -571,7 +672,8 @@ export default function App() {
         endCol: Math.max(0, sheet.columnCount - 1),
       };
     }
-    return selectionToRange(selectionState.selection, selectionState.range);
+    // Cell menus act on the exact current selection, including header-selection gaps.
+    return null;
   };
 
   const ensureRowOpsAllowed = (): boolean => {
@@ -607,10 +709,16 @@ export default function App() {
     if (!ensureRowOpsAllowed()) {
       return;
     }
+    const documentId = activeDocumentIdRef.current;
+    const rows = rowsRef.current;
     const indexes =
       selectedRows.length > 0 ? selectedRows : [contextMenu?.row ?? selectionState.selection.row];
     setPendingConfirm({
       action: () => {
+        if (documentId !== activeDocumentIdRef.current || rows !== rowsRef.current) {
+          showToast(t("clipboardContextChanged"));
+          return;
+        }
         recordBeforeChange();
         sheet.deleteRows(indexes);
         const nextRow = Math.max(0, Math.min(...indexes) - 1);
@@ -624,12 +732,18 @@ export default function App() {
     if (!ensureRowOpsAllowed()) {
       return;
     }
+    const documentId = activeDocumentIdRef.current;
+    const rows = rowsRef.current;
     const indexes =
       selectedColumns.length > 0
         ? selectedColumns
         : [contextMenu?.col ?? selectionState.selection.col];
     setPendingConfirm({
       action: () => {
+        if (documentId !== activeDocumentIdRef.current || rows !== rowsRef.current) {
+          showToast(t("clipboardContextChanged"));
+          return;
+        }
         recordBeforeChange();
         sheet.deleteColumns(indexes);
         const nextCol = Math.max(0, Math.min(...indexes) - 1);
@@ -739,6 +853,8 @@ export default function App() {
       showToast(t("hiddenReference"));
       return;
     }
+    setSelectedRows([]);
+    setSelectedColumns([]);
     if (ref.kind === "cell") {
       selectionState.selectCell(ref.row, ref.col, false);
       setFocusCell({ row: ref.row, col: ref.col, nonce: Date.now() });
@@ -840,17 +956,7 @@ export default function App() {
     <div className="appShell" onKeyDown={handleKeyDown}>
       <TitleBar
         meta={sheet.meta}
-        beforeClose={() => {
-          const dirty =
-            metaRef.current.dirty ||
-            documentsRef.current.some(
-              (doc) => doc.id !== activeDocumentIdRef.current && doc.meta.dirty,
-            );
-          if ((dirty || editorCommitRef.current) && !window.confirm(t("confirmUnsaved")))
-            return false;
-          closeApprovedRef.current = true;
-          return true;
-        }}
+        beforeClose={approveWindowClose}
         onCloseFailed={() => {
           closeApprovedRef.current = false;
           showToast(t("windowCloseFailed"));
@@ -925,7 +1031,8 @@ export default function App() {
         replacement={replacement}
         options={searchOptions}
         current={activeSearchIndex}
-        total={searchHits.length}
+        total={searchResult.total}
+        navigationTotal={searchHits.length}
         onQueryChange={setQuery}
         onReplacementChange={setReplacement}
         onOptionsChange={setSearchOptions}
@@ -991,6 +1098,8 @@ export default function App() {
               sheet.replaceRows(moved.rows, true, false);
               sheet.setColWidths(moved.widths);
               selectionState.selectColumn(to, sheet.rows.length);
+              setSelectedRows([]);
+              setSelectedColumns([to]);
             }}
             onColumnResize={sheet.setColumnWidth}
             onSelectionChange={(sel, range) => selectionState.setSelectionRange(sel, range)}
@@ -1176,35 +1285,6 @@ function referenceForSelection(selection: Selection, range: Range): string {
   return `${columnName(normalized.startCol)}${normalized.startRow + 1}:${columnName(normalized.endCol)}${
     normalized.endRow + 1
   }`;
-}
-
-const SEARCH_HIT_CAP = 5000;
-
-function findSearchHits(
-  rows: CellValue[][],
-  query: string,
-  options: SearchOptions,
-  visible: Set<number> | null = null,
-): SearchHit[] {
-  const matcher = buildMatcher(query, options);
-  if (!matcher) {
-    return [];
-  }
-
-  const hits: SearchHit[] = [];
-  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-    if (visible && !visible.has(rowIndex)) continue;
-    for (let colIndex = 0; colIndex < rows[rowIndex].length; colIndex += 1) {
-      matcher.lastIndex = 0;
-      if (matcher.test(rows[rowIndex][colIndex])) {
-        hits.push({ row: rowIndex, col: colIndex });
-        if (hits.length >= SEARCH_HIT_CAP) {
-          return hits;
-        }
-      }
-    }
-  }
-  return hits;
 }
 
 const MAX_QUERY_LENGTH = 2000;

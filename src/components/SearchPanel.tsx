@@ -16,6 +16,7 @@ type SearchPanelProps = {
   options: SearchOptions;
   current: number;
   total: number;
+  navigationTotal?: number;
   onQueryChange: (value: string) => void;
   onReplacementChange: (value: string) => void;
   onOptionsChange: (options: SearchOptions) => void;
@@ -34,6 +35,7 @@ export function SearchPanel({
   options,
   current,
   total,
+  navigationTotal = total,
   onQueryChange,
   onReplacementChange,
   onOptionsChange,
@@ -44,6 +46,7 @@ export function SearchPanel({
   onClose,
 }: SearchPanelProps) {
   const findInputRef = useRef<HTMLInputElement>(null);
+  const composing = useRef(false);
 
   useEffect(() => {
     if (open) {
@@ -68,7 +71,17 @@ export function SearchPanel({
         value={query}
         placeholder={t("findPlaceholder")}
         onChange={(event) => onQueryChange(event.target.value)}
+        onCompositionStart={() => {
+          composing.current = true;
+        }}
+        onCompositionEnd={() => {
+          composing.current = false;
+        }}
         onKeyDown={(event) => {
+          if (composing.current || event.nativeEvent.isComposing || event.keyCode === 229) {
+            event.stopPropagation();
+            return;
+          }
           if (event.key === "Enter" || event.key === "Escape") {
             event.preventDefault();
             event.stopPropagation();
@@ -107,14 +120,23 @@ export function SearchPanel({
         <span>{t("caseSensitive")}</span>
       </label>
       <div className="searchPanel__count">
-        {total === 0 ? t("noMatches") : t("matchCount", { current: current + 1, total })}
+        {total === 0
+          ? t("noMatches")
+          : navigationTotal < total
+            ? t("limitedMatchCount", { current: current + 1, navigation: navigationTotal, total })
+            : t("matchCount", { current: current + 1, total })}
       </div>
+      {navigationTotal < total && (
+        <span className="searchPanel__scope">
+          {t("limitedMatchScope", { navigation: navigationTotal, total })}
+        </span>
+      )}
       <ActionButton
         type="button"
         className="toolbar__iconButton"
         aria-label={t("previous")}
         tooltip={`${t("previous")} (Shift+Enter)`}
-        disabled={total === 0}
+        disabled={navigationTotal === 0}
         onClick={onPrevious}
       >
         <ChevronUp size={16} aria-hidden="true" />
@@ -124,7 +146,7 @@ export function SearchPanel({
         className="toolbar__iconButton"
         aria-label={t("next")}
         tooltip={`${t("next")} (Enter)`}
-        disabled={total === 0}
+        disabled={navigationTotal === 0}
         onClick={onNext}
       >
         <ChevronDown size={16} aria-hidden="true" />
@@ -134,7 +156,7 @@ export function SearchPanel({
         className="toolbar__button"
         aria-label={t("replace")}
         tooltip={t("replace")}
-        disabled={total === 0}
+        disabled={navigationTotal === 0}
         onClick={onReplace}
       >
         <Replace size={15} aria-hidden="true" />

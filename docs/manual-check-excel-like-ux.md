@@ -33,7 +33,7 @@ CSV は引用符・セル内改行を正しく含めて作る。列は `id,部�
 3. 保存中の追加編集/他tab切替を試せる環境では、元文書だけに結果が返り、追加編集/他文書がcleanにならないことを確認。自動試験はmock I/Oであり、この実機確認の代わりではない。未実施。
 4. 日本語IMEで編集開始/候補選択/変換確定Enter、その後のEnter移動、Esc、F2末尾、Alt+Enterを確認。貼付けやsynthetic compositionイベントだけで合格にしない。未実施。
 5. 5形式の代表sampleを保存/再読込。CSV/TSV/Markdownは既存UTF-8/BOM/Shift_JIS/EUC-JP/Latin-1、JSON/YAMLは既存UTF-8方針を確認。表現不能文字の失敗も確認し、勝手に形式/文字を落とさない。未実施。
-6. アプリ内title-bar閉じるを合成未保存documentで試し、取消で内容を残す。**OS/menu/Alt+F4経路の保護は未確認・別範囲。先に保存し、この経路をデータ損失防止済みと扱わない。**
+6. アプリ内title-barとOS/menu/Alt+F4から、合成未保存documentを閉じる。取消で全タブの内容を残し、編集中の最新値も確認対象になること。保存待ち・日本語変換中は終了しないこと。終了処理が失敗した場合も次の要求で再確認すること。コードと模擬回帰は実装済み、実際のOS操作は未検収。
 
 ## 別枠の画面/性能/見た目（上記10分に含めない）
 
@@ -43,11 +43,12 @@ CSV は引用符・セル内改行を正しく含めて作る。列は `id,部�
 - 空表、1×1、列数が異なる行、長いセル文字列、繰り返しUndo/Redo、開く取消、filter解除/再設定、閉じる取消を確認。未実施。
 - 取り込み前の別製品AIによる全行確認はローカル担当の残件。独立コードレビューと別に記録する。
 
-## 未解決の別範囲
+## 追加承認後の実装と検証境界
 
-- Linux packaging: `.github/workflows/tauri-release.yml` の Linux binary selector / staging 検証が対象候補。frontend / Tauri build 成功と梱包exit2を分け、workflowは変更していない。
-- Native外部close: 現 capability は `core:window:allow-close` を持ち、`allow-destroy` を持たない。導入済みJS APIの `onCloseRequested` は防止しない場合内部で `destroy()` を呼ぶ。試作listenerは公開前に除去。API + destroyの設計を採るなら capability 対象範囲と権限の別承認が必要。代替設計も含めowner側で検討し、現時点ではnative全経路の保護を保証しない。
-- ブランド: 既存app iconとSVGは2列3行の表と青いセルのモチーフ。`index.html` はfavicon linkを持たない。既存favicon SVGの参照には許可外の `index.html` が候補。配布バイナリアイコン/assets生成は変更していない。
+- Linux packaging: binary存在確認を順に行うselectorへ修正。合成4ケースの検証済み。実Linux runnerのstaging合否は同SHAのPR CIで確認する。
+- Native外部close: 終了要求をpreventして共通の未保存確認を通すlistenerと、main限定の `core:window:allow-destroy` を追加。生成capabilityも同期。Windows build・mock回帰と、実OS/IMEの受入を分ける。
+- ブランド: 既存favicon SVGの参照を `index.html` に追加。新しいブランド画像の生成や全アイコンの刷新は行っていない。
+- Browser部分確認: sampleでB2編集→EnterでB3、Undo1回でB2値復帰、検索「営業」の3セル件数とC2参照同期、download開始と未保存保持を確認。canvas画像取得がtimeoutしたため、見た目・狭幅・テーマを合格にしない。downloadコピーの再読込も未確認。
 
 ## 受入記録
 
