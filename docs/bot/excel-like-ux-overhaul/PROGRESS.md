@@ -3,10 +3,30 @@
 - repo: `ishizakahiroshi/PlainSheet`
 - base: `develop`
 - 作業 branch: `bot/20261005-004-excel-like-ux`
-- 更新日時: 2026-10-05 02:40 UTC
+- 更新日時: 2026-10-05 03:23 UTC
 - 受付済み。同一案件番号の既存 PR / 作業 branch との衝突なし（開始時検索）。
 - 固定指示 `README.md` と `REVIEW.md` を SHA `037c29ea4649efc81acc8f28824dca3df08e7450` で全読了。
 - C1 から直列実施。各工程は PR CI と別担当レビューで判定。merge / release はしない。
+
+## 再開: HTML/ブラウザ版 + アプリ版（U1〜U5）
+
+追加指示 SHA `c22439b45dd27bbf6c0e56c7d6858a804242f715` の `DUAL-EDITION-UX.md` と同 commit の README を全読了。既存 PR #1 / branch の受領時 head は `075cb6b4adae6829efa26ac618ed0cc8b7ded091`。ローカル担当は実装を変更していないと依頼者から明示され、dot が同じ実装・Git を一担当で所有する。独立レビューは作業と別担当。以下の U1〜U5 の範囲だけ旧停止・C2 禁止を改訂する。下記 C 表と既存履歴は当時の未完了記録であり、C1 合格へ変更しない。
+
+| 工程 | 旧工程対応 | 担当 | 現在の状態 / 次の確認 |
+|---|---|---|---|
+| U1 再監査 / 共通仕様 | C1 追補 | dot | 進行中。7 場面のソース原因と回帰条件を整理 |
+| U2 データ / 保存修正 | C2〜C5 | dot（単一実装担当） | U1 後。非表示行・保存先・Undo・選択を優先 |
+| U3 アイコン / 導線 / 状態 | C6〜C7 | dot | U2 後。既存 lucide / CSS / 翻訳のみ |
+| U4 検証 / 独立レビュー | C8 | dot + 別担当 reviewer | code SHA と review SHA を分け、最終差分を確認 |
+| U5 同じ PR へ提出 / 検収 | C8 / 手元受入 | dot / ローカル担当 | ブラウザ・Windows Tauri・実 IME・2,000×30・テーマは未実施を分離 |
+
+- 許可: src、公開 docs、README。依存 / lockfile、src-tauri、workflow、配布用アイコンは変更しない。merge / release / deploy しない。
+- 環境: Node v24.19.0、既存 Bun 1.3.14。`bun install --frozen-lockfile`: exit 0、Checked 313 installs / 366 packages / no changes。lockfile 差分なし。共有ツールを読むだけで追加インストールなし。
+- ブラウザ: dot のクラウドブラウザでは先の loopback 到達が `ERR_BLOCKED_BY_CLIENT`。同じ拒否先を回避 / 再試行せず、画面合格を付けない。実画面・Windows app・実 IME は手元担当が検収。
+- 既知 Linux staging exit 2 は修正範囲外として残すが、追加指示により裏付けられる src 修正まで全停止しない。新しい test / lint / build の問題と区別する。
+- 受付時 code は `037c29e…` と同じ。受領時 docs head `075cb6b…` の独立レビュー / CI failure は PR の確定記録を参照。今回の code / review SHA は実装後に別記する。
+
+## 旧 C 工程の履歴（追加指示受領前）
 
 | 工程 | 担当 | 状態 | 証跡・残件・次の一手 |
 |---|---|---|---|
@@ -125,3 +145,7 @@
 - 確認済み編集キー、新規 / 開く / 保存ラベル、未保存表示等は維持候補。全面 toolbar 再編や色寄せは後順位。ただし実 IME / 2,000×30 / テーマ比較は基盤判定の必須残件のままで、免除しない。Glide 固有限界か app / wrapper の設計かは未判定。
 - `d47550c878f1ffa983dc755edb159b43caec69ce` の docs の過去の独立レビュー記録は今回確認できていない。今回の最終追記は別担当が改めて確認し、結果を PR へ記録する。[run 37255800037](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37255800037) は completed / failure。Windows / macOS は success、Ubuntu は同じ Linux staging exit 2（job 111592476389、生ログ照合）。旧 SHA の PASS は使わない。
 - この追記で生じる最新 head も PR の CI / 独立レビューで別途確認する。必要な修正範囲は引き続き許可外の `.github/workflows/tauri-release.yml`。CI 停止、C1 基盤判定保留、C2 未着手を維持。コード・依存・workflow の変更はしていない。
+
+### 2026-10-05 03:23 UTC — 追加指示取り込み / U1 開始
+
+追加指示の 2 docs を既存 head に安全に取り込み、コード差分なしで受付記録を更新。7 場面は既存観測とソース仮説を保持して再点検する。共通編集、ブラウザのダウンロード、アプリの直接保存を明示する方針。保存・非表示行への誤書込を優先し、U2 に入る前に回帰条件を監査へ記す。
