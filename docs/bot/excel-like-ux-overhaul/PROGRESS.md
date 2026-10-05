@@ -3,7 +3,7 @@
 - repo: `ishizakahiroshi/PlainSheet`
 - base: `develop`
 - 作業 branch: `bot/20261005-004-excel-like-ux`
-- 更新日時: 2026-10-05 02:13 UTC
+- 更新日時: 2026-10-05 02:19 UTC
 - 受付済み。同一案件番号の既存 PR / 作業 branch との衝突なし（開始時検索）。
 - 固定指示 `README.md` と `REVIEW.md` を SHA `037c29ea4649efc81acc8f28824dca3df08e7450` で全読了。
 - C1 から直列実施。各工程は PR CI と別担当レビューで判定。merge / release はしない。
@@ -18,7 +18,7 @@
 | C6 初見の分かりやすさ | dot | pending | C5 後 |
 | C7 見た目の仕上げ | dot | pending | C6 後 |
 | C8 統合検証・手動チェックリスト | dot | pending | `docs/manual-check-excel-like-ux.md` |
-| 独立レビュー | dot（作業と別担当） | pending | 対象 SHA・指摘・再検証 |
+| 独立レビュー | dot（作業と別担当） | 停止記録を確認済み | `052c465…` に重大指摘なし。C1 / UX 合格ではない。最終 head の追記差分も再確認する |
 | 手元の別 AI による全行確認 | 依頼者側 | pending | 取り込む前に実施 |
 | 手元検収（Windows 実機・日本語入力） | 依頼者 | 未実施 | 実機の Tauri / 実際の IME の体感は Web 自動操作・貼付けで代替しない |
 
@@ -28,7 +28,7 @@
 - 読了した指示 SHA: `037c29ea4649efc81acc8f28824dca3df08e7450`
 - 作業開始 develop SHA: `037c29ea4649efc81acc8f28824dca3df08e7450`
 - 実 code SHA: `037c29ea4649efc81acc8f28824dca3df08e7450`（開始時。oracle との差分は指示 docs 3 件のみ）
-- review 済み SHA: 未
+- review 済み SHA: `052c465c048e57cb995bb81d0a0f29e2c7d1b06c`（停止記録のみ。UI 未検証）
 - 初回 docs commit: `64640094ef74412247836eff93209782cce78677`
 - Draft PR: https://github.com/ishizakahiroshi/PlainSheet/pull/1
 - 初回 PR CI: https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37254444488 （02:13 UTC: 実行中。最終 head の結果は PR を参照）
@@ -71,3 +71,11 @@
 - PR の `Agent: dot` ラベル追加は tool が `user cancelled MCP tool call` を返したため未適用、再試行しない。commit 末尾の `Agent: dot` は付与済み。
 - 独立レビュー: この停止記録の exact SHA を別担当が確認予定。C1 の UI 判定は未完了のまま。
 - 次の一手: 依頼者側で利用可能な実画面操作環境または手元の検証結果が必要。再開までは実装しない。残件は監査 doc の 42 操作と 3 基準を参照。
+
+### 2026-10-05 02:19 UTC — 独立レビュー / CI 確認
+
+- 別担当が `037c29ea4649efc81acc8f28824dca3df08e7450` → `052c465c048e57cb995bb81d0a0f29e2c7d1b06c` を確認。停止記録への P0/P1/P2/P3 修正要求なし。結果は [PR #1](https://github.com/ishizakahiroshi/PlainSheet/pull/1) のコメントに記録。
+- reviewer の `git diff --check`: exit 0。`src/`、`src-tauri/`、`.github/`、`package.json`、`bun.lock` の base → review SHA 比較と初回検証 SHA → review SHA 比較はいずれも exit 0、差分なし。
+- 保存済み test / lint / build / dev ログを独立照合。reviewer は実 UI、依存取得、HTTP check を再実行していない。元実行の exit code は作業担当の記録。
+- exact-head CI `052c465…`: [run 37254711195](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/37254711195)、02:18 UTC 時点で実行中。`.github/workflows/tauri-release.yml` の lint/test と `src-tauri/tauri.conf.json` の `beforeBuildCommand: bun run build` を確認済み。全成功の断定はしない。
+- この追記は記録のみ。最終 head は PR で検証し、旧 SHA の PASS を引き継がない。C1 は STOP のまま。持ち主の画面操作環境または手元検証が整うまで C2 以降は開始しない。
