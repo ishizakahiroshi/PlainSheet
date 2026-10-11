@@ -1,0 +1,231 @@
+<!--
+  review-sheet 検証スクリプト（差し込み用）
+
+  使い方:
+    1. 下の CONFIG だけを資料に合わせて書き換える
+    2. 資料の **コピー** の </body> をこのファイルの中身で置換する
+       （元ファイルへ書き込まない。配布物に検証コードが混ざる）
+         python -c "import io;s=io.open('sheet.html',encoding='utf-8').read();
+                    i=io.open('verify.html',encoding='utf-8').read();
+                    io.open('probe.html','w',encoding='utf-8').write(s.replace('</body>',i,1))"
+    3. ヘッドレスで描画して上端だけ切り出して読む
+         pwsh -NoProfile -File <tools>/render-html-png.ps1 `
+           -Path <probe.html> -Out probe.png -Width 1280 -Height 900 -CropTop 0 -CropHeight 360
+
+  読み方（全部が下の値になっていれば合格）:
+    bodyClass=interactive   1 行目。静的モードの複製を検証するときは static になっていること
+                            （置換がテンプレートの説明コメントに当たると interactive のまま。先頭アンカーで置換する）
+    brokenAnchors=[]        # で始まるリンクの飛び先が全部実在する
+    dupIds=[]               id が重複していない（getElementById は先頭の 1 つしか返さないので、章と表に同じ id を
+                            付けると JS が章ごと上書きする。2026-09-30 geomap の見取り図で、章と表の両方に
+                            id="gantt" を付け、ガントを描く JS が章の凡例と期日の表を消していた）
+    overflowElems=0         図・表が横スクロールしない
+    svgTextOutOfBox=0       SVG の文字が viewBox からはみ出していない
+    multiSubpathArrows=0    marker-end 付き path に subpath が 2 つ以上ない（矢じりが 1 本しか出ない）
+    responseChecks=[]      メモ単独回答を一括推奨が上書きしない・全グループのIDとメモが出力に残る
+                            （コピー/ダウンロードの最新化・保存/clipboard失敗は実ブラウザで別に確認）
+    generateSummary / generateMarkdown が ERR を出さず、条件付き設問が「対象外」と出る
+    分岐の行が、意図した on / off になっている（dis=true なら入力が無効化されている）
+
+    jsErrors=[]             ページ本体の JS が load までに例外を出していない（計算器・フォームのある資料はここが要）
+    readout=...             READOUT で指定した値（計算器の判定文など）。空なら未設定
+
+  注意:
+    - 何も出ないときは黄色い帯（UNCAUGHT: …）を探す。本体が構文エラーで 1 行も走らなかった印。
+      赤枠の中に VERIFY ERR があれば、本体が途中で落ちた印（そこまでの値は出ている）
+    - alert は先頭で潰す。確認ダイアログが出るとタブが固まり以降が全部タイムアウトする
+    - 枝分かれが無いシートでは BRANCHES を空配列にする（他の検査はそのまま動く）
+    - review-sheet 以外の HTML（design-html の計算器つき資料など）でも使える。無い関数は ERR として
+      出るだけで止まらない。**自前で probe を書かない**（2026-09-08 mer: 既存 probe の load 後に
+      textContent += で足した readout が画面に出ず、独立 probe を作り直した。ここに READOUT を書けば足りる）
+-->
+<script>
+window.alert = function () {};
+// ページ本体の JS の例外を拾う（本体の script より後ろに差し込まれるので、load までに出た分は
+// window.onerror の既定挙動で消えている。ここでは差し込み以降の例外と、READOUT 実行時の例外を数える）
+window.__verifyErrs = [];
+window.addEventListener('error', function (e) {
+  window.__verifyErrs.push(String(e.message));
+  // 次の <script>（CONFIG を含む本体）が構文エラーで丸ごと実行されなかったときも、ここだけは動く。
+  // 黄色い帯に message と行番号を出す（2026-09-09 mer: READOUT の中の '\n' がヒアドキュメントで実改行になり
+  // 構文エラー。本体が 1 行も走らず readout が出ないのを「描画が遅い」と誤認して 2 回撮り直した）
+  var p = document.createElement('pre');
+  p.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;background:#ff0;color:#000;'
+    + 'font-size:13px;padding:6px;margin:0;max-width:100%;white-space:pre-wrap';
+  p.textContent = 'UNCAUGHT: ' + e.message + ' @ line ' + e.lineno + ':' + e.colno;
+  (document.body || document.documentElement).appendChild(p);
+});
+</script>
+<script>
+(function () {
+
+  // ===== CONFIG（ここだけ資料に合わせて書き換える）=====
+
+  // 資料固有の読み出し。計算器の判定文や合計など、目で確かめたい値を文字列の配列で返す。
+  // 例: return ['verdict=' + document.getElementById('estVerdict').textContent];
+  var READOUT = function () { return []; };
+
+  // 出し分けの対象になっている設問 ID。無ければ []
+  var FEATURE_MODE = document.body.getAttribute('data-review-mode') === 'feature-selection';
+  var CONDITIONAL = FEATURE_MODE ? [] : ['Q3'];
+
+  // 回す分岐。picks は [設問名, data-key] の配列。
+  // 判定に使う設問の input に data-key を振っていることが前提。
+  var BRANCHES = FEATURE_MODE ? [] : [
+    { label: '未選択',            picks: [] },
+    { label: 'Q1=止める',         picks: [['Q1', 'stop']] },
+    { label: 'Q1=いまのまま',     picks: [['Q1', 'as-is']] }
+  ];
+
+  // ===== ここから下は資料によらず共通 =====
+
+  var NL = String.fromCharCode(10);
+  var out = [];
+
+  // 差し込み自体が途中で落ちても、それまでの out と例外の場所を必ず画面に出す。
+  // （2026-09-09 mer: READOUT の外で構文エラーになり何も出ず、「描画が遅い」と誤認して 2 回撮り直した）
+  function show(extraLine) {
+    if (extraLine) out.push(extraLine);
+    var pre = document.createElement('pre');
+    pre.style.cssText = 'position:fixed;top:0;left:0;z-index:9999;background:#fff;color:#000;'
+      + 'font-size:12.5px;padding:6px;margin:0;white-space:pre-wrap;max-width:100%;border:2px solid red';
+    pre.textContent = out.join(NL);
+    document.body.insertBefore(pre, document.body.firstChild);
+  }
+  // 静的モードの複製が interactive のまま検証されていないか、最初の行で分かるようにする
+  // （2026-09-09 mer: <body class="interactive"> の置換がテンプレートの説明コメントに先に当たっていた）
+  out.push('bodyClass=' + (document.body.className || '(none)'));
+  out.push('initialChecked=' + document.querySelectorAll('.opts input:checked').length);
+
+  function state() {
+    if (!CONDITIONAL.length) return '（枝分かれなし）';
+    return CONDITIONAL.map(function (q) {
+      var c = document.getElementById('q-' + q);
+      if (!c) return q + ':MISSING';
+      var input = c.querySelector('.opts input');
+      var bar = c.querySelector('.condbar');
+      return q + ':' + (c.classList.contains('na') ? 'off' : 'on')
+           + '/dis=' + (input ? input.disabled : '?')
+           + '/' + (bar ? bar.className.replace('condbar ', '') : '-');
+    }).join('  ');
+  }
+
+  function pick(name, key) {
+    var r = document.querySelector('input[name="' + name + '"][data-key="' + key + '"]');
+    if (!r) { out.push('MISSING data-key ' + name + '/' + key); return; }
+    r.checked = true;
+    r.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  try {
+  // 1. 分岐を全パターン回す
+  try { applyConditions(); } catch (e) { out.push('applyConditions ERR ' + e.message); }
+  BRANCHES.forEach(function (b) {
+    b.picks.forEach(function (p) { pick(p[0], p[1]); });
+    out.push('[' + b.label + '] ' + state());
+  });
+
+  // 2. おすすめ一括（無効化されたカードと事実確認の設問に触らないこと）
+  try { pickRecommended(); } catch (e) { out.push('pickRecommended ERR ' + e.message); }
+  out.push('checkedAfterBulk=' + document.querySelectorAll('.opts input:checked').length);
+  out.push('optCounts=' + [].slice.call(document.querySelectorAll('.opts')).map(function (o) {
+    return o.getAttribute('data-q') + ':' + o.querySelectorAll('input').length;
+  }).join(' '));
+
+  // 3. 決定サマリと Markdown
+  var sb = document.getElementById('summaryBox');
+  try { generateSummary(); } catch (e) { out.push('generateSummary ERR ' + e.message); }
+  out.push('summaryLen=' + (sb ? sb.value.length : -1));
+  out.push('summary=' + (sb ? sb.value.slice(0, 700).split(NL).join(' | ') : ''));
+  try { generateMarkdown(); } catch (e) { out.push('generateMarkdown ERR ' + e.message); }
+  out.push('mdLen=' + (sb ? sb.value.length : -1));
+
+  // 3b. メモだけの回答と非表示グループ。検証用コピーの値だけを一時変更し、画面の値は戻す。
+  var responseErrors = [];
+  var decisionCards = [].slice.call(document.querySelectorAll('.card.decision'));
+  var memoCard = decisionCards.find(function (card) { return card.querySelector('.memo') && card.querySelector('.opts input'); });
+  if (memoCard && sb) {
+    var inputs = [].slice.call(document.querySelectorAll('.opts input'));
+    var savedChecks = inputs.map(function (input) { return input.checked; });
+    var memo = memoCard.querySelector('.memo');
+    var savedMemo = memo.value;
+    var section = memoCard.closest('[data-section]');
+    var savedDisplay = section ? section.style.display : '';
+    try {
+      memoCard.querySelectorAll('.opts input').forEach(function (input) { input.checked = false; });
+      memo.value = 'VERIFY_MEMO_ONLY';
+      pickRecommended();
+      if (memoCard.querySelector('.opts input:checked')) responseErrors.push('bulk-overwrote-memo-only-answer');
+      if (section) section.style.display = 'none';
+      [generateSummary, generateMarkdown].forEach(function (generate) {
+        generate();
+        if (sb.value.indexOf('VERIFY_MEMO_ONLY') < 0) responseErrors.push('export-omits-memo');
+        if (!/メモで回答|記述/.test(sb.value)) responseErrors.push('export-treats-memo-as-unanswered');
+        decisionCards.forEach(function (card) {
+          var qid = card.querySelector('.qid');
+          var id = card.getAttribute('data-question-id') || (qid && qid.textContent.trim());
+          if (id && sb.value.indexOf(id) < 0) responseErrors.push('export-omits-id:' + id);
+        });
+      });
+    } catch (e) { responseErrors.push('response-check:' + e.message); }
+    finally {
+      inputs.forEach(function (input, index) { input.checked = savedChecks[index]; });
+      memo.value = savedMemo;
+      if (section) section.style.display = savedDisplay;
+      // 以下の幾何検査は全グループを描画してから測る（非表示SVGのgetBBoxを合格扱いしない）。
+      if (typeof setGroup === 'function') setGroup('all');
+    }
+  }
+  out.push('responseChecks=' + JSON.stringify(responseErrors));
+
+  // 4. アンカーのリンク切れ
+  out.push('brokenAnchors=' + JSON.stringify(
+    [].slice.call(document.querySelectorAll('a[href^="#"]'))
+      .map(function (a) { return a.getAttribute('href').slice(1); })
+      .filter(function (id) { return id && !document.getElementById(id); })));
+
+  // 4b. id の重複（読み方は冒頭の dupIds の説明）
+  var idCount = {};
+  [].slice.call(document.querySelectorAll('[id]')).forEach(function (el) {
+    idCount[el.id] = (idCount[el.id] || 0) + 1;
+  });
+  out.push('dupIds=' + JSON.stringify(Object.keys(idCount).filter(function (k) { return idCount[k] > 1; })));
+
+  // 5. 横スクロール（図・対比・表）
+  out.push('overflowElems=' + [].slice.call(document.querySelectorAll('.fig,.ba,table'))
+    .filter(function (el) { return el.getClientRects().length && el.scrollWidth > el.clientWidth + 1; }).length);
+
+  // 6. SVG の文字はみ出し
+  var svgBad = 0;
+  [].slice.call(document.querySelectorAll('.fig svg')).forEach(function (sv) {
+    if (!sv.getClientRects().length) return;
+    var vb = sv.viewBox.baseVal;
+    if (!vb) return;
+    [].slice.call(sv.querySelectorAll('text')).forEach(function (t) {
+      var b = t.getBBox();
+      if (b.x < vb.x - 1 || b.y < vb.y - 1
+       || b.x + b.width > vb.x + vb.width + 1
+       || b.y + b.height > vb.y + vb.height + 1) svgBad++;
+    });
+  });
+  out.push('svgTextOutOfBox=' + svgBad);
+
+  // 7. 矢じりが 1 本しか出ない path（subpath が 2 つ以上）
+  out.push('multiSubpathArrows=' + [].slice.call(
+    document.querySelectorAll('.fig svg path[marker-end]'))
+    .filter(function (p) { return (p.getAttribute('d').match(/M/g) || []).length > 1; }).length);
+
+  // 8. 資料固有の読み出しと JS の例外
+  try {
+    var extra = READOUT() || [];
+    if (extra.length) out.push('readout=' + extra.join(' | '));
+  } catch (e) { out.push('readout ERR ' + e.message); }
+  out.push('jsErrors=' + JSON.stringify(window.__verifyErrs));
+
+  show();
+  } catch (e) {
+    show('VERIFY ERR ' + e.message + (e.stack ? ' @ ' + String(e.stack).split(NL)[1] : ''));
+  }
+})();
+</script>
+</body>

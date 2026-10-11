@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<!--docsweep-meta
+type: review-sheet
+status: {{STATUS}}
+tags: [{{TAGS}}]
+owner: {{OWNER}}
+related: [{{RELATED_PLANS}}]
+last_reviewed: {{TODAY}}
+docsweep_policy: archive_with_release
+-->
+<!--
+  機能採用を視覚で選ぶテンプレート。案件の私的な文章・実データをこの共有雛形へ持ち込まない。
+  題名・説明・図・おすすめ理由・期日・改修目安・代替策を案件に合わせて置換する。
+  回答は安定したカードIDと選択肢のdata-keyで保存する。設問順や選択肢順を鍵にしない。
+  表示中のグループだけを集計しない。メモだけの回答を「未選択」で打ち消さない。
+  コピー/書出しの直前に毎回DOMから全回答を作り直す。保存/コピー失敗を成功と表示しない。
+-->
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}} — 機能の選択</title>
+<style>
+:root{--bg:#f7f4ec;--card:#fffdf9;--ink:#27231e;--sub:#62584e;--line:#d2c5b6;--accent:#c74a18;--soft:#fff1e8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.75 "Segoe UI","Yu Gothic UI",Meiryo,sans-serif}
+main{max-width:1120px;margin:auto;padding:28px 20px 64px}
+h1{font-size:28px;line-height:1.4;margin:0 0 12px}h2{font-size:22px}h3{font-size:19px;margin:0}
+p{margin:8px 0}button,input,textarea{font:inherit}button,a,input,textarea{accent-color:var(--accent)}
+button{border:1px solid var(--line);background:white;border-radius:8px;padding:9px 14px;min-height:44px;cursor:pointer;color:var(--ink)}
+button:hover{border-color:var(--accent)}button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+a{color:#a53f15}textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:10px;background:white;color:var(--ink);resize:vertical;min-height:82px;overflow-wrap:anywhere}
+.header,.index,.bulk,.card,.export{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px;margin:16px 0}
+.header{border:2px solid var(--ink);box-shadow:3px 4px 0 #ddd5c8}.sub,.why,.limits{color:var(--sub)}.filters,.actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.filters button{border-radius:24px}.filters button[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:white}
+.index-links{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.index-links a{display:block;text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:10px;overflow-wrap:anywhere}
+.status{display:block;font-size:13px;color:var(--sub)}.is-hidden{display:none}
+.qid{display:inline-block;color:var(--accent);font-size:14px;margin-right:8px}
+.ba{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:14px 0}
+.fig{border:1px solid var(--line);border-radius:10px;padding:12px;min-width:0;background:#faf7f2}.fig.after{background:var(--soft)}
+.fig strong{display:block;margin-bottom:6px}.fig svg{width:100%;height:auto;display:block}.fig svg text{fill:var(--ink);font:15px "Segoe UI","Yu Gothic UI",Meiryo,sans-serif}
+.fig svg rect{fill:white;stroke:#cbbca8;stroke-width:1.5}.fig svg .added{fill:var(--soft);stroke:var(--accent)}
+.opts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;border:0;padding:0;margin:14px 0}
+.opts legend{font-weight:700;margin-bottom:8px}.opts label{border:1px solid var(--line);border-radius:8px;padding:12px;cursor:pointer;min-height:48px}
+.opts label:has(input:checked){background:var(--soft);border-color:var(--accent)}
+.opts input{margin-right:6px}.opt-main{font-weight:700}.opt-detail{display:block;font-size:13px;color:var(--sub);margin-top:4px}
+.rec-mark{font-size:12px;font-weight:700;color:#13674c}.memo-label{display:block;font-weight:700}
+.bottom{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}
+#saveState,#copyState,#progress{font-size:14px}#saveState.warning,#copyState.warning{color:#8b3d00;font-weight:700}
+#summaryBox{min-height:190px;white-space:pre-wrap}body.static .filters,body.static .bulk,body.static .bottom button,body.static .export{display:none}
+body.static [data-section]{display:block}body.static .opts{pointer-events:none}
+@media(max-width:720px){main{padding:14px 12px 40px}.header,.index,.bulk,.card,.export{padding:16px}.ba,.opts,.index-links{grid-template-columns:1fr}h1{font-size:24px}}
+@media print{body{background:white}main{max-width:none;padding:0}.is-hidden{display:block!important}.filters,.bulk,.export,.bottom button{display:none!important}.card{break-inside:avoid}.header,.index,.card{border-color:#aaa}a{color:inherit}}
+</style>
+</head>
+<body class="interactive" data-review-mode="feature-selection">
+<main>
+<header class="header">
+<h1>{{TITLE}}</h1>
+<p>図で変化を見て、各機能のすぐ下で採用方針を選びます。初回は未選択です。気になる条件はメモに書いてください。</p>
+<p class="sub">作成：{{DATETIME}}</p>
+<p class="sub">この図は説明用の模式図です。実画面・実装済みの機能を示すものではありません。決めたいこと：{{DECISION_SCOPE}} ／ 回答の目安：{{DECISION_DUE}}</p>
+<p id="saveState" role="status" aria-live="polite">回答はこのブラウザに自動保存します。別の端末へ渡すときは下のコピー・書出しを使ってください。</p>
+<p id="progress" aria-live="polite"></p>
+</header>
+<nav class="index" id="index" aria-label="機能の一覧">
+<h2>見たいグループ</h2>
+<div class="filters" aria-label="グループ切替">
+<button type="button" data-group-button="all" aria-pressed="false">すべて</button>
+<button type="button" data-group-button="A" aria-pressed="true">A · 一覧の使いやすさ</button>
+<button type="button" data-group-button="B" aria-pressed="false">B · 画面の使いやすさ</button>
+</div>
+<div class="index-links">
+<a href="#q-A1">A1 · 項目に目印を付ける<span class="status" data-status-for="A1"></span></a>
+<a href="#q-A2">A2 · 一覧を絞り込む<span class="status" data-status-for="A2"></span></a>
+<a href="#q-B1">B1 · 詳細を横に並べる<span class="status" data-status-for="B1"></span></a>
+</div>
+<p class="sub">グループ切替は表示だけを変えます。回答のコピーと書出しには全グループが入ります。</p>
+</nav>
+<div class="bulk">
+<button type="button" onclick="pickRecommended()">未回答だけおすすめを選ぶ</button>
+<p class="sub">既に選んだ回答と、メモに書いた回答はそのまま残します。おすすめは自動では選ばれません。</p>
+</div>
+<section data-section="A" aria-labelledby="group-A">
+<h2 id="group-A">A · 一覧の使いやすさ</h2>
+<article class="card decision" id="q-A1" data-question-id="A1">
+<h3><span class="qid">A1</span><span class="question-title">項目に目印を付ける</span></h3>
+<p class="why">あとで見たい項目が一覧に埋もれる場面で、目印を付けて見つけやすくします。</p>
+<div class="ba">
+<div class="fig"><strong>現在</strong><svg viewBox="0 0 440 150" role="img" aria-label="同じ見た目の項目が3件並ぶ"><rect x="15" y="15" width="410" height="34" rx="6"/><text x="30" y="38">項目 1</text><rect x="15" y="58" width="410" height="34" rx="6"/><text x="30" y="81">項目 2</text><rect x="15" y="101" width="410" height="34" rx="6"/><text x="30" y="124">項目 3</text></svg></div>
+<div class="fig after"><strong>追加した場合</strong><svg viewBox="0 0 440 150" role="img" aria-label="項目2に目印が付いている"><rect x="15" y="15" width="410" height="34" rx="6"/><text x="30" y="38">項目 1</text><rect class="added" x="15" y="58" width="410" height="34" rx="6"/><text x="30" y="81">★ 項目 2 · あとで見る</text><rect x="15" y="101" width="410" height="34" rx="6"/><text x="30" y="124">項目 3</text></svg></div>
+</div>
+<p>利点：探し直す時間を減らせます。注意点：目印を付けすぎると区別しにくくなります。</p>
+<fieldset class="opts" data-q="A1"><legend>A1 の採用方針</legend>
+<label><input type="radio" name="A1" data-key="adopt" data-recommended="true"><span class="opt-main">採用する</span><span class="rec-mark"> おすすめ</span><span class="opt-detail">再確認する項目を見つけやすくするため。</span></label>
+<label><input type="radio" name="A1" data-key="later"><span class="opt-main">あとで検討</span><span class="opt-detail">使う場面を確認してから決める。</span></label>
+<label><input type="radio" name="A1" data-key="skip"><span class="opt-main">今回は入れない</span><span class="opt-detail">現在の一覧を使う。</span></label>
+</fieldset>
+<label class="memo-label" for="memo-A1">条件・要望のメモ</label><textarea class="memo" id="memo-A1" placeholder="例：目印は1種類でよい"></textarea>
+<p class="limits">改修の目安：{{A1_EFFORT}} ／ 決まるまで：今の一覧から探します。</p>
+<div class="bottom"><button type="button" onclick="resetQuestion('A1')">選択だけ未選択に戻す</button><a href="#index">一覧へ戻る</a></div>
+</article>
+<article class="card decision" id="q-A2" data-question-id="A2">
+<h3><span class="qid">A2</span><span class="question-title">一覧を絞り込む</span></h3>
+<p class="why">条件に合う項目だけを表示して、確認する件数を減らします。</p>
+<div class="ba">
+<div class="fig"><strong>現在</strong><svg viewBox="0 0 440 150" role="img" aria-label="条件に関係なく項目が表示される"><rect x="15" y="20" width="410" height="110" rx="8"/><text x="30" y="50">一覧 · すべての項目</text><text x="30" y="83">項目 1 ／ 項目 2 ／ 項目 3</text><text x="30" y="112">必要なものを目で探す</text></svg></div>
+<div class="fig after"><strong>追加した場合</strong><svg viewBox="0 0 440 150" role="img" aria-label="目印ありの条件を選び項目2だけが表示される"><rect class="added" x="15" y="15" width="410" height="40" rx="8"/><text x="30" y="41">条件：目印あり</text><rect x="15" y="65" width="410" height="65" rx="8"/><text x="30" y="102">項目 2</text></svg></div>
+</div>
+<p>利点：確認に集中できます。注意点：絞り込み中は他の項目が見えないため、解除する場所を分かりやすくします。</p>
+<fieldset class="opts" data-q="A2"><legend>A2 の採用方針</legend>
+<label><input type="radio" name="A2" data-key="adopt" data-recommended="true"><span class="opt-main">採用する</span><span class="rec-mark"> おすすめ</span><span class="opt-detail">探す項目が多いときに便利なため。</span></label>
+<label><input type="radio" name="A2" data-key="later"><span class="opt-main">あとで検討</span><span class="opt-detail">必要な条件を確認してから決める。</span></label>
+<label><input type="radio" name="A2" data-key="skip"><span class="opt-main">今回は入れない</span><span class="opt-detail">すべての項目を表示する。</span></label>
+</fieldset>
+<label class="memo-label" for="memo-A2">条件・要望のメモ</label><textarea class="memo" id="memo-A2" placeholder="例：絞り込み条件を見失わないようにしたい"></textarea>
+<p class="limits">改修の目安：{{A2_EFFORT}} ／ 決まるまで：現在の一覧で確認します。</p>
+<div class="bottom"><button type="button" onclick="resetQuestion('A2')">選択だけ未選択に戻す</button><a href="#index">一覧へ戻る</a></div>
+</article>
+</section>
+<section data-section="B" class="is-hidden" aria-labelledby="group-B">
+<h2 id="group-B">B · 画面の使いやすさ</h2>
+<article class="card decision" id="q-B1" data-question-id="B1">
+<h3><span class="qid">B1</span><span class="question-title">詳細を横に並べる</span></h3>
+<p class="why">一覧を見ながら詳細を確認できるようにします。</p>
+<div class="ba">
+<div class="fig"><strong>現在</strong><svg viewBox="0 0 440 150" role="img" aria-label="一覧から別の詳細画面へ移動する"><rect x="15" y="20" width="170" height="105" rx="8"/><text x="65" y="79">一覧</text><text x="204" y="79">→</text><rect x="255" y="20" width="170" height="105" rx="8"/><text x="305" y="79">詳細</text></svg></div>
+<div class="fig after"><strong>追加した場合</strong><svg viewBox="0 0 440 150" role="img" aria-label="一覧と詳細が同じ画面で横に並ぶ"><rect x="15" y="20" width="170" height="105" rx="8"/><text x="65" y="79">一覧</text><rect class="added" x="200" y="20" width="225" height="105" rx="8"/><text x="283" y="79">詳細</text></svg></div>
+</div>
+<p>利点：一覧に戻る操作が減ります。注意点：小さい画面では表示する場所が狭くなるため、縦に並べる方法も検討します。</p>
+<fieldset class="opts" data-q="B1"><legend>B1 の採用方針</legend>
+<label><input type="radio" name="B1" data-key="adopt"><span class="opt-main">採用する</span><span class="opt-detail">大きい画面では横に並べる。</span></label>
+<label><input type="radio" name="B1" data-key="later" data-recommended="true"><span class="opt-main">あとで検討</span><span class="rec-mark"> おすすめ</span><span class="opt-detail">小さい画面での使い方も確かめるため。</span></label>
+<label><input type="radio" name="B1" data-key="skip"><span class="opt-main">今回は入れない</span><span class="opt-detail">現在の画面移動を続ける。</span></label>
+</fieldset>
+<label class="memo-label" for="memo-B1">条件・要望のメモ</label><textarea class="memo" id="memo-B1" placeholder="例：小さい画面では一覧の下に詳細を出したい"></textarea>
+<p class="limits">改修の目安：{{B1_EFFORT}} ／ 決まるまで：現在の画面移動を続けます。</p>
+<div class="bottom"><button type="button" onclick="resetQuestion('B1')">選択だけ未選択に戻す</button><a href="#index">一覧へ戻る</a></div>
+</article>
+</section>
+<section class="export" aria-labelledby="export-title">
+<h2 id="export-title">回答をまとめて渡す</h2>
+<p>全グループの最新回答を出力します。選択が空でも、メモに回答があれば「メモで回答」として残します。メモの内容から採用・不採用を自動で推測しません。</p>
+<div class="actions">
+<button type="button" onclick="generateSummary()">決定サマリを出力</button>
+<button type="button" onclick="copySummary()">クリップボードにコピー</button>
+<button type="button" onclick="generateMarkdown()">Markdown 形式で出力</button>
+<button type="button" onclick="downloadMarkdown()">.md ファイル保存</button>
+<button type="button" onclick="window.print()">印刷 / PDF 保存</button>
+</div>
+<label for="summaryBox">出力された回答</label><textarea id="summaryBox" readonly></textarea>
+<p id="copyState" role="status" aria-live="polite"></p>
+<button type="button" onclick="clearSavedAnswers()">保存した回答を消して初期状態に戻す</button>
+<p class="sub">保存はこのブラウザ内だけです。このHTMLを別の人へ渡しても保存した回答は移りません。{{RELATED_LINE}}</p>
+</section>
+</main>
+<script>
+'use strict';
+const STORE_KEY = 'review-sheet:features:v1:' + location.pathname;
+const cards = () => Array.from(document.querySelectorAll('.card.decision'));
+const cardOf = id => cards().find(card => card.dataset.questionId === id);
+let storageWarning = '';
+function answers() {
+  return cards().map(card => {
+    const chosen = Array.from(card.querySelectorAll('.opts input:checked'));
+    const memo = card.querySelector('.memo').value.trim();
+    return { id: card.dataset.questionId, title: card.querySelector('.question-title').textContent.trim(),
+      keys: chosen.map(input => input.dataset.key),
+      choice: chosen.map(input => input.closest('label').querySelector('.opt-main').textContent.trim()).join('／'),
+      memo };
+  });
+}
+function responseLabel(answer) { return answer.choice || (answer.memo ? 'メモで回答（内容を優先）' : '未選択'); }
+function markState(saved = false) {
+  const rows = answers();
+  const selected = rows.filter(row => row.keys.length).length;
+  const memoOnly = rows.filter(row => !row.keys.length && row.memo).length;
+  const unanswered = rows.length - selected - memoOnly;
+  document.getElementById('progress').textContent = '選択済み ' + selected + ' 件 ／ メモで回答 ' + memoOnly + ' 件 ／ 未回答 ' + unanswered + ' 件';
+  rows.forEach(row => {
+    const status = document.querySelector('[data-status-for="' + row.id + '"]');
+    if (status) status.textContent = responseLabel(row);
+  });
+  const status = document.getElementById('saveState');
+  status.classList.toggle('warning', Boolean(storageWarning));
+  if (storageWarning) status.textContent = storageWarning;
+  else if (saved) status.textContent = 'このブラウザに保存済み。選択とメモは開き直しても復元されます。';
+}
+function saveAnswers() {
+  try {
+    const data = Object.fromEntries(answers().map(row => [row.id, { keys: row.keys, memo: cardOf(row.id).querySelector('.memo').value }]));
+    localStorage.setItem(STORE_KEY, JSON.stringify({ version: 1, answers: data }));
+    storageWarning = '';
+    markState(true);
+  } catch (error) {
+    storageWarning = 'このブラウザには保存できません。閉じる前に最新の回答をコピーするか、.md ファイル保存を使ってください。';
+    markState();
+  }
+}
+function restoreAnswers() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) { markState(); return; }
+    const data = JSON.parse(raw);
+    if (data.version !== 1 || !data.answers || typeof data.answers !== 'object' || Array.isArray(data.answers)) throw new Error('saved schema');
+    cards().forEach(card => {
+      const row = data.answers[card.dataset.questionId];
+      if (!row) return;
+      if (!Array.isArray(row.keys) || row.keys.some(key => typeof key !== 'string') || typeof row.memo !== 'string') throw new Error('saved answer');
+    });
+    cards().forEach(card => {
+      const row = data.answers[card.dataset.questionId];
+      if (!row) return;
+      card.querySelectorAll('.opts input').forEach(input => { input.checked = row.keys.includes(input.dataset.key); });
+      card.querySelector('.memo').value = row.memo;
+    });
+    markState(true);
+  } catch (error) {
+    storageWarning = '保存した回答を読み込めませんでした。画面の回答を確認してください。このブラウザへの保存を頼らず、コピー・.md ファイル保存で回答を残せます。';
+    markState();
+  }
+}
+function clearSavedAnswers() {
+  if (!window.confirm('このブラウザに保存した選択とメモを消して、初期状態に戻しますか？')) return;
+  try { localStorage.removeItem(STORE_KEY); }
+  catch (error) {
+    storageWarning = '保存した回答を削除できませんでした。画面の選択とメモは残しています。必要な回答をコピー・.md ファイル保存してください。';
+    markState(); return;
+  }
+  cards().forEach(card => {
+    card.querySelectorAll('.opts input').forEach(input => { input.checked = input.defaultChecked; });
+    card.querySelector('.memo').value = card.querySelector('.memo').defaultValue;
+  });
+  storageWarning = '';
+  document.getElementById('saveState').textContent = '保存した回答を消し、初期状態に戻しました。';
+  document.getElementById('summaryBox').value = '';
+  markState();
+}
+function resetQuestion(id) {
+  const card = cardOf(id);
+  if (!card) return;
+  card.querySelectorAll('.opts input').forEach(input => { input.checked = false; });
+  saveAnswers();
+}
+function pickRecommended() {
+  cards().forEach(card => {
+    if (card.querySelector('.opts input:checked') || card.querySelector('.memo').value.trim()) return;
+    const recommended = card.querySelector('.opts input[data-recommended="true"]:not(:disabled)');
+    if (recommended) recommended.checked = true;
+  });
+  saveAnswers();
+}
+function applyConditions() {} // 条件付き設問がないこのモードでも共通verifyから呼べる。
+function setGroup(group) {
+  document.querySelectorAll('[data-section]').forEach(section => {
+    section.classList.toggle('is-hidden', group !== 'all' && section.dataset.section !== group);
+  });
+  document.querySelectorAll('[data-group-button]').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.groupButton === group));
+  });
+}
+function generateSummary() {
+  const output = document.querySelector('h1').textContent.trim() + '\n\n' + answers().map(row =>
+    '[' + row.id + '] ' + row.title + '\n回答：' + responseLabel(row) + (row.memo ? '\nメモ：' + row.memo : '')
+  ).join('\n\n');
+  document.getElementById('summaryBox').value = output;
+  return output;
+}
+function generateMarkdown() {
+  const cell = text => text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
+  const rows = answers();
+  const output = '# ' + document.querySelector('h1').textContent.trim() + '\n\n| ID | 機能 | 回答 |\n|---|---|---|\n' +
+    rows.map(row => '| ' + cell(row.id) + ' | ' + cell(row.title) + ' | ' + cell(responseLabel(row)) + ' |').join('\n') +
+    rows.filter(row => row.memo).map(row => '\n\n### ' + row.id + ' · メモ\n\n' + row.memo).join('') + '\n';
+  document.getElementById('summaryBox').value = output;
+  return output;
+}
+async function copySummary() {
+  const latest = generateSummary();
+  const status = document.getElementById('copyState');
+  try {
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') throw new Error('clipboard unavailable');
+    await navigator.clipboard.writeText(latest);
+    status.classList.remove('warning');
+    status.textContent = 'コピーしました。全グループの回答が入っています。';
+  } catch (error) {
+    const box = document.getElementById('summaryBox');
+    box.focus(); box.select();
+    status.classList.add('warning');
+    status.textContent = '自動コピーできませんでした。出力欄を選択しています。Ctrl+C（Macは⌘C）または端末のコピー操作を使ってください。';
+  }
+}
+function downloadMarkdown() {
+  const latest = generateMarkdown();
+  const url = URL.createObjectURL(new Blob([latest], { type: 'text/markdown;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url; link.download = '{{TOPIC_STEM}}_decisions.md';
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+document.querySelectorAll('[data-group-button]').forEach(button => {
+  button.addEventListener('click', () => setGroup(button.dataset.groupButton));
+});
+document.querySelectorAll('a[href^="#q-"]').forEach(link => {
+  link.addEventListener('click', () => {
+    const target = document.getElementById(link.hash.slice(1));
+    if (target) setGroup(target.closest('[data-section]').dataset.section);
+  });
+});
+document.addEventListener('change', event => {
+  if (event.target.matches('.opts input')) saveAnswers();
+});
+document.addEventListener('input', event => {
+  if (event.target.matches('.memo')) saveAnswers();
+});
+restoreAnswers();
+</script>
+</body>
+</html>
