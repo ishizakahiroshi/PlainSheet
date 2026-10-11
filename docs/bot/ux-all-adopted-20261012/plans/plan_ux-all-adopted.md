@@ -36,7 +36,7 @@ due: 2026-10-19
 
 案件 P-20261012-001 / ishizakahiroshi/PlainSheet。基準はDraft PR #1の固定SHA `8a11f1b94e16d575fa3f3df3f43924b34c0a4cf6`。main/develop/既存PR #1と既存worktreeは保持。作業branch `dots/ux-all-P-20261012-001`、Draft PR baseは `bot/20261005-004-excel-like-ux` とするstacked構成。PR #1のmerge/rebase/base更新は自動実施せず、後続PRの差分に既存PRを再計上しない。
 
-公開指示: `docs/bot/ux-all-adopted-20261012/README.md`、本計画と子planの公開copyは同フォルダのplans配下。新案件Issueと固定指示SHAは公開後に受付・実装記録へ追記する。研究のR3原文と公式出典を同フォルダへsnapshotとして置く。以前のR2branchだけでは最終R3を読めないため今回のsnapshotを使う。
+公開指示: `docs/bot/ux-all-adopted-20261012/README.md`、本計画と子planの公開copyは同フォルダのplans配下。新案件は [Issue #3](https://github.com/ishizakahiroshi/PlainSheet/issues/3)。初回指示公開commit / review diff起点は `bf7e54689742c35a2158c16f79823a66cb59ad85`。送信時の固定指示SHAは公開後に受付・実装記録へ追記する。研究のR3原文と公式出典を同フォルダへsnapshotとして置く。以前のR2branchだけでは最終R3を読めないため今回のsnapshotを使う。
 
 ## 実装の範囲・互換性
 

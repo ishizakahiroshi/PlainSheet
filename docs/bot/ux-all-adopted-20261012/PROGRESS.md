@@ -4,6 +4,8 @@
 
 手元Codex: 方針・指示・送信・差分総合検収。dots: 実装統合と別担当の独立review。初回の指示公開commit、Issue URL、最終固定指示commitは送信前の追記で確定する。Draft PR/code SHA/review SHA/CI runは実測後に追記する。
 
+専用Issue: https://github.com/ishizakahiroshi/PlainSheet/issues/3 。初回指示公開commit / review diff起点: `bf7e54689742c35a2158c16f79823a66cb59ad85`。送信時の固定指示commitはIssue本文/送信記録が示す。本文と各snapshotの実ファイルを公開後に照合する。
+
 状態の正本は専用Issueコメント。利用者は28件を採用済み。計画の公開と送信を、受付/実装着手として数えない。
 
 | 工程 | 担当 | Issueの証跡 | 残件 |

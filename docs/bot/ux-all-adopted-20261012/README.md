@@ -12,6 +12,8 @@ last_reviewed: 2026-10-12
 
 2026-10-12(月)。利用者の指示は「せっかくだから全部採用しますよ 計画して dots に実装させてみて」。前の研究案件P-20261011-013のUX-001〜028を全部実装する。保留8件・見送り2件を外さず、数式計算と共同編集も実装する。旧proposalの推薦や「別案件」「未選択」は歴史的評価として読み、今回の指示が上書きする。
 
+専用Issue: https://github.com/ishizakahiroshi/PlainSheet/issues/3 。初回指示公開commit / 実装review diff起点: `bf7e54689742c35a2158c16f79823a66cb59ad85`。送信時の固定指示commitはIssue本文と送信receiptへ記録する。
+
 ## 正本と読む順
 
 1. このREADME、[FACTS](FACTS.md)、[全体plan](plans/plan_ux-all-adopted.md)。
@@ -26,7 +28,7 @@ last_reviewed: 2026-10-12
 - 挙動oracle/継承したPR #1のhead: `8a11f1b94e16d575fa3f3df3f43924b34c0a4cf6`。
 - Draft PR base: `bot/20261005-004-excel-like-ux`。既存Draft PR #1に積む別Draft PR。main/develop向けに重複したPRを新規作成しない。
 - review diffは固定指示公開commitから新code SHA。指示公開後に専用IssueへそのSHAを固定して送る。看板はbranch最新版、挙動oracleとは別。
-- GitHub Issue URLと固定指示SHAは送信前にREADME/PROGRESSとIssueへ追記する。状態はIssueコメントが正本。
+- GitHub Issue #3への受付/進捗/提出/独立review/手元検収コメントが状態の正本。
 
 ## 依存順と担当
 
