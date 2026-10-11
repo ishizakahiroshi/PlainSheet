@@ -13,7 +13,7 @@ last_reviewed: 2026-10-11
 - 対象/保存先: `ishizakahiroshi/PlainSheet`（公開）
 - 資料branch: `dots/ux-research-P-20261011-013`
 - source: develop `037c29ea4649efc81acc8f28824dca3df08e7450` / PR #1 `8a11f1b94e16d575fa3f3df3f43924b34c0a4cf6`
-- 管理Issue: 発行後に追記
+- 管理Issue: https://github.com/ishizakahiroshi/PlainSheet/issues/2
 - この依頼は調査・提案。製品変更/merge/build/起動は含まない。
 
 | 工程 | 担当 | 証跡・残件 |
