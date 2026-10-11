@@ -26,3 +26,10 @@ last_reviewed: 2026-10-11
 | 実画面/Windows/実IME | 環境を持つ担当 | 今回未確認。sourceだけで合格にしない |
 
 指示commitはgit履歴および管理Issueで固定する。source SHA・指示SHA・成果SHA・review対象SHAを別々に記録する。私有会話locatorを公開資料へ書かない。
+
+
+## 2026-10-11 調査開始・途中候補
+
+[初回候補batch](results/batch-01.md) / [往復記録](results/iterations.md)。安定ID UX-001〜014、暫定優先度と反証質問を提出。最終MD/HTML・全coverage・公式sources・独立反証は作業中。
+
+GitHub固定source読取とWeb一次資料は実施。Node/既存Playwright/Chromiumを使う資料・合成検査は可能。Vitest依存の取得、製品build/compile/新規起動はしていない。実画面/Windows/native/実IME/性能は未確認。
