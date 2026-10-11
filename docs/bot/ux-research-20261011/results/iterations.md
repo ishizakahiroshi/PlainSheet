@@ -1,6 +1,15 @@
+---
+type: reference
+status: draft
+tags: [ux-research, plainsheet]
+owner: dots
+review_status: draft
+last_reviewed: 2026-10-12
+---
+
 # P-20261011-013 PlainSheet：往復記録
 
-指示SHA a4b136e7074986caf778c39ee26e61c0c774c2bb。主対象SHA 8a11f1b94e16d575fa3f3df3f43924b34c0a4cf6。develop SHA 037c29ea4649efc81acc8f28824dca3df08e7450。日付は2026-10-11。
+指示SHA a4b136e7074986caf778c39ee26e61c0c774c2bb。主対象SHA 8a11f1b94e16d575fa3f3df3f43924b34c0a4cf6。develop SHA 037c29ea4649efc81acc8f28824dca3df08e7450。日付は2026-10-11 UTC / 2026-10-11〜12 JST。
 
 ## I0 受付
 
@@ -45,3 +54,13 @@ UX-014はA100/A100:B101/Z1の移動/選択だけでrows/dirtyを変えない受�
 ## I7 全体checkpoint R1
 
 proposal.md/htmlを単一台帳の20IDから生成。採用/保留/見送りは初回未選択、選択肢ごとに利用者の利点/不利点、時期/概算/暫定回避/一覧復帰を用意。公式sources・13領域coverageを提出。HTMLの描画・保存・全件出力の動的検証と最終固定revision独立レビューは継続中。既存templateの検証スクリプトは配布物でなく検証用コピーにのみ差し込む。
+
+## I8 R1反証と全28件への拡張
+
+R1 docs commit ab15648ddf66083eceee86ded17514b16ebe6532の20件を、手元担当と別contextの独立反証担当が点検。独立F01–08はreview.mdの表のとおり、MD anchor、置換回避、header条件、source範囲、close guard、取込図、用語を修正した。UX-008の実rangeTsv→parseClipboardTextによる手元合成自己往復は実関数証拠として維持し、こちらのモデルだけへ縮小しない。
+
+手元は「実用改善をcoverageの記載だけで済ませず個別に選べるように」と提案。UX-021 行固定、022 複数キー並替え、023 選択内・完全一致検索、024 キーボードmenu入口と復帰、025 OS別キー、026 操作名検索、027 任意の端末内復元下書き、028 名前付き表示条件を独立カード化。列固定/単列sort/既存menu矢印Esc/toolbar折返しは既存として反証に含めた。UX-001と028は自動タブ復帰対明示的な複数条件保存として区別する。
+
+採用の得失と推奨理由を利用者体験へ統一し、仕様検査や工数は改修目安へ分離。HTMLの各選択欄にメリット・デメリット、カードに導入時期・暫定回避・一覧復帰を明示。保存キーはtask/schema/versionとlocation.pathnameを使い、別ファイルの回答混入を避ける。手元のR1検査15/16と唯一のpathname問題はR2で再検査する。MD/HTML相互リンク、静的reference/draft metadataを追加。描画用の新規Chromium修復は停止し、既存の別環境検査へ委ねる。
+
+UX-013の追加実fillSeries合成例（長整数、小数、数字suffix、日付風文字列）はseed上書きと別の型推定仕様に分類。すべてUIbugとはせず、コピー/連番の明示と事前確認・元値保護を受入に追加。実日本語IME・OS操作をPASSにしない。

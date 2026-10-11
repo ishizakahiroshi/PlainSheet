@@ -1,6 +1,15 @@
+---
+type: reference
+status: draft
+tags: [ux-research, plainsheet]
+owner: dots
+review_status: draft
+last_reviewed: 2026-10-12
+---
+
 # P-20261011-013 PlainSheet：公式出典台帳
 
-確認日は公開/更新日ではない。初回27件は2026-10-11 UTC（同日JST）、追加Google/Microsoft4ページは2026-10-11 15:05:50–15:05:58 UTC / 2026-10-12 00:05:50–00:05:58 JST。BOMページは同じOFF-MS-14を再確認して重複計上しない。合計33 entry（Microsoft/Google/W3C/WHATWG32、固定Glide source1）。実競合画面は操作していない。
+確認日は公開/更新日ではない。初回27件は2026-10-11 UTC（同日JST）、追加Google/Microsoft4ページは2026-10-11 15:05:50–15:05:58 UTC / 2026-10-12 00:05:50–00:05:58 JST。BOMページは同じOFF-MS-14を再確認して重複計上しない。出典数は下の個別entryを正とする。追加8提案の参照資料も別記した。実競合画面は操作していない。
 
 ## OFF-MS-01 Worksheet-scoped Sheet Views
 
@@ -8,7 +17,7 @@
 - 参照節: “Add a Sheet View”; “Using a Sheet View”; “About differences between Sheet Views on Excel platforms”; “Frequently Asked Questions”.
 - 確認日: 2026-10-11 UTC / 2026-10-11 JST（初回読取）
 - 製品/環境: Excel desktop/Mac/Web等。OneDrive/SharePointの条件あり。
-- 支持するID: UX-001
+- 支持するID: UX-001 / UX-028
 - 確認した内容: Sheet Viewsはsort/filterを名前つきで保存し、active worksheetのviewを選ぶ。
 - 限界: 全タブのscroll/selection自動復元の証拠ではない。local copyでは利用制限あり。
 
@@ -18,7 +27,7 @@
 - 参照節: introduction; “Create a custom view”; “Apply a custom view”.
 - 確認日: 2026-10-11 UTC / 2026-10-11 JST（初回読取）
 - 製品/環境: Windows desktop ExcelのCustom Views。
-- 支持するID: UX-001
+- 支持するID: UX-001 / UX-028
 - 確認した内容: 選択・filter・表示設定をworksheetに属するviewへ保存できる。
 - 限界: 明示保存viewであり自動復元ではない。Excel tableがあるworkbookでは制限。
 
@@ -28,7 +37,7 @@
 - 参照節: “Filter your data”; “Create, save, delete, or share a filter view”; “Find an existing filter view”; “Sort data in alphabetical or numerical order”.
 - 確認日: 2026-10-11 UTC / 2026-10-11 JST（初回読取）
 - 製品/環境: Google Sheets Computer/browser。
-- 支持するID: UX-001 / UX-004 / UX-015
+- 支持するID: UX-001 / UX-004 / UX-015 / UX-022 / UX-028
 - 確認した内容: filter viewの保存・再利用、sort時のData has header row、header freezeの別手順を記載。
 - 限界: 自動header判定や全view状態の自動復元を保証しない。
 
@@ -38,7 +47,7 @@
 - 参照節: Windows “Find” / “Replace”; macOS “Find text or numbers from the Search bar”; Web “Find” / “Replace”.
 - 確認日: 2026-10-11 UTC / 2026-10-11 JST（初回読取）
 - 製品/環境: Excel Windows/Mac/Webの節を区別。
-- 支持するID: UX-002 / UX-007 / UX-011
+- 支持するID: UX-002 / UX-007 / UX-011 / UX-023
 - 確認した内容: Find/Replace、件数/移動、case/whole-cell/scopeの選択を説明。MacとWindowsでキーの意味が異なる。
 - 限界: 開いたpanelへの再shortcut focusやregex互換の証拠ではない。
 
@@ -48,7 +57,7 @@
 - 参照節: “PC shortcuts”; “Mac shortcuts”; “Chrome OS shortcuts”; “Use other spreadsheet shortcuts”.
 - 確認日: 2026-10-11 UTC / 2026-10-11 JST（初回読取）
 - 製品/環境: Sheets PC/Mac/ChromeOSの各shortcut表。
-- 支持するID: UX-002 / UX-008 / UX-013
+- 支持するID: UX-002 / UX-008 / UX-013 / UX-024 / UX-025
 - 確認した内容: Find/Replace・copy/paste・fill down/right等をplatform別に示す。Macの置換はCommand+Shift+H。
 - 限界: shortcutの伝播、繰返しfocus、OS clipboardの完全互換を保証しない。
 
@@ -58,7 +67,7 @@
 - 参照節: “Use find and replace in a spreadsheet”; “Replace with regular expressions”; “Regular expressions”.
 - 確認日: 2026-10-11 UTC / 2026-10-11 JST（初回読取）
 - 製品/環境: Google Sheets Computer Find/Replace。Docsとは区別。
-- 支持するID: UX-007 / UX-011
+- 支持するID: UX-007 / UX-011 / UX-023
 - 確認した内容: 正規表現置換に$1/$2のcapture参照例がある。case/full-cell/formula検索の選択もある。
 - 限界: JavaScript regexとSheets RE2は完全互換ではない。
 
@@ -128,7 +137,7 @@
 - 参照節: “Save a file”; “Make a copy of a file”; “Download a copy of a file”.
 - 確認日: 2026-10-11 UTC / 2026-10-11 JST（初回読取）
 - 製品/環境: Google Docs Editors Computer、Sheetsを含む。
-- 支持するID: UX-003 / UX-005 / UX-012 / UX-020
+- 支持するID: UX-003 / UX-005 / UX-012 / UX-020 / UX-027
 - 確認した内容: online自動保存、copy、downloadを別操作で説明。Sheetsではcell編集を確定する手順にも言及。
 - 限界: 元localファイル上書きや全exit前の永続化完了を保証しない。
 
@@ -148,7 +157,7 @@
 - 参照節: “Freeze rows or columns”.
 - 確認日: 2026-10-11 UTC / 2026-10-11 JST（初回読取）
 - 製品/環境: 掲載対象のWindows desktop Excel。
-- 支持するID: UX-004
+- 支持するID: UX-004 / UX-021
 - 確認した内容: 選択の上の行・左の列を固定する。行/列は独立した表示操作。
 - 限界: header認識、編集保護、Web固有UIの証拠ではない。
 
@@ -158,7 +167,7 @@
 - 参照節: “Freeze, group, hide, or merge rows & columns” (opening freeze procedure).
 - 確認日: 2026-10-11 UTC / 2026-10-11 JST（初回読取）
 - 製品/環境: Sheets Computer/browser。
-- 支持するID: UX-004
+- 支持するID: UX-004 / UX-021
 - 確認した内容: View > Freezeで行数/列数を指定し、各軸の固定を解除できる。
 - 限界: sortで先頭を除く意味とは別。
 
@@ -258,7 +267,7 @@
 - 参照節: “Success Criterion (SC)”; “Intent”.
 - 確認日: 2026-10-11 UTC / 2026-10-11 JST（初回読取）
 - 製品/環境: WCAG2.2 SC2.1.1のUnderstanding。
-- 支持するID: UX-011 / coverage a11y
+- 支持するID: UX-011 / coverage a11y / UX-024 / UX-026
 - 確認した内容: 機能をkeyboard interfaceから操作できることの趣旨を説明。
 - 限界: Excelと同じshortcutを要求しない。sourceだけで適合判定しない。
 
@@ -268,9 +277,19 @@
 - 参照節: “Success Criterion (SC)”; “Intent”.
 - 確認日: 2026-10-11 UTC / 2026-10-11 JST（初回読取）
 - 製品/環境: WCAG2.2 SC2.4.7のUnderstanding。
-- 支持するID: UX-011 / coverage a11y
+- 支持するID: UX-011 / coverage a11y / UX-024 / UX-026
 - 確認した内容: keyboard focusが見える必要性を説明。
 - 限界: 特定の色や装飾を要求せず、実画面の検査が必要。
+
+## OFF-MS-17 Keyboard shortcuts in Excel
+
+- URL: [Keyboard shortcuts in Excel](https://support.microsoft.com/en-us/accessibility/excel/keyboard-shortcuts-in-excel)
+- 参照節: macOS > Frequently used shortcuts / Work in windows and dialog boxes
+- 確認日: 2026-10-11 UTC / 2026-10-12 JST（追加読取）
+- 製品/環境: Excel macOSの節
+- 支持するID: UX-002 / coverage日本語・OS / UX-025
+- 確認した内容: 置換はCtrl+HまたはCommand+Shift+H、Command+HはExcelを隠す操作。WindowsやWebの節を混ぜない。
+- 限界: OS設定・keyboard配列・browserによる干渉は実機検証が必要。PlainSheetの全キー互換を保証しない。
 
 ## OFF-GS-08 Split text, remove duplicates, or trim whitespace
 
@@ -331,6 +350,76 @@
 - 支持するID: UX-013 / UX-016
 - 確認した内容: fillDestinationにseedを含む範囲、preventDefault後の標準処理不実行、fillDown/R、visible ordinal markerを確認。
 - 限界: 実canvas実行の証拠ではない。Web整形行番号をGitHub物理行に流用しない。
+
+## OFF-MS-18 Multiple-key sorting in Excel
+
+- URL: [Multiple-key sorting in Excel](https://support.microsoft.com/en-us/excel/sort-data-in-a-range-or-table-in-excel)
+- 参照節: Windows > Sort by more than one column or row
+- 確認日: 2026-10-11 UTC / 2026-10-12 JST（追加読取）
+- 製品/環境: Excel Windows desktopの複数キーsort手順。Web節と区別。
+- 支持するID: UX-022
+- 確認した内容: Sortで優先列・方向を選び、Add Levelで条件を追加、上下で優先順を変える。
+- 限界: PlainSheetの対象preview、非表示行の扱い、一括Undoを直接定めるものではない。Excelの型・色sortを複製する提案でもない。
+
+## OFF-MS-19 Device AutoRecover versus cloud AutoSave
+
+- URL: [Device AutoRecover versus cloud AutoSave](https://support.microsoft.com/en-us/office/collab-files/save-back-up-and-recover-a-file-in-microsoft-office)
+- 参照節: Back up and recover your files > Saved to your device / Saved to OneDrive
+- 確認日: 2026-10-11 UTC / 2026-10-12 JST（追加読取）
+- 製品/環境: 掲載Office Windows desktop系列、Excelを含む。保存先ごとの説明を区別。
+- 支持するID: UX-027
+- 確認した内容: 端末保存ではAutoRecover有効時に予期しない終了後のDocument Recoveryを説明。手動保存も引き続き推奨。cloud AutoSave/Version Historyとは別。
+- 限界: PlainSheetの期限・削除・snapshot間隔・回復保証やCSVの全挙動を証明しない。初期OFF等は今回の設計案。
+
+## OFF-MS-20 Command search and a collapsible entrypoint
+
+- URL: [Command search and a collapsible entrypoint](https://support.microsoft.com/en-us/office/foundations-experiences/find-what-you-need-with-search-in-microsoft-365-apps)
+- 参照節: introduction; Get started quickly on the web; Resizing the search box
+- 確認日: 2026-10-11 UTC / 2026-10-12 JST（追加読取）
+- 製品/環境: 冒頭はWindows版Microsoft365 apps、Excelを含む。Web節の機能説明も掲載されるがplatformを混同しない。
+- 支持するID: UX-026
+- 確認した内容: 操作・help等を検索できる入口、Alt+Q、最近の操作、検索boxをiconへ畳む設定を説明。
+- 限界: PlainSheetのlocal-only検索、全OSでのAlt+Q、AI不要の実装を保証しない。人/ファイル/cloud検索まで取り込む提案ではない。
+
+## OFF-MS-21 Platform-specific keyboard entry into Excel menus
+
+- URL: [Platform-specific keyboard entry into Excel menus](https://support.microsoft.com/en-us/accessibility/excel/keyboard-shortcuts-in-excel)
+- 参照節: Windows > Frequently used shortcuts / Work in the ribbon with the keyboard; macOS > Work in cells or the Formula bar; Web > Frequently used shortcuts
+- 確認日: 2026-10-11 UTC / 2026-10-12 JST（追加読取）
+- 製品/環境: Excel Windows/macOS/Webの各menu入口。OFF-MS-17のMac置換キーとは参照節を分ける。
+- 支持するID: UX-024
+- 確認した内容: context menuのShift+F10とWindows Menu key等をplatformごとに掲載。Windowsでは選択buttonのmenuをAlt+Downで開く。
+- 限界: Glide/PlainSheetの実イベント発火やscreen reader動作を保証しない。Power Pivot限定のfilter手順を通常gridへ一般化しない。
+
+## OFF-GS-10 Sheets tool finder as an alternate command route
+
+- URL: [Sheets tool finder as an alternate command route](https://support.google.com/docs/answer/13466905?hl=en)
+- 参照節: introduction; Find tools & features
+- 確認日: 2026-10-11 UTC / 2026-10-12 JST（追加読取）
+- 製品/環境: Google Docs/Sheets/Slides/VidsのComputer向けtool finder。
+- 支持するID: UX-026
+- 確認した内容: menu項目・toolの検索入口をtoolbar/Helpに置き、PC/ChromeOSはAlt+/、MacはOption+/を案内。
+- 限界: PlainSheetの特定キー互換・offline実装・狭幅での適合を証明しない。提案は操作名検索に限定。
+
+## OFF-W3C-06 Keyboard entry into a menu button
+
+- URL: [Keyboard entry into a menu button](https://www.w3.org/WAI/ARIA/apg/patterns/menu-button/)
+- 参照節: Keyboard Interaction; WAI-ARIA Roles, States, and Properties
+- 確認日: 2026-10-11 UTC / 2026-10-12 JST（追加読取）
+- 製品/環境: Webのmenu button authoring guidance。
+- 支持するID: UX-024
+- 確認した内容: buttonへのfocus中にEnter/Spaceでmenuを開き最初の項目へfocus。aria-haspopup/expanded等の意味を説明。
+- 限界: menu buttonのpatternであり、filter内checkboxの全操作をmenu化する根拠ではない。APGだけでWCAG適合としない。
+
+## OFF-W3C-07 Menu cancellation and return to the invoking context
+
+- URL: [Menu cancellation and return to the invoking context](https://www.w3.org/WAI/ARIA/apg/patterns/menubar/)
+- 参照節: Keyboard Interaction > Escape; Note item 3
+- 確認日: 2026-10-11 UTC / 2026-10-12 JST（追加読取）
+- 製品/環境: Webのmenu/menubar authoring guidance。
+- 支持するID: UX-024
+- 確認した内容: Escでmenuを閉じ呼出し元の要素/文脈へfocusを戻す。context action後のEnterでeditor等へ戻す例も説明。
+- 限界: filter dialogに一律focus trapを要求しない。実製品のfocus伝播やOSキー合格の証明ではない。
 
 ## 比較の結論と空白
 
