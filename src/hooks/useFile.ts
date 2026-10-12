@@ -39,6 +39,7 @@ type UseFileOptions = {
 export type SaveOutcome = {
   status: "direct" | "download" | "cancelled" | "failed" | "busy";
   snapshot?: SaveSnapshot;
+  savedMeta?: SheetMeta;
 };
 
 type FileDropPayload =
@@ -218,7 +219,11 @@ export function useFile({
             });
           setSaveNotice(t("browserDownloadNotice", { name: fileName }));
           onToast(t("toastDownloadStarted"));
-          return { status: "download", snapshot };
+          return {
+            status: "download",
+            snapshot,
+            savedMeta: { ...snapshot.meta, fileName, format, delimiter, encoding },
+          };
         }
         const path =
           chooseName || !currentMeta.filePath
@@ -272,7 +277,19 @@ export function useFile({
         onRecentPath?.(path);
         setSaveNotice(t("savedFileNotice", { name: fileNameFromPath(path) }));
         onToast(t("toastSaved"));
-        return { status: "direct", snapshot };
+        return {
+          status: "direct",
+          snapshot,
+          savedMeta: {
+            ...snapshot.meta,
+            filePath: path,
+            fileName: fileNameFromPath(path),
+            format,
+            delimiter,
+            encoding,
+            sourceText: content,
+          },
+        };
       } catch (error) {
         const message = saveErrorMessage(error);
         setSaveNotice(`${targetLabel}: ${message}`);

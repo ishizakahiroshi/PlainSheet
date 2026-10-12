@@ -447,3 +447,204 @@ describe("browser import supersession", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent("newer.csv");
   });
 });
+
+const rulesDialog = () => screen.getByRole("dialog", { name: "Input rules for this document" });
+function addRequired() {
+  openRules();
+  fireEvent.change(within(rulesDialog()).getByRole("combobox", { name: "On invalid input" }), {
+    target: { value: "reject" },
+  });
+  fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Add rule" }));
+  fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Close" }));
+}
+describe("review regressions: cleanup, rule history and normalized saves", () => {
+  it("R1 sorting preserves an untouched invalid value while moving the complete row", async () => {
+    await load("id,value\n,z\n11,a");
+    addRequired();
+    act(() => editor().onHeaderMenuClick?.(1, { x: 0, y: 0, width: 120, height: 32 }));
+    fireEvent.click(screen.getByRole("menuitem", { name: t("sortAsc") }));
+    expect(matrix(3)).toEqual([
+      ["id", "value"],
+      ["11", "a"],
+      ["", "z"],
+    ]);
+    openRules();
+    expect(rulesDialog()).toHaveTextContent("Current data: 1 rule violations");
+    fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+    expect(matrix(3)).toEqual([
+      ["id", "value"],
+      ["", "z"],
+      ["11", "a"],
+    ]);
+    expect(screen.getByRole("button", { name: /Validation \(1\)/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: t("undo") })).toBeDisabled();
+  });
+  it.each(["insert", "move"] as const)(
+    "R1 column %s preserves untouched invalid cells and remaps their rule",
+    async (operation) => {
+      await load("id,value\n,keep");
+      addRequired();
+      if (operation === "insert") {
+        act(() => editor().onHeaderMenuClick?.(0, { x: 0, y: 0, width: 120, height: 32 }));
+        fireEvent.click(screen.getByRole("menuitem", { name: t("insertColLeft") }));
+        expect(matrix(2, 3)).toEqual([
+          ["", "id", "value"],
+          ["", "", "keep"],
+        ]);
+      } else {
+        act(() => editor().onColumnMoved?.(0, 1));
+        expect(matrix(2)).toEqual([
+          ["value", "id"],
+          ["keep", ""],
+        ]);
+      }
+      openRules();
+      expect(within(rulesDialog()).getByRole("list", { name: "Existing rules" })).toHaveTextContent(
+        "Column 2: required",
+      );
+      expect(rulesDialog()).toHaveTextContent("Current data: 1 rule violations");
+      fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Close" }));
+      fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+      expect(matrix(2)).toEqual([
+        ["id", "value"],
+        ["", "keep"],
+      ]);
+      openRules();
+      expect(within(rulesDialog()).getByRole("list", { name: "Existing rules" })).toHaveTextContent(
+        "Column 1: required",
+      );
+      expect(screen.getByRole("button", { name: t("undo") })).toBeDisabled();
+    },
+  );
+  it("R1 permits cleanup of unrelated valid data when a preexisting required value is missing", async () => {
+    await load("id,value\n, padded ");
+    addRequired();
+    select(1, 1);
+    fireEvent.click(screen.getByRole("button", { name: /Cleanup/ }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Clean up selected data" })).getByRole("button", {
+        name: "Apply cleanup",
+      }),
+    );
+    expect(cell(1, 1)).toBe("padded");
+    expect(cell(1, 0)).toBe("");
+  });
+  it("R2 Undo of an earlier cell edit must not silently remove a subsequently added input rule", async () => {
+    await load("id,value\n11,old");
+    edit(1, 1, "edited");
+    addRequired();
+    expect(screen.getByRole("button", { name: /Validation \(1\)/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+    expect(cell(1, 1)).toBe("old");
+    expect(screen.queryByRole("button", { name: /Validation \(1\)/ })).toBeInTheDocument();
+    openRules();
+    fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Edit rule" }));
+    fireEvent.change(within(rulesDialog()).getByRole("spinbutton", { name: "Column number" }), {
+      target: { value: "2" },
+    });
+    fireEvent.change(within(rulesDialog()).getByRole("combobox", { name: /^Rule$/ }), {
+      target: { value: "pattern" },
+    });
+    fireEvent.change(within(rulesDialog()).getByRole("textbox", { name: "Full-cell pattern" }), {
+      target: { value: "[a-z]+" },
+    });
+    fireEvent.change(within(rulesDialog()).getByRole("combobox", { name: "On invalid input" }), {
+      target: { value: "warning" },
+    });
+    fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Save rule" }));
+    fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: t("redo") }));
+    expect(cell(1, 1)).toBe("edited");
+    expect(screen.getByRole("button", { name: /Validation \(1\)/ })).toBeInTheDocument();
+    openRules();
+    expect(within(rulesDialog()).getByRole("list", { name: "Existing rules" })).toHaveTextContent(
+      "Column 2: pattern · warning",
+    );
+    fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Edit rule" }));
+    expect(within(rulesDialog()).getByRole("textbox", { name: "Full-cell pattern" })).toHaveValue(
+      "[a-z]+",
+    );
+    fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+    expect(cell(1, 1)).toBe("old");
+    openRules();
+    expect(within(rulesDialog()).getByRole("list", { name: "Existing rules" })).toHaveTextContent(
+      "Column 2: pattern · warning",
+    );
+  });
+  it("R3 save-and-close accepts native serialization metadata normalization", async () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
+    let writes = 0,
+      finishSecond!: () => void;
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "open_file_dialog") return "/source.json";
+      if (command === "read_file_bytes")
+        return [239, 187, 191, ...new TextEncoder().encode('[{"qty":"7"}]')];
+      if (command === "save_file_dialog") return "/second.csv";
+      if (command === "write_file" && ++writes === 2)
+        return await new Promise<void>((r) => {
+          finishSecond = r;
+        });
+    });
+    render(<App />);
+    fireEvent.click(screen.getAllByRole("button", { name: t("open") })[0]);
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: /読込み|Import preview/ })).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /この内容で開く|Open this preview/ }));
+    await waitFor(() => expect(cell(1, 0)).toBe("7"));
+    edit(1, 0, "8");
+    fireEvent.click(screen.getByRole("button", { name: t("newTab") }));
+    edit(0, 0, "B edit");
+    await askWindowClose();
+    fireEvent.click(within(closeDialog()).getByRole("button", { name: /Save and close/ }));
+    await waitFor(() => expect(finishSecond).toBeDefined());
+    await act(async () => finishSecond());
+    expect(writes).toBe(2);
+    expect(native.destroy).toHaveBeenCalledOnce();
+  });
+  it("R4 enum candidate selection commits through validation and a single Undo", async () => {
+    await load("id,value\n11,keep");
+    openRules();
+    fireEvent.change(within(rulesDialog()).getByRole("combobox", { name: /^Rule$/ }), {
+      target: { value: "enum" },
+    });
+    fireEvent.change(
+      within(rulesDialog()).getByRole("textbox", { name: "Allowed values, one per line" }),
+      { target: { value: "11\n22" } },
+    );
+    fireEvent.change(within(rulesDialog()).getByRole("combobox", { name: "On invalid input" }), {
+      target: { value: "reject" },
+    });
+    fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Add rule" }));
+    fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Close" }));
+    select(1, 0);
+    fireEvent.change(screen.getByRole("combobox", { name: /入力候補/ }), {
+      target: { value: "1" },
+    });
+    expect(cell(1, 0)).toBe("22");
+    fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+    expect(cell(1, 0)).toBe("11");
+    expect(screen.getByRole("button", { name: t("undo") })).toBeDisabled();
+  });
+  it("R5 column movement remaps rules and Undo restores the original column", async () => {
+    await load("id,value\n11,keep");
+    addRequired();
+    act(() => editor().onColumnMoved?.(0, 1));
+    openRules();
+    expect(within(rulesDialog()).getByRole("list", { name: "Existing rules" })).toHaveTextContent(
+      "Column 2: required",
+    );
+    fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+    openRules();
+    expect(within(rulesDialog()).getByRole("list", { name: "Existing rules" })).toHaveTextContent(
+      "Column 1: required",
+    );
+    expect(matrix(2)).toEqual([
+      ["id", "value"],
+      ["11", "keep"],
+    ]);
+  });
+});

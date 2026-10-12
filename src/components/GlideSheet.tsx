@@ -82,6 +82,7 @@ type GlideSheetProps = {
     col: number,
     x: number,
     y: number,
+    preserveSelection?: boolean,
   ) => void;
   onHeaderMenuClick?: (
     col: number,
@@ -611,7 +612,17 @@ export function GlideSheet({
         event.stopPropagation();
         const row = gridSelection.current?.cell[1] ?? toVisibleRow(selection.row);
         const col = gridSelection.current?.cell[0] ?? selection.col;
-        onOpenContextMenu("cell", toSourceRow(row), col, 20, 120);
+        const columns = compactToIndexes(gridSelection.columns);
+        const selectedHeaderRows = compactToIndexes(gridSelection.rows);
+        const kind = columns.length ? "column" : selectedHeaderRows.length ? "row" : "cell";
+        onOpenContextMenu(
+          kind,
+          toSourceRow(selectedHeaderRows[0] ?? row),
+          columns[0] ?? col,
+          20,
+          120,
+          true,
+        );
         return;
       }
       const mod = event.ctrlKey || event.metaKey;

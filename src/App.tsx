@@ -104,7 +104,14 @@ export default function App() {
   const { settings, update: updateSettings } = useSettings();
   const filter = useFilter();
   const viewStatesRef = useRef(new Map<string, DocumentView>());
-  const [view, setView] = useState<DocumentView>(createDocumentView);
+  const [viewState, setView] = useState<DocumentView>(createDocumentView);
+  const view = useMemo(
+    () =>
+      sheet.meta.format === "json" || sheet.meta.format === "yaml"
+        ? { ...viewState, useHeaderRow: true }
+        : viewState,
+    [viewState, sheet.meta.format],
+  );
   const viewRef = useRef(view);
   viewRef.current = view;
   const filterRef = useRef(filter.filters);
@@ -398,6 +405,7 @@ export default function App() {
       setValidationReport(null);
       setCleanupOpen(null);
       setSortOpen(false);
+      setSortKeys([{ colIndex: 0, direction: "asc", mode: "auto" }]);
       setPendingPreview(null);
       setPastePreview(null);
       setFocusCell(null);
@@ -430,6 +438,7 @@ export default function App() {
       if (isBlankStarter()) {
         workspace.replaceActiveContent(rows, meta);
         setView(createDocumentView());
+        setSortKeys([{ colIndex: 0, direction: "asc", mode: "auto" }]);
         viewStatesRef.current.delete(activeDocumentIdRef.current);
         setRulesById((current) => ({ ...current, [activeDocumentIdRef.current]: [] }));
         setActiveViewById((current) => ({ ...current, [activeDocumentIdRef.current]: null }));
@@ -728,6 +737,7 @@ export default function App() {
           success = false;
           break;
         }
+        if (outcome.savedMeta) snapshots.set(id, { ...snapshot, meta: outcome.savedMeta });
         downloaded ||= outcome.status === "download";
       }
     } finally {
@@ -873,33 +883,41 @@ export default function App() {
     sheet.rows[selectionState.selection.row]?.[selectionState.selection.col] ?? "";
   const selectedReference = referenceForSelection(selectionState.selection, selectionState.range);
 
-  const recordBeforeChange = useCallback(() => {
-    if (collaboration.client) return;
-    history.record(sheet.rows, selectionState.selection, {
-      range: selectionState.range,
-      colWidths: sheet.colWidths,
+  const recordBeforeChange = useCallback(
+    (includeRules = false) => {
+      if (collaboration.client) return;
+      history.record(sheet.rows, selectionState.selection, {
+        range: selectionState.range,
+        colWidths: sheet.colWidths,
+        selectedRows,
+        selectedColumns,
+        ...(includeRules ? { validationRules: rules } : {}),
+      });
+    },
+    [
+      history,
+      selectionState.selection,
+      selectionState.range,
+      sheet.rows,
+      sheet.colWidths,
       selectedRows,
       selectedColumns,
-      validationRules: rules,
-    });
-  }, [
-    history,
-    selectionState.selection,
-    selectionState.range,
-    sheet.rows,
-    sheet.colWidths,
-    selectedRows,
-    selectedColumns,
-    collaboration.client,
-    rules,
-  ]);
+      collaboration.client,
+      rules,
+    ],
+  );
 
-  const validateNext = (next: CellValue[][], nextRules = rules, allCells = false) => {
+  const validateNext = (
+    next: CellValue[][],
+    nextRules = rules,
+    allCells = false,
+    beforeRows = sheet.rows,
+  ) => {
     if (collaboration.readOnly) {
       showToast("閲覧専用または権限失効 / Read-only sharing session");
       return false;
     }
-    const report = validateMutation(allCells ? [] : sheet.rows, next, nextRules);
+    const report = validateMutation(allCells ? [] : beforeRows, next, nextRules);
     setValidationReport(report.totalIssues || report.ruleErrors.length ? report : null);
     if (!report.allowed) {
       showToast("入力ルールにより操作全体を拒否しました / Entire change rejected by validation");
@@ -1205,6 +1223,7 @@ export default function App() {
     const row = start?.row ?? selected.startRow;
     const col = start?.col ?? selected.startCol;
     try {
+      let text: string;
       if (navigator.clipboard.read) {
         const items = await navigator.clipboard.read();
         const plain = items.find((item) => item.types.includes("text/plain"));
@@ -1222,8 +1241,8 @@ export default function App() {
           } else showToast("貼り付け可能な文字列がありません / No clipboard text");
           return;
         }
-      }
-      const text = await navigator.clipboard.readText();
+        text = await (await plain.getType("text/plain")).text();
+      } else text = await navigator.clipboard.readText();
       if (!clipboardContextValid(context)) {
         showToast(t("clipboardContextChanged"));
         return;
@@ -1330,6 +1349,7 @@ export default function App() {
     col: number,
     x: number,
     y: number,
+    preserveSelection = false,
   ) => {
     const selected = normalizeRange(
       selectionToRange(selectionState.selection, selectionState.range),
@@ -1341,12 +1361,12 @@ export default function App() {
       col <= selected.endCol &&
       (selectedRows.length === 0 || selectedRows.includes(row)) &&
       (selectedColumns.length === 0 || selectedColumns.includes(col));
-    if (kind === "cell" && !inside) {
+    if (kind === "cell" && !inside && !preserveSelection) {
       selectionState.selectCell(row, col, false);
       setSelectedRows([]);
       setSelectedColumns([]);
     }
-    if (kind === "column") {
+    if (kind === "column" && !preserveSelection) {
       setSelectedRows([]);
       setSelectedColumns([col]);
       selectionState.setSelectionRange(
@@ -1359,16 +1379,16 @@ export default function App() {
         },
       );
     }
-    if (kind === "row") {
+    if (kind === "row" && !preserveSelection) {
       setSelectedRows([row]);
       setSelectedColumns([]);
       selectionState.selectRow(row, sheet.columnCount);
     }
-    setContextMenu({ kind, row, col, x, y });
+    setContextMenu({ kind, row, col, x, y, preserveSelection });
   };
 
   const rangeFromContextMenu = (): Exclude<Range, null> | null => {
-    if (!contextMenu) {
+    if (!contextMenu || contextMenu.preserveSelection) {
       return null;
     }
     if (contextMenu.kind === "column") {
@@ -1419,6 +1439,11 @@ export default function App() {
         Array.from({ length: Math.max(1, sheet.columnCount) }, () => ""),
       ),
     );
+    const comparison: CellValue[][] = [];
+    sheet.rows.forEach((row, source) => {
+      comparison[source < index ? source : source + rowsToInsert] = row;
+    });
+    if (index === 0 && rules.some((rule) => rule.skipHeader)) delete comparison[rowsToInsert];
     if (view.formulaEnabled)
       next = rewriteFormulasForStructure(next, {
         type: "insert",
@@ -1426,7 +1451,7 @@ export default function App() {
         index,
         count: rowsToInsert,
       });
-    if (!validateNext(next, rules, true)) return;
+    if (!validateNext(next, rules, false, comparison)) return;
     if (collaboration.client) {
       collaboration.structure(
         insertAxisActions(collaboration.client.getDocument()!, "row", index, rowsToInsert),
@@ -1449,6 +1474,7 @@ export default function App() {
       copy.splice(index, 0, ...Array.from({ length: colsToInsert }, () => ""));
       return copy;
     });
+    const comparison = cloneRows(next);
     if (view.formulaEnabled)
       next = rewriteFormulasForStructure(next, {
         type: "insert",
@@ -1460,7 +1486,7 @@ export default function App() {
       ...rule,
       column: rule.column >= index ? rule.column + colsToInsert : rule.column,
     }));
-    if (!validateNext(next, nextRules, true)) return;
+    if (!validateNext(next, nextRules, false, comparison)) return;
     if (collaboration.client) {
       if (
         !collaboration.structure(
@@ -1470,7 +1496,7 @@ export default function App() {
       )
         return;
     } else {
-      recordBeforeChange();
+      recordBeforeChange(true);
       sheet.insertColumns(index, colsToInsert);
       replaceRows(next, true, false);
     }
@@ -1506,7 +1532,8 @@ export default function App() {
             });
         }
         if (!next.length && !collaboration.client) next = [[""]];
-        if (!validateNext(next, rules, true)) return;
+        const comparison = rows.filter((_, row) => !indexes.includes(row));
+        if (!validateNext(next, rules, false, comparison)) return;
         if (collaboration.client)
           collaboration.structure(
             deleteAxisActions(collaboration.client.getDocument()!, "row", indexes),
@@ -1562,7 +1589,8 @@ export default function App() {
             ...rule,
             column: rule.column - indexes.filter((index) => index < rule.column).length,
           }));
-        if (!validateNext(next, nextRules, true)) return;
+        const comparison = rows.map((row) => row.filter((_, col) => !indexes.includes(col)));
+        if (!validateNext(next, nextRules, false, comparison)) return;
         if (collaboration.client) {
           if (
             !collaboration.structure(
@@ -1572,7 +1600,7 @@ export default function App() {
           )
             return;
         } else {
-          recordBeforeChange();
+          recordBeforeChange(true);
           sheet.deleteColumns(indexes);
           replaceRows(next, true, false);
         }
@@ -1589,7 +1617,13 @@ export default function App() {
   };
 
   const applySortedRows = (sorted: CellValue[][]) => {
-    if (!validateNext(sorted, rules, true)) return;
+    const comparison = [...sorted];
+    if (rules.some((rule) => rule.skipHeader) && !view.useHeaderRow) {
+      const oldFirst = JSON.stringify(sheet.rows[0]);
+      const movedFirst = sorted.findIndex((row) => JSON.stringify(row) === oldFirst);
+      if (movedFirst > 0) delete comparison[movedFirst];
+    }
+    if (!validateNext(sorted, rules, false, comparison)) return;
     if (collaboration.client) {
       const doc = collaboration.client.getDocument()!;
       const raw = sharedDocumentRows(doc);
@@ -1644,7 +1678,7 @@ export default function App() {
       colWidths: sheet.colWidths,
       selectedRows,
       selectedColumns,
-      validationRules: rules,
+      ...(history.snapshot().undo.at(-1)?.validationRules ? { validationRules: rules } : {}),
     });
     if (previous) {
       replaceRowsFromHistory(previous);
@@ -1664,7 +1698,7 @@ export default function App() {
       colWidths: sheet.colWidths,
       selectedRows,
       selectedColumns,
-      validationRules: rules,
+      ...(history.snapshot().redo.at(-1)?.validationRules ? { validationRules: rules } : {}),
     });
     if (next) {
       replaceRowsFromHistory(next);
@@ -1894,6 +1928,7 @@ export default function App() {
           selectionState.selection.col,
           20,
           120,
+          true,
         ),
     },
     {
@@ -2055,7 +2090,15 @@ export default function App() {
         </button>
         <button
           onClick={() => {
-            if (finishPendingEdit()) setSortOpen(true);
+            if (finishPendingEdit()) {
+              setSortKeys((keys) => {
+                const valid = keys.filter(
+                  (key) => key.colIndex >= 0 && key.colIndex < sheet.columnCount,
+                );
+                return valid.length ? valid : [{ colIndex: 0, direction: "asc", mode: "auto" }];
+              });
+              setSortOpen(true);
+            }
           }}
         >
           詳しく並べ替え / Sort
@@ -2352,7 +2395,7 @@ export default function App() {
                         ? rule.column + 1
                         : rule.column,
               }));
-              if (!validateNext(moved.rows, nextRules, true)) return;
+              if (!validateNext(moved.rows, nextRules, false, moved.rows)) return;
               if (collaboration.client) {
                 const doc = collaboration.client.getDocument()!;
                 const ids = activeIds(doc, "column");
@@ -2361,7 +2404,7 @@ export default function App() {
                   { type: "reorder", axis: "column", ids, ifRevision: doc.revision },
                 ]);
               } else {
-                recordBeforeChange();
+                recordBeforeChange(true);
                 replaceRows(moved.rows, true, false);
               }
               invalidateSearchScope();
@@ -2632,7 +2675,8 @@ export default function App() {
                     )
                 : rows;
             const finalRows = rewrite(next);
-            if (!validateNext(finalRows, rules, true)) return;
+            const beforeCleanup = sheet.rows.filter((_, row) => !deleted.includes(row));
+            if (!validateNext(finalRows, rules, false, beforeCleanup)) return;
             if (deleted.length && collaboration.client)
               collaboration.structure(
                 deleteAxisActions(collaboration.client.getDocument()!, "row", deleted),

@@ -331,3 +331,187 @@ describe("review regressions: input, search and workspace", () => {
     expect(screen.queryByText(t("searchVisibleScope"))).not.toBeInTheDocument();
   });
 });
+
+const contextMenu = (row: number, col: number) =>
+  act(() => {
+    const handler = editor().onCellContextMenu!;
+    handler([col, row], {
+      preventDefault: vi.fn(),
+      bounds: { x: 10, y: 10, width: 40, height: 25 },
+    } as unknown as Parameters<typeof handler>[1]);
+  });
+
+describe("corrected candidate additional boundary challenges", () => {
+  it.each(["json", "yaml"])(
+    "R01 maintains mandatory object-list header when a headerless CSV is saved as %s",
+    async (format) => {
+      await load("z\nb\na", true);
+      fireEvent.change(screen.getByRole("combobox", { name: /First row/ }), {
+        target: { value: "data" },
+      });
+      vi.mocked(invoke).mockImplementation(async (command) =>
+        command === "save_file_dialog" ? `converted.${format}` : undefined,
+      );
+      key("s", { shiftKey: true });
+      await waitFor(() =>
+        expect(screen.getByRole("tab", { selected: true })).toHaveAccessibleName(
+          new RegExp(`converted\\.${format}`),
+        ),
+      );
+      const header = screen.getByRole("combobox", { name: /First row/ });
+      expect(header).toBeDisabled();
+      act(() => editor().onHeaderMenuClick?.(0, { x: 0, y: 0, width: 120, height: 32 }));
+      fireEvent.click(screen.getByRole("menuitem", { name: t("sortAsc") }));
+      expect(matrix(3, 1)).toEqual([["z"], ["a"], ["b"]]);
+    },
+  );
+  it.each(["json", "yaml"])(
+    "R01 keeps saved %s key rows through tab switching, filters and advanced sort",
+    async (format) => {
+      await load("z\nb\na", true);
+      fireEvent.change(screen.getByRole("combobox", { name: /First row/ }), {
+        target: { value: "data" },
+      });
+      vi.mocked(invoke).mockImplementation(async (command) =>
+        command === "save_file_dialog" ? `converted.${format}` : undefined,
+      );
+      key("s", { shiftKey: true });
+      await waitFor(() =>
+        expect(screen.getByRole("tab", { selected: true })).toHaveAccessibleName(
+          new RegExp(`converted\\.${format}`),
+        ),
+      );
+      fireEvent.click(screen.getByRole("button", { name: t("newTab") }));
+      fireEvent.click(screen.getByRole("tab", { name: new RegExp(`converted\\.${format}`) }));
+      expect(screen.getByRole("combobox", { name: /First row/ })).toBeDisabled();
+      expect(screen.getByRole("combobox", { name: /First row/ })).toHaveValue("header");
+      act(() => editor().onHeaderMenuClick?.(0, { x: 0, y: 0, width: 120, height: 32 }));
+      fireEvent.click(screen.getByRole("menuitem", { name: t("filter") }));
+      const filterDialog = screen.getByRole("dialog", { name: t("filter") });
+      expect(within(filterDialog).queryByRole("checkbox", { name: /^z/ })).not.toBeInTheDocument();
+      expect(within(filterDialog).getByRole("checkbox", { name: /^a/ })).toBeChecked();
+      expect(within(filterDialog).getByRole("checkbox", { name: /^b/ })).toBeChecked();
+      fireEvent.click(within(filterDialog).getByRole("button", { name: t("cancel") }));
+      fireEvent.click(screen.getByRole("button", { name: /詳しく並べ替え/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Confirm preview/ }));
+      fireEvent.click(
+        within(screen.getByRole("dialog", { name: /Apply sort/ })).getByRole("button", {
+          name: /Apply/,
+        }),
+      );
+      expect(matrix(3, 1)).toEqual([["z"], ["a"], ["b"]]);
+    },
+  );
+  it("R02 a context text paste uses the already acquired ClipboardItem snapshot", async () => {
+    await load("original,neighbor");
+    select(0, 0);
+    const getType = vi.fn(async () => ({ text: async () => "snapshot" }));
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        read: vi.fn(async () => [{ types: ["text/plain"], getType }]),
+        readText: vi.fn(async () => ""),
+        writeText: writeClipboard,
+      },
+    });
+    contextMenu(0, 0);
+    fireEvent.click(screen.getByRole("menuitem", { name: t("paste") }));
+    await waitFor(() => expect(cell(0, 0)).toBe("snapshot"));
+    expect(getType).toHaveBeenCalledWith("text/plain");
+    expect(navigator.clipboard.readText).not.toHaveBeenCalled();
+    expect(cell(0, 1)).toBe("neighbor");
+  });
+  it("R03 a bulk-fill limit rejection explains why nothing was changed", async () => {
+    await load("original,keep");
+    act(() =>
+      editor().onFillPattern?.({
+        patternSource: { x: 0, y: 0, width: 1, height: 1 },
+        fillDestination: { x: 0, y: 0, width: 1000, height: 501 },
+        preventDefault: vi.fn(),
+      }),
+    );
+    expect(cell(0, 0)).toBe("original");
+    clean();
+    expect(screen.getByText(/Fill limit/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: t("undo") })).toBeDisabled();
+  });
+  it("R04 the keyboard menu exposes column actions for an exact column selection", async () => {
+    await load("header,other\nfirst,keep");
+    act(() =>
+      editor().onGridSelectionChange?.({
+        rows: CompactSelection.empty(),
+        columns: CompactSelection.empty().add(1),
+      }),
+    );
+    fireEvent.keyDown(canvas(), { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menuitem", { name: t("sortAsc") })).toBeInTheDocument();
+  });
+  it.each(["columns", "rows"] as const)(
+    "R04 keyboard-menu cancellation preserves disjoint exact %s and the Copy target",
+    async (axis) => {
+      await load("a0,b0,c0\na1,b1,c1\na2,b2,c2\na3,b3,c3");
+      act(() =>
+        editor().onGridSelectionChange?.({
+          rows: axis === "rows" ? CompactSelection.empty().add(1).add(3) : CompactSelection.empty(),
+          columns:
+            axis === "columns" ? CompactSelection.empty().add(0).add(2) : CompactSelection.empty(),
+        }),
+      );
+      const selection = editor().gridSelection;
+      fireEvent.keyDown(canvas(), { key: "F10", shiftKey: true });
+      const menu = screen.getByRole("menu", {
+        name: t(axis === "columns" ? "columnMenu" : "rowMenu"),
+      });
+      expect(
+        within(menu).getByRole("menuitem", {
+          name: t(axis === "columns" ? "sortAsc" : "deleteRow"),
+        }),
+      ).toBeInTheDocument();
+      fireEvent.keyDown(menu, { key: "Escape" });
+      expect(editor().gridSelection).toEqual(selection);
+      key("c");
+      await waitFor(() => expect(writeClipboard).toHaveBeenCalled());
+      expect(clipboardText).toBe(
+        axis === "columns" ? "a0\tc0\na1\tc1\na2\tc2\na3\tc3" : "a1\tb1\tc1\na3\tb3\tc3",
+      );
+      clean();
+      expect(screen.getByRole("button", { name: t("undo") })).toBeDisabled();
+    },
+  );
+});
+
+describe("review regressions: sort schema changes", () => {
+  it("R05 multi-sort resets invalid previous-document keys instead of presenting A while sorting a missing column", async () => {
+    await load("name,group,rank\nb,2,20\na,1,10", true);
+    fireEvent.click(screen.getByRole("button", { name: /詳しく並べ替え/ }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Sort column 1" }), {
+      target: { value: "2" },
+    });
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: /Multi-column sort/ })).getByRole("button", {
+        name: /Cancel/,
+      }),
+    );
+    vi.mocked(invoke).mockImplementation(async (command) =>
+      command === "open_file_dialog"
+        ? "narrow.csv"
+        : command === "read_file_bytes"
+          ? [...new TextEncoder().encode("name\nb\na")]
+          : undefined,
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: t("open") })[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "この内容で開く" }));
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { selected: true })).toHaveAccessibleName(/narrow.csv/),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /詳しく並べ替え/ }));
+    expect(screen.getByRole("combobox", { name: "Sort column 1" })).toHaveValue("0");
+    fireEvent.click(screen.getByRole("button", { name: /Confirm preview/ }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: /Apply sort/ })).getByRole("button", {
+        name: /Apply/,
+      }),
+    );
+    expect(matrix(3, 1)).toEqual([["name"], ["a"], ["b"]]);
+  });
+});
