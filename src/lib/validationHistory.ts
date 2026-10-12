@@ -1,4 +1,5 @@
 import type { ValidationRule } from "./validation";
+import { VALIDATION_RULE_LIMIT, validateRule } from "./validation";
 
 export type ValidationColumnChange =
   | { type: "insert"; index: number; count: number }
@@ -86,4 +87,18 @@ export function restoreValidationHistory(
     }
   }
   return next;
+}
+
+/** Preflight before moving either history stack or mutating rows/rules. */
+export function validationHistoryError(
+  rules: readonly ValidationRule[],
+  entry?: ValidationHistory,
+): string | null {
+  if (!entry?.validationChanges) return null;
+  const restored = restoreValidationHistory(rules, entry);
+  if (restored.length > VALIDATION_RULE_LIMIT)
+    return "復元後の入力ルールが100件を超えるため変更しませんでした。不要なルールを削除して再実行してください / History would exceed 100 rules; remove unused rules and retry.";
+  if (restored.some((rule) => validateRule(rule)))
+    return "復元後の入力ルールが有効な列範囲を外れるため変更しませんでした。該当ルールを修正または削除してください / History would invalidate a rule; correct or remove the affected rule.";
+  return null;
 }

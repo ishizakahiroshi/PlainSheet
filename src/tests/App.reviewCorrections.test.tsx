@@ -6,13 +6,28 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import App from "../App";
 import { t } from "../lib/i18n";
+import type { ValidationRule } from "../lib/validation";
 
 // Execute App, GlideSheet, hooks, parsers and helpers. Only native I/O and the
 // canvas renderer are replaced. A transparent collaboration-hook wrapper captures
 // the actual App boundary so a deterministic late remote update can be delivered.
+// A transparent history-hook wrapper observes the real Undo/Redo stacks.
 // This is not GUI, real IME, relay or native acceptance.
 type EditorProps = ComponentProps<typeof DataEditor>;
 const capture = vi.hoisted(() => ({ props: null as unknown }));
+type AppHistory = ReturnType<typeof import("../hooks/useHistory").useHistory>;
+const historyCapture = vi.hoisted(() => ({ current: null as AppHistory | null }));
+vi.mock("../hooks/useHistory", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../hooks/useHistory")>();
+  return {
+    ...original,
+    useHistory: () => {
+      const history = original.useHistory();
+      historyCapture.current = history;
+      return history;
+    },
+  };
+});
 const native = vi.hoisted(() => ({
   handler: null as ((event: { preventDefault: () => void }) => Promise<void>) | null,
   destroy: vi.fn(),
@@ -457,6 +472,153 @@ function addRequired() {
   fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Add rule" }));
   fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Close" }));
 }
+
+async function importRules(rules: ValidationRule[]) {
+  const text = JSON.stringify({ version: 1, kind: "plainsheet-validation", rules });
+  openRules();
+  fireEvent.change(within(rulesDialog()).getByLabelText("Import validation sidecar"), {
+    target: { files: [{ size: text.length, text: async () => text }] },
+  });
+  await waitFor(() =>
+    expect(
+      within(within(rulesDialog()).getByRole("list", { name: "Existing rules" })).queryAllByRole(
+        "listitem",
+      ),
+    ).toHaveLength(rules.length),
+  );
+  fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Close" }));
+}
+
+function readRules(): ValidationRule[] {
+  openRules();
+  fireEvent.click(
+    within(rulesDialog()).getByRole("button", { name: "Export separate rules JSON" }),
+  );
+  const text = (
+    within(rulesDialog()).getByRole("textbox", {
+      name: "Rules sidecar JSON (save separately from CSV)",
+    }) as HTMLTextAreaElement
+  ).value;
+  fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Close" }));
+  return JSON.parse(text).rules;
+}
+
+function deleteFirstColumn() {
+  act(() => editor().onHeaderMenuClick?.(0, { x: 0, y: 0, width: 120, height: 32 }));
+  fireEvent.click(screen.getByRole("menuitem", { name: t("deleteCol") }));
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: t("confirmDeleteTitle") })).getByRole("button", {
+      name: t("deleteAction"),
+    }),
+  );
+}
+
+function maximumRules(): ValidationRule[] {
+  return Array.from({ length: 100 }, (_, index) => ({
+    id: `imported-${index}`,
+    column: 0,
+    kind: "required",
+    mode: "reject",
+    skipHeader: true,
+  }));
+}
+
+describe("review regressions: bounded structural rule restoration", () => {
+  it("Undo preflights the 100-rule limit, preserves both stacks, and succeeds after one rule is removed", async () => {
+    await load("id,value\n11,keep");
+    addRequired();
+    const original = readRules();
+    deleteFirstColumn();
+    const imported = maximumRules();
+    await importRules(imported);
+    const before = historyCapture.current!.snapshot();
+    fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+    expect(matrix(2, 1)).toEqual([["value"], ["keep"]]);
+    expect(historyCapture.current!.snapshot()).toEqual(before);
+    expect(screen.getByText(/100.*rules|rules.*100/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/remove.*rules|reduce.*rules|ルール.*(?:削除|減ら)/i),
+    ).toBeInTheDocument();
+    expect(readRules()).toEqual(imported);
+    edit(1, 0, "12");
+    expect(cell(1, 0)).toBe("12");
+    expect(screen.queryByRole("button", { name: /Validation \(101\)/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+    expect(cell(1, 0)).toBe("keep");
+    openRules();
+    fireEvent.click(within(rulesDialog()).getAllByRole("button", { name: "Remove rule" })[0]);
+    fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Close" }));
+    const unblocked = historyCapture.current!.snapshot();
+    fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+    expect(matrix(2)).toEqual([
+      ["id", "value"],
+      ["11", "keep"],
+    ]);
+    expect(readRules()).toEqual([
+      ...imported.slice(1).map((rule) => ({ ...rule, column: 1 })),
+      ...original,
+    ]);
+    expect(historyCapture.current!.snapshot().undo).toHaveLength(unblocked.undo.length - 1);
+    expect(historyCapture.current!.snapshot().redo).toHaveLength(unblocked.redo.length + 1);
+  }, 15000);
+
+  it("Redo preflights restored inserted-column rules without clipping or consuming either stack", async () => {
+    await load("id,value\n11,keep");
+    act(() => editor().onHeaderMenuClick?.(0, { x: 0, y: 0, width: 120, height: 32 }));
+    fireEvent.click(screen.getByRole("menuitem", { name: t("insertColLeft") }));
+    addRequired();
+    const inserted = readRules();
+    fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+    const imported = maximumRules();
+    await importRules(imported);
+    const before = historyCapture.current!.snapshot();
+    fireEvent.click(screen.getByRole("button", { name: t("redo") }));
+    expect(matrix(2)).toEqual([
+      ["id", "value"],
+      ["11", "keep"],
+    ]);
+    expect(historyCapture.current!.snapshot()).toEqual(before);
+    expect(screen.getByText(/100.*rules|rules.*100/i)).toBeInTheDocument();
+    expect(readRules()).toEqual(imported);
+    openRules();
+    fireEvent.click(within(rulesDialog()).getAllByRole("button", { name: "Remove rule" })[0]);
+    fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: t("redo") }));
+    expect(matrix(2, 3)).toEqual([
+      ["", "id", "value"],
+      ["", "11", "keep"],
+    ]);
+    expect(readRules()).toEqual([
+      ...imported.slice(1).map((rule) => ({ ...rule, column: 1 })),
+      ...inserted,
+    ]);
+    expect(historyCapture.current!.snapshot().undo).toHaveLength(before.undo.length + 1);
+    expect(historyCapture.current!.snapshot().redo).toHaveLength(before.redo.length - 1);
+  }, 15000);
+
+  it("Undo rejects a rule mapped past XFD before changing rows, rules or history", async () => {
+    await load("id,value\n11,keep");
+    deleteFirstColumn();
+    const imported: ValidationRule[] = [
+      { id: "last-column", column: 16383, kind: "required", mode: "warning", skipHeader: true },
+    ];
+    await importRules(imported);
+    const before = historyCapture.current!.snapshot();
+    fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+    expect(matrix(2, 1)).toEqual([["value"], ["keep"]]);
+    expect(historyCapture.current!.snapshot()).toEqual(before);
+    expect(readRules()).toEqual(imported);
+    openRules();
+    fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Remove rule" }));
+    fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+    expect(matrix(2)).toEqual([
+      ["id", "value"],
+      ["11", "keep"],
+    ]);
+    expect(readRules()).toEqual([]);
+  });
+});
 
 function expectRequiredColumns(columns: number[]) {
   openRules();

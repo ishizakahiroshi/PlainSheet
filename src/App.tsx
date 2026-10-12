@@ -67,6 +67,7 @@ import {
 } from "./lib/validation";
 import {
   validationHistoryBefore,
+  validationHistoryError,
   restoreValidationHistory,
   type ValidationColumnChange,
 } from "./lib/validationHistory";
@@ -1695,6 +1696,12 @@ export default function App() {
       if (entry) void client.undo(entry.id).catch((error) => showToast(String(error)));
       return;
     }
+    const target = history.snapshot().undo.at(-1);
+    const ruleError = validationHistoryError(rules, target);
+    if (ruleError) {
+      showToast(ruleError);
+      return;
+    }
     const previous = history.undo({
       rows: sheet.rows,
       selection: selectionState.selection,
@@ -1702,7 +1709,7 @@ export default function App() {
       colWidths: sheet.colWidths,
       selectedRows,
       selectedColumns,
-      ...validationHistoryBefore(rules, history.snapshot().undo.at(-1)?.validationChanges),
+      ...validationHistoryBefore(rules, target?.validationChanges),
     });
     if (previous) {
       replaceRowsFromHistory(previous);
@@ -1715,6 +1722,12 @@ export default function App() {
       showToast("共有履歴から戻す内容を選んでください / Choose a shared history entry");
       return;
     }
+    const target = history.snapshot().redo.at(-1);
+    const ruleError = validationHistoryError(rules, target);
+    if (ruleError) {
+      showToast(ruleError);
+      return;
+    }
     const next = history.redo({
       rows: sheet.rows,
       selection: selectionState.selection,
@@ -1722,7 +1735,7 @@ export default function App() {
       colWidths: sheet.colWidths,
       selectedRows,
       selectedColumns,
-      ...validationHistoryBefore(rules, history.snapshot().redo.at(-1)?.validationChanges),
+      ...validationHistoryBefore(rules, target?.validationChanges),
     });
     if (next) {
       replaceRowsFromHistory(next);

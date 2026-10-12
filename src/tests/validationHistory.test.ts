@@ -4,6 +4,7 @@ import {
   remapValidationRules,
   restoreValidationHistory,
   validationHistoryBefore,
+  validationHistoryError,
   type ValidationColumnChange,
 } from "../lib/validationHistory";
 import { validateMutation, type ValidationRule } from "../lib/validation";
@@ -63,6 +64,22 @@ describe("column-aware validation history", () => {
 
   it("keeps ordinary cell history metadata-neutral", () => {
     expect(validationHistoryBefore([rule("later", 0)])).toEqual({});
+  });
+
+  it("preflights capacity without clipping rules or changing restoration metadata", () => {
+    const current = Array.from({ length: 100 }, (_, index) => rule(`current-${index}`, 0));
+    const undo = validationHistoryBefore([rule("removed", 0)], [{ type: "delete", indexes: [0] }]);
+    const saved = structuredClone({ current, undo });
+    expect(validationHistoryError(current, undo)).toMatch(/100 rules/);
+    expect({ current, undo }).toEqual(saved);
+    expect(validationHistoryError(current.slice(1), undo)).toBeNull();
+    expect(restoreValidationHistory(current.slice(1), undo)).toHaveLength(100);
+  });
+
+  it("preflights mapped rules outside the supported column range", () => {
+    const target = { validationChanges: [{ type: "insert" as const, index: 0, count: 1 }] };
+    expect(validationHistoryError([rule("last", 16383)], target)).toMatch(/invalidate a rule/);
+    expect(validationHistoryError([rule("last", 16382)], target)).toBeNull();
   });
 
   it("copies mutable rule values and change indexes", () => {
