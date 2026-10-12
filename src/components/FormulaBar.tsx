@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { CellEditIdentity } from "../types/sheet";
 import type { RegisterEditorCommit } from "./CellTextEditor";
 import { t } from "../lib/i18n";
 import { parseCellRef } from "../lib/cellref";
@@ -8,10 +9,23 @@ type FormulaBarProps = {
   col: number;
   reference: string;
   value: string;
-  onCommit: (row: number, col: number, value: string, reselect: boolean) => void;
+  onCommit: (
+    row: number,
+    col: number,
+    value: string,
+    reselect: boolean,
+    identity?: CellEditIdentity,
+  ) => void;
+  editIdentity?: CellEditIdentity;
   disabled?: boolean;
   registerCommit?: RegisterEditorCommit;
-  onMove?: (row: number, col: number, rowDelta: number, colDelta: number) => void;
+  onMove?: (
+    row: number,
+    col: number,
+    rowDelta: number,
+    colDelta: number,
+    identity?: CellEditIdentity,
+  ) => void;
   onJump?: (ref: ReturnType<typeof parseCellRef>) => void;
 };
 
@@ -25,6 +39,7 @@ export function FormulaBar({
   registerCommit,
   onMove,
   disabled,
+  editIdentity,
 }: FormulaBarProps) {
   const [draft, setDraft] = useState(value);
   const [refDraft, setRefDraft] = useState(reference);
@@ -36,7 +51,13 @@ export function FormulaBar({
   const composing = useRef(false);
   const unregister = useRef<(() => void) | undefined>();
   useEffect(() => () => unregister.current?.(), []);
-  const target = useRef({ row, col });
+  const target = useRef({ row, col, identity: editIdentity });
+  const commitDraft = () => {
+    const current = target.current;
+    if (current.identity)
+      commitRef.current(current.row, current.col, draftRef.current, false, current.identity);
+    else commitRef.current(current.row, current.col, draftRef.current, false);
+  };
   const focused = useRef(false);
   const refFocused = useRef(false);
   const refComposing = useRef(false);
@@ -115,12 +136,12 @@ export function FormulaBar({
         onFocus={() => {
           focused.current = true;
           skipBlurCommit.current = false;
-          target.current = { row, col };
+          target.current = { row, col, identity: editIdentity };
           unregister.current?.();
           unregister.current = registerCommit?.(() => {
             if (composing.current) return false;
             skipBlurCommit.current = true;
-            commitRef.current(target.current.row, target.current.col, draftRef.current, false);
+            commitDraft();
             focused.current = false;
             return true;
           });
@@ -144,7 +165,7 @@ export function FormulaBar({
             skipBlurCommit.current = false;
             return;
           }
-          commitRef.current(target.current.row, target.current.col, draftRef.current, false);
+          commitDraft();
         }}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing || composing.current || event.keyCode === 229) {
@@ -168,12 +189,13 @@ export function FormulaBar({
             event.preventDefault();
             event.stopPropagation();
             skipBlurCommit.current = true;
-            commitRef.current(target.current.row, target.current.col, draftRef.current, false);
+            commitDraft();
             onMove?.(
               target.current.row,
               target.current.col,
               event.key === "Enter" ? (event.shiftKey ? -1 : 1) : 0,
               event.key === "Tab" ? (event.shiftKey ? -1 : 1) : 0,
+              target.current.identity,
             );
             event.currentTarget.blur();
           }

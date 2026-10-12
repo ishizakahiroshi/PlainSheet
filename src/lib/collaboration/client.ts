@@ -1,5 +1,6 @@
 import {
   actionsForHistoryRestore,
+  actionsForHistoryUndo,
   applyCollaborationOperation,
   COLLABORATION_LIMITS,
   CollaborationError,
@@ -35,6 +36,7 @@ export type CollaborationClientOptions = {
   origin?: string;
   timeoutMs?: number;
 };
+export type CollaborationEnqueueOptions = { expectedRevision?: number };
 
 export function validateCollaborationEndpoint(endpoint: string): string {
   if (!endpoint.trim())
@@ -108,26 +110,29 @@ export class CollaborationClient {
     let document = this.state.snapshot?.document;
     if (!document) return null;
     for (const operation of this.pending) {
-      const entry = this.state.snapshot?.history.find(
-        (candidate) => candidate.id === (operation.undoOf ?? operation.restoreOf),
-      );
-      const restoreEntry =
-        entry && operation.restoreBefore ? { ...entry, actions: entry.inverse } : entry;
-      const actions: CollaborationAction[] =
-        operation.undoOf && entry
-          ? entry.inverse
-          : operation.restoreOf && restoreEntry
-            ? actionsForHistoryRestore(restoreEntry, document)
-            : operation.actions;
-      if (!actions.length) continue;
+      // A sync can observe a committed operation whose ACK was lost. Do not project it twice.
+      if (this.state.snapshot?.history.some((entry) => entry.id === operation.id)) continue;
       try {
+        const entry = this.state.snapshot?.history.find(
+          (candidate) => candidate.id === (operation.undoOf ?? operation.restoreOf),
+        );
+        const restoreEntry =
+          entry && operation.restoreBefore ? { ...entry, actions: entry.inverse } : entry;
+        const actions: CollaborationAction[] =
+          operation.undoOf && entry
+            ? actionsForHistoryUndo(entry, document)
+            : operation.restoreOf && restoreEntry
+              ? actionsForHistoryRestore(restoreEntry, document)
+              : operation.actions;
+        if (!actions.length) break;
         document = applyCollaborationOperation(document, {
           ...operation,
           baseRevision: Math.min(operation.baseRevision, document.revision),
           actions,
         }).document;
       } catch {
-        /* A rejected/conflicting operation stays in the queue for explicit review. */
+        // Retain rejected work for review. Later edits may depend on its projected structure.
+        break;
       }
     }
     return structuredClone(document);
@@ -347,8 +352,8 @@ export class CollaborationClient {
     await this.flush();
   }
 
-  /** Queue a stable-ID edit. When disconnected it stays in this tab until explicit reconnect. */
-  enqueue(actions: CollaborationAction[]): string {
+  /** Guard coordinate-derived edits with the exact getDocument() revision used to prepare them. */
+  enqueue(actions: CollaborationAction[], options: CollaborationEnqueueOptions = {}): string {
     if (!this.session || !this.state.snapshot)
       throw new CollaborationError("no-session", "Start or join sharing first.");
     const member = this.state.snapshot.members.find(
@@ -369,10 +374,13 @@ export class CollaborationClient {
         413,
       );
     }
-    const operation = {
+    const operation: CollaborationOperation = {
       id: collaborationId(),
       baseRevision: this.state.snapshot.document.revision,
       actions: structuredClone(actions),
+      ...(options.expectedRevision !== undefined
+        ? { expectedRevision: options.expectedRevision }
+        : {}),
     };
     const document = this.getDocument()!;
     applyCollaborationOperation(document, operation); // Fail malformed local operations before queueing.
@@ -381,8 +389,11 @@ export class CollaborationClient {
     return operation.id;
   }
 
-  async submit(actions: CollaborationAction[]): Promise<string> {
-    const id = this.enqueue(actions);
+  async submit(
+    actions: CollaborationAction[],
+    options: CollaborationEnqueueOptions = {},
+  ): Promise<string> {
+    const id = this.enqueue(actions, options);
     if (this.connected) await this.flush();
     return id;
   }

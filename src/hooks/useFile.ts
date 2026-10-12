@@ -125,7 +125,19 @@ export function useFile({
   const openFile = useCallback(async () => {
     try {
       if (!isTauriRuntime()) {
-        await openBrowserFile(loadData, onToast, requestImportPreview);
+        const generation = ++loadGenerationRef.current;
+        const current = () => generation === loadGenerationRef.current;
+        await openBrowserFile(
+          (rows, meta) => {
+            if (current()) loadData(rows, meta);
+          },
+          (message) => {
+            if (current()) onToast(message);
+          },
+          requestImportPreview
+            ? (request) => (current() ? requestImportPreview(request) : Promise.resolve(null))
+            : undefined,
+        );
         return;
       }
       const path = await invoke<string | null>("open_file_dialog");
@@ -282,12 +294,14 @@ export function useFile({
   }, [performSave]);
 
   const loadSample = useCallback(async () => {
+    const generation = ++loadGenerationRef.current;
     try {
       const response = await fetch(`${import.meta.env.BASE_URL}sample.csv`);
       if (!response.ok) {
         throw new Error("sample file is unavailable");
       }
       const content = await response.text();
+      if (generation !== loadGenerationRef.current) return;
       const rows = parseTableText(content, "csv", ",");
       loadData(rows, {
         fileName: "sample.csv",
@@ -311,7 +325,20 @@ export function useFile({
         event.preventDefault();
         const file = event.dataTransfer?.files[0];
         if (file) {
-          void loadBrowserFile(file, loadData, onToastRef.current, requestImportPreview);
+          const generation = ++loadGenerationRef.current;
+          const current = () => generation === loadGenerationRef.current;
+          void loadBrowserFile(
+            file,
+            (rows, meta) => {
+              if (current()) loadData(rows, meta);
+            },
+            (message) => {
+              if (current()) onToastRef.current(message);
+            },
+            requestImportPreview
+              ? (request) => (current() ? requestImportPreview(request) : Promise.resolve(null))
+              : undefined,
+          );
         }
       };
       window.addEventListener("dragover", handleDragOver);
@@ -456,6 +483,7 @@ async function loadBrowserFile(
 ): Promise<void> {
   try {
     if (requestImportPreview) {
+      if (file.size > 32 * 1024 * 1024) throw new Error("Import preview limit is 32 MiB");
       const result = await requestImportPreview({
         bytes: new Uint8Array(await file.arrayBuffer()),
         fileName: file.name,

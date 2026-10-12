@@ -11,10 +11,17 @@ export type RecoveryPanelProps = {
   store: RecoveryStore;
   onRestore: (copy: RecoveryCopy) => void;
   onStateChange?: (state: RecoveryState) => void;
+  onDeleteCompleted?: (documentIds?: string[]) => void;
   onClose: () => void;
 };
 
-export function RecoveryPanel({ store, onRestore, onStateChange, onClose }: RecoveryPanelProps) {
+export function RecoveryPanel({
+  store,
+  onRestore,
+  onStateChange,
+  onDeleteCompleted,
+  onClose,
+}: RecoveryPanelProps) {
   const [state, setState] = useState<RecoveryState | null>(null);
   const [error, setError] = useState("");
   const [consent, setConsent] = useState(false);
@@ -84,13 +91,37 @@ export function RecoveryPanel({ store, onRestore, onStateChange, onClose }: Reco
             >
               Open recovery copy
             </button>
-            <button onClick={() => receive(store.deleteOne(draft.id))}>Delete this draft</button>
+            <button
+              onClick={() => {
+                const result = store.deleteOne(draft.id);
+                if (result.ok) onDeleteCompleted?.([draft.documentId]);
+                receive(result);
+              }}
+            >
+              Delete this draft
+            </button>
           </li>
         ))}
       </ul>
       <div className="modalActions">
-        <button onClick={() => receive(store.deleteAll())}>Delete all recovery drafts</button>
-        <button onClick={() => receive(store.disable())}>Turn off and delete all drafts</button>
+        <button
+          onClick={() => {
+            const result = store.deleteAll();
+            if (result.ok) onDeleteCompleted?.();
+            receive(result);
+          }}
+        >
+          Delete all recovery drafts
+        </button>
+        <button
+          onClick={() => {
+            const result = store.disable();
+            if (result.ok) onDeleteCompleted?.();
+            receive(result);
+          }}
+        >
+          Turn off and delete all drafts
+        </button>
         <button onClick={onClose}>Later</button>
       </div>
     </FeatureDialog>

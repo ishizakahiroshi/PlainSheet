@@ -43,6 +43,7 @@ export type HistoryEntry = {
   colWidths?: ColumnWidthMap;
   selectedRows?: number[];
   selectedColumns?: number[];
+  validationRules?: import("../lib/validation").ValidationRule[];
 };
 
 export type ColumnWidthMap = Record<number, number>;
@@ -75,3 +76,5 @@ export const EMPTY_SELECTION: Selection = {
   row: 0,
   col: 0,
 };
+
+export type CellEditIdentity = { documentId: string; rowId: string; columnId: string };

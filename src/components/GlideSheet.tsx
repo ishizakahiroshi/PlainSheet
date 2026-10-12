@@ -24,7 +24,7 @@ import {
   MAX_GRID_COLS,
   MAX_GRID_ROWS,
 } from "../types/sheet";
-import type { CellValue, ColumnWidthMap, Range } from "../types/sheet";
+import type { CellValue, ColumnWidthMap, Range, CellEditIdentity } from "../types/sheet";
 import type { ContextMenuKind } from "./ContextMenu";
 import { columnName } from "../lib/columns";
 import { CellTextEditor, type RegisterEditorCommit } from "./CellTextEditor";
@@ -60,13 +60,18 @@ type GlideSheetProps = {
   onFillPreview?: (updates: { row: number; col: number; value: string }[]) => void;
   onCopy?: () => void;
   onPasteText?: (text: string) => void;
-  onEdit: (row: number, col: number, value: string) => void;
+  onPasteHtml?: (html: string) => void;
+  onInputError?: (message: string) => void;
+  onEdit: (row: number, col: number, value: string, identity?: CellEditIdentity) => void;
+  getEditIdentity?: (row: number, col: number) => CellEditIdentity | undefined;
   onColumnResize: (col: number, width: number) => void;
   onSelectionChange: (selection: { row: number; col: number }, range: Range) => void;
   onRowsSelected?: (indexes: number[]) => void;
   onColumnsSelected?: (indexes: number[]) => void;
   onPasteGrid: (startRow: number, startCol: number, grid: CellValue[][]) => void;
-  onFill?: (updates: { row: number; col: number; value: string }[]) => void;
+  onFill?: (
+    updates: { row: number; col: number; value: string; identity?: CellEditIdentity }[],
+  ) => void;
   onCut?: () => void;
   onClear?: () => void;
   onColumnMove?: (from: number, to: number) => void;
@@ -155,7 +160,10 @@ export function GlideSheet({
   onFillPreview,
   onCopy,
   onPasteText,
+  onPasteHtml,
+  onInputError,
   onEdit,
+  getEditIdentity,
   onColumnResize,
   onSelectionChange,
   onRowsSelected,
@@ -280,9 +288,10 @@ export function GlideSheet({
         displayData: displayValues?.(toSourceRow(row), col) ?? data,
         allowOverlay: !readOnly && toSourceRow(row) >= 0,
         readonly: readOnly || toSourceRow(row) < 0,
-      };
+        editIdentity: getEditIdentity?.(toSourceRow(row), col),
+      } as GridCell & { editIdentity?: CellEditIdentity };
     },
-    [rows, toSourceRow, displayValues, readOnly],
+    [rows, toSourceRow, displayValues, readOnly, getEditIdentity],
   );
 
   const onCellEdited = useCallback(
@@ -291,7 +300,12 @@ export function GlideSheet({
         return;
       }
       const sourceRow = toSourceRow(cell[1]);
-      if (sourceRow >= 0) onEdit(sourceRow, cell[0], newValue.data);
+      if (sourceRow >= 0) {
+        const identity = (newValue as EditableGridCell & { editIdentity?: CellEditIdentity })
+          .editIdentity;
+        if (identity) onEdit(sourceRow, cell[0], newValue.data, identity);
+        else onEdit(sourceRow, cell[0], newValue.data);
+      }
     },
     [onEdit, toSourceRow],
   );
@@ -537,8 +551,12 @@ export function GlideSheet({
   ]);
 
   const fillUpdates = useCallback(
-    (source: Rectangle, dest: Rectangle, mode: "copy" | "series") =>
-      buildFillUpdates(rowsRef.current, source, dest, { mode }).map((u) => {
+    (source: Rectangle, dest: Rectangle, mode: "copy" | "series") => {
+      if (source.width * source.height > 500_000 || dest.width * dest.height > 500_000) {
+        onInputError?.("フィルは50万セルまで / Fill limit: 500,000 cells");
+        return [];
+      }
+      return buildFillUpdates(rowsRef.current, source, dest, { mode }).map((u) => {
         const r =
           source.y + ((((u.row - source.y) % source.height) + source.height) % source.height);
         const c = source.x + ((((u.col - source.x) % source.width) + source.width) % source.width);
@@ -554,8 +572,9 @@ export function GlideSheet({
                 })
               : u.value,
         };
-      }),
-    [formulaEnabled, toSourceRow],
+      });
+    },
+    [formulaEnabled, toSourceRow, onInputError],
   );
 
   const handleFillPattern = useCallback(
@@ -592,7 +611,7 @@ export function GlideSheet({
         event.stopPropagation();
         const row = gridSelection.current?.cell[1] ?? toVisibleRow(selection.row);
         const col = gridSelection.current?.cell[0] ?? selection.col;
-        onOpenContextMenu("column", toSourceRow(row), col, 20, 120);
+        onOpenContextMenu("cell", toSourceRow(row), col, 20, 120);
         return;
       }
       const mod = event.ctrlKey || event.metaKey;
@@ -714,7 +733,11 @@ export function GlideSheet({
           return;
         event.preventDefault();
         event.stopPropagation();
-        onPasteText(event.clipboardData.getData("text/plain"));
+        const types = [...(event.clipboardData.types ?? [])];
+        const plain = event.clipboardData.getData("text/plain");
+        const html = event.clipboardData.getData("text/html");
+        if (types.includes("text/plain") || plain) onPasteText(plain);
+        else if (html && onPasteHtml) onPasteHtml(html);
       }}
     >
       {freezeRows > 0 && (
@@ -737,6 +760,8 @@ export function GlideSheet({
                             <button
                               title={values[col] ?? ""}
                               onClick={() => {
+                                onRowsSelected?.([]);
+                                onColumnsSelected?.([]);
                                 onSelectionChange({ row: toSourceRow(visibleRow), col }, null);
                                 ref.current?.scrollTo(col, visibleRow);
                                 ref.current?.focus();
@@ -794,6 +819,8 @@ export function GlideSheet({
                     row: toSourceRow(item.location[1]),
                     col: item.location[0],
                     value: item.value.data,
+                    identity: (item.value as EditableGridCell & { editIdentity?: CellEditIdentity })
+                      .editIdentity,
                   },
                 ]
               : [],

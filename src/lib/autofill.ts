@@ -40,7 +40,13 @@ export function buildFillUpdates(
   destination: FillRectangle,
   options: { mode?: FillMode } = {},
 ): FillUpdate[] {
-  if (!validRectangle(source) || !validRectangle(destination)) return [];
+  if (
+    !validRectangle(source) ||
+    !validRectangle(destination) ||
+    source.width * source.height > 500_000 ||
+    destination.width * destination.height > 500_000
+  )
+    return [];
   const mode = options.mode ?? "series";
   const vertical = destination.x === source.x && destination.width === source.width;
   const horizontal = destination.y === source.y && destination.height === source.height;

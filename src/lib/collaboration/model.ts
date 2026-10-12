@@ -19,6 +19,8 @@ export type CollaborationAction =
 export type CollaborationOperation = {
   id: string;
   baseRevision: number;
+  /** Exact source revision for coordinate-derived batches; stale batches must be recomputed. */
+  expectedRevision?: number;
   actions: CollaborationAction[];
   undoOf?: string;
   restoreOf?: string;
@@ -40,6 +42,7 @@ export type CollaborationHistoryEntry = {
   actions: CollaborationAction[];
   inverse: CollaborationAction[];
   conflicts: CollaborationConflict[];
+  expectedRevision?: number;
   undoOf?: string;
   restoreOf?: string;
   restoreBefore?: boolean;
@@ -188,6 +191,8 @@ export function validateOperation(value: unknown): asserts value is Collaboratio
     !validId(value.id) ||
     !Number.isSafeInteger(value.baseRevision) ||
     (value.baseRevision as number) < 0 ||
+    (value.expectedRevision !== undefined &&
+      (!Number.isSafeInteger(value.expectedRevision) || (value.expectedRevision as number) < 0)) ||
     !Array.isArray(value.actions) ||
     value.actions.length > COLLABORATION_LIMITS.maxActions ||
     (value.undoOf !== undefined && !validId(value.undoOf)) ||
@@ -248,6 +253,12 @@ export function applyCollaborationOperation(
   conflicts: CollaborationConflict[];
 } {
   validateOperation(operation);
+  if (operation.expectedRevision !== undefined && operation.expectedRevision !== source.revision)
+    throw new CollaborationError(
+      "revision-conflict",
+      "The table changed after this edit was prepared. Review the pending edit, then discard and recompute it from the latest table.",
+      409,
+    );
   if (operation.baseRevision > source.revision)
     throw new CollaborationError("future-revision", "Sync before sending this operation.", 409);
   const document = structuredClone(source);
@@ -278,7 +289,8 @@ export function applyCollaborationOperation(
         );
       }
       if (
-        previous.revision > operation.baseRevision &&
+        // A successful guard also covers the exact projected revisions of earlier queued work.
+        previous.revision > (operation.expectedRevision ?? operation.baseRevision) &&
         previous.revision !== revision &&
         previous.value !== action.value
       ) {
@@ -390,11 +402,48 @@ export function applyCollaborationOperation(
   return { document, inverse, conflicts };
 }
 
-/** A deliberate restore is a new write; Undo remains conditional and cannot erase a later edit. */
+/** History stores positional formula strings, not transforms that can be rebased onto a new table. */
+function validateHistoryRevision(
+  entry: CollaborationHistoryEntry,
+  document: SharedDocument,
+  undo: boolean,
+): void {
+  const actions = [...entry.actions, ...entry.inverse];
+  const structural = actions.some((action) => action.type !== "set-cell");
+  const formula = actions.some(
+    (action) => action.type === "set-cell" && action.value.startsWith("="),
+  );
+  // Every structural Undo is tied to its original commit, even if the original table had no
+  // formulas. A peer may have created a formula elsewhere without touching the affected axis.
+  // Unguarded, formula-free structural restoration can still revive retained stable-ID values.
+  const coordinateDerived =
+    entry.expectedRevision !== undefined ||
+    formula ||
+    (structural &&
+      (undo || Object.values(document.cells).some((cell) => cell.value.startsWith("="))));
+  if (coordinateDerived && document.revision !== entry.revision)
+    throw new CollaborationError(
+      undo ? "undo-conflict" : "history-conflict",
+      "The table changed after this history entry. Its positional changes cannot be replayed safely; review and recompute them from the latest table.",
+      409,
+    );
+}
+
+/** A structural or formula-bearing inverse is valid only at its original operation revision. */
+export function actionsForHistoryUndo(
+  entry: CollaborationHistoryEntry,
+  document: SharedDocument,
+): CollaborationAction[] {
+  validateHistoryRevision(entry, document, true);
+  return structuredClone(entry.inverse);
+}
+
+/** A deliberate restore is a new write, but never silently rebases positional formula strings. */
 export function actionsForHistoryRestore(
   entry: CollaborationHistoryEntry,
   document: SharedDocument,
 ): CollaborationAction[] {
+  validateHistoryRevision(entry, document, false);
   return entry.actions.map((action): CollaborationAction => {
     if (action.type === "set-cell")
       return {

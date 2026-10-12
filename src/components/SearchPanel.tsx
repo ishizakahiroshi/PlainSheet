@@ -81,7 +81,13 @@ export function SearchPanel({
       }}
     >
       <span className="searchPanel__scope">
-        {filtered ? t("searchVisibleScope") : t("searchAllScope")}
+        {scope === "selection"
+          ? "固定した選択 / Frozen selection"
+          : scope === "sheet"
+            ? t("searchAllScope")
+            : scope === "visible" || filtered
+              ? t("searchVisibleScope")
+              : t("searchAllScope")}
       </span>
       {onScopeChange && (
         <label>
@@ -129,7 +135,8 @@ export function SearchPanel({
           }
         }}
       />
-      <input
+      <textarea
+        rows={1}
         aria-label={t("replacePlaceholder")}
         value={replacement}
         placeholder={t("replacePlaceholder")}

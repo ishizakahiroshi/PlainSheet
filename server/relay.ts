@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import {
   actionsForHistoryRestore,
+  actionsForHistoryUndo,
   applyCollaborationOperation,
   COLLABORATION_LIMITS,
   CollaborationError,
@@ -378,6 +379,8 @@ export function createCollaborationRelay(options: RelayOptions) {
         validateOperation(input);
         const fingerprint = hash(JSON.stringify(input));
         const receipt = room.receipts.get(input.id);
+        // ACK replay precedes every revision/history precondition: the original payload may
+        // already have committed, including after its retained history entry has expired.
         if (receipt) {
           if (receipt.memberId !== member.id || receipt.fingerprint !== fingerprint)
             throw new CollaborationError(
@@ -423,7 +426,7 @@ export function createCollaborationRelay(options: RelayOptions) {
           operation = {
             ...input,
             actions: input.undoOf
-              ? entry.inverse
+              ? actionsForHistoryUndo(entry, room.snapshot.document)
               : actionsForHistoryRestore(restoreEntry, room.snapshot.document),
           };
           if (!operation.actions.length)
@@ -443,6 +446,9 @@ export function createCollaborationRelay(options: RelayOptions) {
           actions: operation.actions,
           inverse: applied.inverse,
           conflicts: applied.conflicts,
+          ...(input.expectedRevision !== undefined
+            ? { expectedRevision: input.expectedRevision }
+            : {}),
           ...(input.undoOf ? { undoOf: input.undoOf } : {}),
           ...(input.restoreOf ? { restoreOf: input.restoreOf } : {}),
           ...(input.restoreBefore ? { restoreBefore: true } : {}),

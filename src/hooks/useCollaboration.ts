@@ -71,10 +71,10 @@ export function useCollaboration(options: Options) {
       state?.snapshot?.stopped ||
       state?.status === "blocked"),
   );
-  const submit = (actions: CollaborationAction[]) => {
+  const submit = (actions: CollaborationAction[], expectedRevision?: number) => {
     if (!client || !actions.length) return false;
     try {
-      client.enqueue(actions);
+      client.enqueue(actions, expectedRevision === undefined ? undefined : { expectedRevision });
       if (client.getState().status === "online")
         void client.flush().catch((error) => latest.current.onError(String(error)));
       return true;
@@ -101,7 +101,7 @@ export function useCollaboration(options: Options) {
           ...actionsForCellMatrix(projected, transform(sharedDocumentRows(projected))),
         ];
       }
-      return submit(actions);
+      return submit(actions, transform ? document.revision : undefined);
     } catch (error) {
       latest.current.onError(String(error));
       return false;
@@ -155,5 +155,9 @@ export function useCollaboration(options: Options) {
     structure,
     replaceMatrix,
     hasSession: (id: string) => sessions.current.has(id),
+    pendingDocumentIds: () =>
+      [...sessions.current]
+        .filter(([, session]) => session.client.getState().pendingCount > 0)
+        .map(([id]) => id),
   };
 }

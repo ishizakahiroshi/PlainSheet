@@ -60,6 +60,10 @@ describe("optional Node 24 relay entry point", () => {
       await exited;
     }
     expect(output).not.toContain("Bearer");
-    expect(child.exitCode).toBe(0);
+    // Windows terminates SIGTERM children directly; it reports a signal rather
+    // than running Node's graceful signal handler and returning numeric zero.
+    if (process.platform === "win32") expect(child.signalCode).toBe("SIGTERM");
+    else expect(child.exitCode).toBe(0);
+    await expect(fetch(`http://127.0.0.1:${port}/rooms`)).rejects.toThrow();
   }, 10_000);
 });

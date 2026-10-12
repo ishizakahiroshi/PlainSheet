@@ -114,3 +114,46 @@ export function normalizeRange(range: Exclude<Range, null>): Exclude<Range, null
     endCol: Math.max(range.startCol, range.endCol),
   };
 }
+
+/** Inert HTML table import. Never insert clipboard markup into the live document. */
+export function clipboardHtmlRows(html: string): CellValue[][] | null {
+  if (!html || html.length > 2 * 1024 * 1024) return null;
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  parsed.querySelectorAll("script,style,iframe,object,embed").forEach((node) => node.remove());
+  const table = parsed.querySelector("table");
+  if (!table) return null;
+  const sourceRows = [...table.querySelectorAll("tr")].filter(
+    (row) => row.closest("table") === table,
+  );
+  if (sourceRows.length > 10000) return null;
+  const result: string[][] = [];
+  for (let r = 0; r < sourceRows.length; r++) {
+    result[r] ??= [];
+    let c = 0;
+    for (const cell of [...sourceRows[r].children].filter((item) => item.matches("td,th"))) {
+      while (result[r][c] !== undefined) c++;
+      const width = Number(cell.getAttribute("colspan") ?? 1);
+      const height = Number(cell.getAttribute("rowspan") ?? 1);
+      if (
+        !Number.isSafeInteger(width) ||
+        !Number.isSafeInteger(height) ||
+        width < 1 ||
+        height < 1 ||
+        c + width > 1000 ||
+        r + height > 10000 ||
+        (r + height) * (c + width) > 500000
+      )
+        return null;
+      cell.querySelectorAll("br").forEach((br) => br.replaceWith("\n"));
+      for (let dr = 0; dr < height; dr++) {
+        result[r + dr] ??= [];
+        for (let dc = 0; dc < width; dc++)
+          result[r + dr][c + dc] = dr || dc ? "" : (cell.textContent ?? "");
+      }
+      c += width;
+    }
+  }
+  const width = result.reduce((max, row) => Math.max(max, row.length), 0);
+  if (!width || result.length * width > 500000) return null;
+  return result.map((row) => Array.from({ length: width }, (_, col) => row[col] ?? ""));
+}
