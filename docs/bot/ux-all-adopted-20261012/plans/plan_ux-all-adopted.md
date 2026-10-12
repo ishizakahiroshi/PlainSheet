@@ -1,6 +1,6 @@
 ---
 type: plan
-status: draft
+status: in_progress
 docsweep_state: planned
 tags: [PlainSheet, UX, dots]
 owner: ishizakahiroshi
@@ -57,3 +57,14 @@ dotsはbranchへのコード/テスト/指示/看板push、上記base向けDraft
 手元担当Codex、exact model IDはunknown/unavailable。docsweepの有効設定はprovenance checkが無効を返したため設定変更/汎用実行台帳を作らない。未取得のモデルを推測しない。
 
 次のAIは本親planを入口に新案件Issue・PROGRESS・最新Draft PR headを確認し、進行中のCを再開する。routine設計判断はAI間で解決し、重大なscope逸脱・課金/secret/本番配置・実行側承認取消だけを停止理由として証跡化する。取消後は同じ書込を自動再試行しない。新しい書込制限が出ても、安全に進められる別Cや可読差分の準備を続ける。
+
+## 実装・証跡更新（2026-10-12 UTC）
+
+候補code7831c3c2、Draft PR4。全28候補統合、49files607tests/TypeScript/ESLint成功。詳細は親ディレクトリのcoverage.md、verification.md、remediation.mdを参照。C1/C3/C4とC2/C5の独立再review中。C6/C7修正後独立再reviewは未実施、実GUI/nativeの条件はpending。公開証跡・独立確認・実環境受入が未完のため、この計画をdoneにはしない。
+
+最終source候補更新: ac8194cb09a79d38332ba3421dc10a15d0aa00f3、49files625tests/TypeScript/ESLint成功。範囲別独立確認/未検収はverification.mdと各review報告を参照し、doneとはしない。
+
+
+最新source更新: `76ab986ceeff7fb0d2dcba17cf6096489c45ff33`、50 files /641 tests、TypeScript/ESLint成功。構造Undo/Redoの後付け規則維持と規則単位ヘッダー適用判定を追加修正。C1/C3/C4は前候補ac8194cbの限定receipt取得済み、C2/C5は最新固定SHAで限定再確認中。C6/C7修正後独立再reviewは未実施、実GUI/native受入は保留。
+
+最終提出source: `6dba8bd1fb42b22b065fc9e8003d8d137e054610`。50 files /646 tests、TypeScript/ESLint成功。規則履歴の100件/列上限を原子的に事前検査し、拒否時もデータと両履歴stackを維持。最新receipt/CIと未検収はHANDOFF.md・verification.md・Issue 3を参照。

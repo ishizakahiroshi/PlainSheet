@@ -19,3 +19,104 @@
 全採用の追加契約はREADMEと親子planに記録。公式研究出典は[出典一覧](sources.md)。共同編集設計候補の一次資料は[Yjs公式](https://docs.yjs.dev/) と [y-webrtc公式](https://github.com/yjs/y-webrtc)。Yjsのdata modelとnetwork providerを分離できること、y-webrtcがpublic signaling設定を持つことを確認した。採用する場合は既定の外部接続を明示無効にし、transportの暗号化だけで閲覧/編集の認可を証明したと扱わない。これらは候補であり特定library導入を必須にしない。
 
 前案件のdotsはNode24あり/Bunなし、Chromium socket制約を申告していた。新案件環境は受付で再確認する。手元の既存候補は保持済み。共有Git・文書統合は直列所有する。
+
+## 新案件の実測追記（2026-10-12 UTC）
+
+- 固定指示全文:8204b5442f602164148b725c3ad07190630e33c4。新規に基準190testsを実行し、旧研究の成功は流用していない。
+- branch:dots/ux-all-P-20261012-001、[Draft PR4](https://github.com/ishizakahiroshi/PlainSheet/pull/4)、code7831c3c2fc7f8e89ec517b845e0b0485c9f3d2e9。共有App/Glide/useFileは単一統合担当で直列変更。
+- Cloud Linux / Node24.19.0 / npm11.9.0 / Python3.12.14。local Bun/Rust/Cargoなし。接続済みdesktopは今回の操作許可なし、saved environmentなし。既存cloud/connectorで許可内作業。
+- 49files607tests、TypeScript、ESLint成功。ネットワーク共同編集は実HTTP loopback合成確認済み。GUI/native操作の未検収は別。
+- 新規依存なし。既存npm実測とBun lock再現性を区別。詳細はdependency-ledger.md。
+- 独立review初回22件と修正はremediation.md。C6/C7修正後独立再reviewは未実施、C8/全28受入済みとはしない。
+
+### 実際の変更source/test paths（code SHA7831c3c2）
+
+- `server/relay.ts`
+- `server/run.mjs`
+- `server/serve.ts`
+- `src-tauri/src/main.rs`
+- `src-tauri/tauri.conf.json`
+- `src/App.tsx`
+- `src/components/CleanupPanel.tsx`
+- `src/components/CommandSearch.tsx`
+- `src/components/FeatureDialog.tsx`
+- `src/components/FilterPopover.tsx`
+- `src/components/FormulaBar.tsx`
+- `src/components/GlideSheet.tsx`
+- `src/components/HelpModal.tsx`
+- `src/components/ImportPreview.tsx`
+- `src/components/NamedViewsPanel.tsx`
+- `src/components/RecoveryPanel.tsx`
+- `src/components/SearchPanel.tsx`
+- `src/components/SettingsModal.tsx`
+- `src/components/SharingPanel.tsx`
+- `src/components/Toolbar.tsx`
+- `src/components/ValidationPanel.tsx`
+- `src/hooks/useCollaboration.ts`
+- `src/hooks/useDialogFocus.ts`
+- `src/hooks/useDocuments.ts`
+- `src/hooks/useFile.ts`
+- `src/hooks/useFilter.ts`
+- `src/hooks/useHistory.ts`
+- `src/lib/autofill.ts`
+- `src/lib/cleanup.ts`
+- `src/lib/clipboard.ts`
+- `src/lib/collaboration/client.ts`
+- `src/lib/collaboration/index.ts`
+- `src/lib/collaboration/model.ts`
+- `src/lib/commands.ts`
+- `src/lib/conversionPreview.ts`
+- `src/lib/decimal.ts`
+- `src/lib/formula.ts`
+- `src/lib/gridOperations.ts`
+- `src/lib/importPreview.ts`
+- `src/lib/namedViews.ts`
+- `src/lib/recovery.ts`
+- `src/lib/saveState.ts`
+- `src/lib/search.ts`
+- `src/lib/sort.ts`
+- `src/lib/validation.ts`
+- `src/lib/viewState.ts`
+- `src/styles/app.css`
+- `src/tests/App.adoptedUx.test.tsx`
+- `src/tests/App.extendedUx.test.tsx`
+- `src/tests/App.integration.test.tsx`
+- `src/tests/App.reviewCorrections.test.tsx`
+- `src/tests/App.reviewInputCorrections.test.tsx`
+- `src/tests/App.sharingCorrections.test.tsx`
+- `src/tests/GlideSheet.inputSafety.test.tsx`
+- `src/tests/GlideSheet.test.tsx`
+- `src/tests/ImportPreview.test.tsx`
+- `src/tests/autofill.bounds.test.ts`
+- `src/tests/autofill.test.ts`
+- `src/tests/c5Panels.test.tsx`
+- `src/tests/cleanup.test.ts`
+- `src/tests/clipboard.test.ts`
+- `src/tests/clipboardHtml.test.ts`
+- `src/tests/collaboration.model.test.ts`
+- `src/tests/collaboration.panel.test.tsx`
+- `src/tests/collaboration.revisionGuard.test.ts`
+- `src/tests/collaboration.runner.test.ts`
+- `src/tests/collaboration.transport.test.ts`
+- `src/tests/conversionPreview.test.ts`
+- `src/tests/decimal.test.ts`
+- `src/tests/dualEditionUi.test.tsx`
+- `src/tests/formula.test.ts`
+- `src/tests/importPreview.test.ts`
+- `src/tests/namedViews.test.ts`
+- `src/tests/namedViewsPanel.test.tsx`
+- `src/tests/recovery.test.ts`
+- `src/tests/sort.test.ts`
+- `src/tests/useCollaboration.test.tsx`
+- `src/tests/useFile.test.ts`
+- `src/tests/validation.test.ts`
+- `src/types/sheet.ts`
+
+最終source候補はac8194cb09a79d38332ba3421dc10a15d0aa00f3へ更新。上の変更一覧に加えてContextMenu.tsxの選択維持フラグを変更。source/test総81paths。49files625tests/TypeScript/ESLint成功。
+
+
+最新source更新: `76ab986ceeff7fb0d2dcba17cf6096489c45ff33`、50 files /641 tests、TypeScript/ESLint成功。構造Undo/Redoの後付け規則維持と規則単位ヘッダー適用判定を追加修正。C1/C3/C4は前候補ac8194cbの限定receipt取得済み、C2/C5は最新固定SHAで限定再確認中。C6/C7修正後独立再reviewは未実施、実GUI/native受入は保留。
+
+追加source: src/lib/validationHistory.ts、追加test: src/tests/validationHistory.test.ts。source/test変更総83 paths。
+
+最終提出source: `6dba8bd1fb42b22b065fc9e8003d8d137e054610`。50 files /646 tests、TypeScript/ESLint成功。規則履歴の100件/列上限を原子的に事前検査し、拒否時もデータと両履歴stackを維持。最新receipt/CIと未検収はHANDOFF.md・verification.md・Issue 3を参照。

@@ -69,3 +69,16 @@ last_reviewed: 2026-10-12
 利用者は実装を依頼済み。途中の工程承認を繰り返し求めず、範囲内の実装/設計/review修正を自律継続する。範囲外・課金・secret・実配置・実行側承認拒否/取消は停止してIssueへ理由と未完了・安全な再開の一手を残す。同じ書込を取消後に自動再試行しない。特定環境が不足しても安全な別Cやコード/合成検査を進める。長時間になれば checkpoint を残して範囲を落とさず再開可能にする。
 
 同じ案件の会話内だけで返信し、毎回1行目を `#P-20261012-001 PlainSheet：<報告内容>` とする。受付では案件/指示commit/衝突/作業branch/base/独立担当/OS・Node/Bun/Rust/依存取得/GUI/CI能力を報告。進捗・停止・提出はIssueに同じ事実を記録し、PROGRESSはその証跡へのリンクを更新する。私有locator・実ホームpath・秘密値は公開文書へ書かない。
+
+## 実装候補と検収状態（2026-10-12 UTC追記）
+
+[Draft PR4](https://github.com/ishizakahiroshi/PlainSheet/pull/4)、code7831c3c2fc7f8e89ec517b845e0b0485c9f3d2e9。全28の候補実装/統合と合成回帰を用意した。受入条件135項目と28行追跡は[coverage](coverage.md)、設計は[design](design.md)、実測は[verification](verification.md)、指摘修正は[remediation](remediation.md)、実環境一括検収は[manual-acceptance](manual-acceptance.md)。
+
+49files607tests/TypeScript/ESLint成功は候補の実測。C1/C3/C4とC2/C5は独立再review中、C6/C7の修正後独立再reviewは未実施。実GUI/native/IME/clipboard/支援技術/性能もpending。C8と全28受入をdoneにせず範囲別に引き継ぐ。状態の正本はIssue3。
+
+最新source候補: `ac8194cb09a79d38332ba3421dc10a15d0aa00f3`、49files625tests。上記7831c3c2は前候補として保持。最新の範囲別検収・CIはverification.md/Issue3を参照。
+
+
+最新source更新: `76ab986ceeff7fb0d2dcba17cf6096489c45ff33`、50 files /641 tests、TypeScript/ESLint成功。構造Undo/Redoの後付け規則維持と規則単位ヘッダー適用判定を追加修正。C1/C3/C4は前候補ac8194cbの限定receipt取得済み、C2/C5は最新固定SHAで限定再確認中。C6/C7修正後独立再reviewは未実施、実GUI/native受入は保留。
+
+最終提出source: `6dba8bd1fb42b22b065fc9e8003d8d137e054610`。50 files /646 tests、TypeScript/ESLint成功。規則履歴の100件/列上限を原子的に事前検査し、拒否時もデータと両履歴stackを維持。最新receipt/CIと未検収はHANDOFF.md・verification.md・Issue 3を参照。
