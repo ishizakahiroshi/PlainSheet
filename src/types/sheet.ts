@@ -43,7 +43,8 @@ export type HistoryEntry = {
   colWidths?: ColumnWidthMap;
   selectedRows?: number[];
   selectedColumns?: number[];
-  validationRules?: import("../lib/validation").ValidationRule[];
+  validationChanges?: import("../lib/validationHistory").ValidationColumnChange[];
+  validationRemovedRules?: import("../lib/validation").ValidationRule[];
 };
 
 export type ColumnWidthMap = Record<number, number>;

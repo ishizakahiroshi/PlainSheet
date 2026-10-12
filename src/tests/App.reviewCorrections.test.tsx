@@ -457,6 +457,180 @@ function addRequired() {
   fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Add rule" }));
   fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Close" }));
 }
+
+function expectRequiredColumns(columns: number[]) {
+  openRules();
+  const list = within(rulesDialog()).getByRole("list", { name: "Existing rules" });
+  expect(within(list).queryAllByRole("listitem")).toHaveLength(columns.length);
+  for (const column of columns) expect(list).toHaveTextContent(`Column ${column}: required`);
+  fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Close" }));
+}
+
+function addMixedHeaderRules() {
+  openRules();
+  fireEvent.change(within(rulesDialog()).getByRole("combobox", { name: /^Rule$/ }), {
+    target: { value: "pattern" },
+  });
+  fireEvent.change(within(rulesDialog()).getByRole("textbox", { name: "Full-cell pattern" }), {
+    target: { value: "[0-9]*" },
+  });
+  fireEvent.change(within(rulesDialog()).getByRole("combobox", { name: "On invalid input" }), {
+    target: { value: "reject" },
+  });
+  fireEvent.click(
+    within(rulesDialog()).getByRole("checkbox", { name: "Skip source row 1 (header)" }),
+  );
+  fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Add rule" }));
+  fireEvent.change(within(rulesDialog()).getByRole("spinbutton", { name: "Column number" }), {
+    target: { value: "2" },
+  });
+  fireEvent.change(within(rulesDialog()).getByRole("combobox", { name: /^Rule$/ }), {
+    target: { value: "required" },
+  });
+  fireEvent.change(within(rulesDialog()).getByRole("combobox", { name: "On invalid input" }), {
+    target: { value: "reject" },
+  });
+  fireEvent.click(
+    within(rulesDialog()).getByRole("checkbox", { name: "Skip source row 1 (header)" }),
+  );
+  fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Add rule" }));
+  fireEvent.click(within(rulesDialog()).getByRole("button", { name: "Close" }));
+}
+
+function moveHeaderIntoData(operation: "insert" | "sort") {
+  if (operation === "insert") {
+    select(0, 0);
+    fireEvent.keyDown(screen.getByTestId("canvas-proxy"), { key: "F10", shiftKey: true });
+    fireEvent.click(screen.getByRole("menuitem", { name: t("insertRowAbove") }));
+  } else {
+    fireEvent.change(screen.getByRole("combobox", { name: /First row/ }), {
+      target: { value: "data" },
+    });
+    act(() => editor().onHeaderMenuClick?.(0, { x: 0, y: 0, width: 120, height: 32 }));
+    fireEvent.click(screen.getByRole("menuitem", { name: t("sortAsc") }));
+  }
+}
+
+describe("review regressions: later rules and per-rule header applicability", () => {
+  it("structural Undo preserves and reverse-maps a later rule addition, and Redo maps it forward", async () => {
+    await load("id,value\n11,keep");
+    act(() => editor().onColumnMoved?.(0, 1));
+    addRequired();
+    expect(screen.getByRole("button", { name: /Validation \(1\)/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+    expect(matrix(2)).toEqual([
+      ["id", "value"],
+      ["11", "keep"],
+    ]);
+    expect(screen.queryByRole("button", { name: /Validation \(1\)/ })).toBeInTheDocument();
+    expectRequiredColumns([2]);
+    fireEvent.click(screen.getByRole("button", { name: t("redo") }));
+    expect(matrix(2)).toEqual([
+      ["value", "id"],
+      ["keep", "11"],
+    ]);
+    expectRequiredColumns([1]);
+  });
+
+  it("a rule added to an inserted column returns with Redo without leaking onto surviving columns", async () => {
+    await load("id,value\n11,keep");
+    act(() => editor().onHeaderMenuClick?.(0, { x: 0, y: 0, width: 120, height: 32 }));
+    fireEvent.click(screen.getByRole("menuitem", { name: t("insertColLeft") }));
+    expect(matrix(2, 3)).toEqual([
+      ["", "id", "value"],
+      ["", "11", "keep"],
+    ]);
+    addRequired();
+    expectRequiredColumns([1]);
+    fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+    expect(matrix(2)).toEqual([
+      ["id", "value"],
+      ["11", "keep"],
+    ]);
+    expectRequiredColumns([]);
+    fireEvent.click(screen.getByRole("button", { name: t("redo") }));
+    expect(matrix(2, 3)).toEqual([
+      ["", "id", "value"],
+      ["", "11", "keep"],
+    ]);
+    expectRequiredColumns([1]);
+  });
+
+  it("column deletion Undo restores its removed rule and preserves a later surviving-column rule", async () => {
+    await load("id,value,extra\n11,keep,last");
+    addRequired();
+    act(() => editor().onHeaderMenuClick?.(0, { x: 0, y: 0, width: 120, height: 32 }));
+    fireEvent.click(screen.getByRole("menuitem", { name: t("deleteCol") }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: t("confirmDeleteTitle") })).getByRole("button", {
+        name: t("deleteAction"),
+      }),
+    );
+    expect(matrix(2)).toEqual([
+      ["value", "extra"],
+      ["keep", "last"],
+    ]);
+    expectRequiredColumns([]);
+    addRequired();
+    fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+    expect(matrix(2, 3)).toEqual([
+      ["id", "value", "extra"],
+      ["11", "keep", "last"],
+    ]);
+    expectRequiredColumns([1, 2]);
+    fireEvent.click(screen.getByRole("button", { name: t("redo") }));
+    expect(matrix(2)).toEqual([
+      ["value", "extra"],
+      ["keep", "last"],
+    ]);
+    expectRequiredColumns([1]);
+  });
+
+  it.each(["insert", "sort"] as const)(
+    "header %s does not revalidate an unchanged all-rows violation in another column",
+    async (operation) => {
+      await load("bad,value\n11,keep");
+      addMixedHeaderRules();
+      moveHeaderIntoData(operation);
+      expect(matrix(operation === "insert" ? 3 : 2)).toEqual(
+        operation === "insert"
+          ? [
+              ["", ""],
+              ["bad", "value"],
+              ["11", "keep"],
+            ]
+          : [
+              ["11", "keep"],
+              ["bad", "value"],
+            ],
+      );
+      expect(screen.getByRole("button", { name: /Validation \(2\)/ })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: t("undo") }));
+      expect(matrix(2)).toEqual([
+        ["bad", "value"],
+        ["11", "keep"],
+      ]);
+      expect(screen.getByRole("button", { name: t("undo") })).toBeDisabled();
+    },
+  );
+
+  it.each(["insert", "sort"] as const)(
+    "header %s still rejects a newly applicable skip-header rule atomically",
+    async (operation) => {
+      await load("bad,\n11,keep");
+      addMixedHeaderRules();
+      moveHeaderIntoData(operation);
+      expect(matrix(2)).toEqual([
+        ["bad", ""],
+        ["11", "keep"],
+      ]);
+      expect(screen.getByRole("button", { name: t("undo") })).toBeDisabled();
+      expect(screen.getByRole("tab", { selected: true })).not.toHaveAccessibleName(
+        new RegExp(t("unsaved")),
+      );
+    },
+  );
+});
 describe("review regressions: cleanup, rule history and normalized saves", () => {
   it("R1 sorting preserves an untouched invalid value while moving the complete row", async () => {
     await load("id,value\n,z\n11,a");

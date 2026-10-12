@@ -66,6 +66,11 @@ import {
   type ValidationReport,
 } from "./lib/validation";
 import {
+  validationHistoryBefore,
+  restoreValidationHistory,
+  type ValidationColumnChange,
+} from "./lib/validationHistory";
+import {
   evaluateFormulaSheet,
   exportFormulaRows,
   rewriteFormulasForStructure,
@@ -884,14 +889,14 @@ export default function App() {
   const selectedReference = referenceForSelection(selectionState.selection, selectionState.range);
 
   const recordBeforeChange = useCallback(
-    (includeRules = false) => {
+    (columnChanges?: ValidationColumnChange[]) => {
       if (collaboration.client) return;
       history.record(sheet.rows, selectionState.selection, {
         range: selectionState.range,
         colWidths: sheet.colWidths,
         selectedRows,
         selectedColumns,
-        ...(includeRules ? { validationRules: rules } : {}),
+        ...validationHistoryBefore(rules, columnChanges),
       });
     },
     [
@@ -912,12 +917,19 @@ export default function App() {
     nextRules = rules,
     allCells = false,
     beforeRows = sheet.rows,
+    newlyApplicableRules: readonly { row: number; ruleId: string }[] = [],
   ) => {
     if (collaboration.readOnly) {
       showToast("閲覧専用または権限失効 / Read-only sharing session");
       return false;
     }
-    const report = validateMutation(allCells ? [] : beforeRows, next, nextRules);
+    const report = validateMutation(
+      allCells ? [] : beforeRows,
+      next,
+      nextRules,
+      undefined,
+      newlyApplicableRules,
+    );
     setValidationReport(report.totalIssues || report.ruleErrors.length ? report : null);
     if (!report.allowed) {
       showToast("入力ルールにより操作全体を拒否しました / Entire change rejected by validation");
@@ -989,8 +1001,11 @@ export default function App() {
     selectionState.setSelectionRange(entry.selection, entry.range ?? null);
     setSelectedRows(entry.selectedRows ?? []);
     setSelectedColumns(entry.selectedColumns ?? []);
-    if (entry.validationRules)
-      setRulesById((current) => ({ ...current, [workspace.activeId]: entry.validationRules! }));
+    if (entry.validationChanges)
+      setRulesById((current) => ({
+        ...current,
+        [workspace.activeId]: restoreValidationHistory(current[workspace.activeId] ?? [], entry),
+      }));
   };
 
   const getEditIdentity = (row: number, col: number): CellEditIdentity | undefined => {
@@ -1443,7 +1458,12 @@ export default function App() {
     sheet.rows.forEach((row, source) => {
       comparison[source < index ? source : source + rowsToInsert] = row;
     });
-    if (index === 0 && rules.some((rule) => rule.skipHeader)) delete comparison[rowsToInsert];
+    const newlyApplicable =
+      index === 0
+        ? rules
+            .filter((rule) => rule.skipHeader)
+            .map((rule) => ({ row: rowsToInsert, ruleId: rule.id }))
+        : [];
     if (view.formulaEnabled)
       next = rewriteFormulasForStructure(next, {
         type: "insert",
@@ -1451,7 +1471,7 @@ export default function App() {
         index,
         count: rowsToInsert,
       });
-    if (!validateNext(next, rules, false, comparison)) return;
+    if (!validateNext(next, rules, false, comparison, newlyApplicable)) return;
     if (collaboration.client) {
       collaboration.structure(
         insertAxisActions(collaboration.client.getDocument()!, "row", index, rowsToInsert),
@@ -1496,7 +1516,7 @@ export default function App() {
       )
         return;
     } else {
-      recordBeforeChange(true);
+      recordBeforeChange([{ type: "insert", index, count: colsToInsert }]);
       sheet.insertColumns(index, colsToInsert);
       replaceRows(next, true, false);
     }
@@ -1600,7 +1620,7 @@ export default function App() {
           )
             return;
         } else {
-          recordBeforeChange(true);
+          recordBeforeChange([{ type: "delete", indexes }]);
           sheet.deleteColumns(indexes);
           replaceRows(next, true, false);
         }
@@ -1618,12 +1638,16 @@ export default function App() {
 
   const applySortedRows = (sorted: CellValue[][]) => {
     const comparison = [...sorted];
+    let newlyApplicable: { row: number; ruleId: string }[] = [];
     if (rules.some((rule) => rule.skipHeader) && !view.useHeaderRow) {
       const oldFirst = JSON.stringify(sheet.rows[0]);
       const movedFirst = sorted.findIndex((row) => JSON.stringify(row) === oldFirst);
-      if (movedFirst > 0) delete comparison[movedFirst];
+      if (movedFirst > 0)
+        newlyApplicable = rules
+          .filter((rule) => rule.skipHeader)
+          .map((rule) => ({ row: movedFirst, ruleId: rule.id }));
     }
-    if (!validateNext(sorted, rules, false, comparison)) return;
+    if (!validateNext(sorted, rules, false, comparison, newlyApplicable)) return;
     if (collaboration.client) {
       const doc = collaboration.client.getDocument()!;
       const raw = sharedDocumentRows(doc);
@@ -1678,7 +1702,7 @@ export default function App() {
       colWidths: sheet.colWidths,
       selectedRows,
       selectedColumns,
-      ...(history.snapshot().undo.at(-1)?.validationRules ? { validationRules: rules } : {}),
+      ...validationHistoryBefore(rules, history.snapshot().undo.at(-1)?.validationChanges),
     });
     if (previous) {
       replaceRowsFromHistory(previous);
@@ -1698,7 +1722,7 @@ export default function App() {
       colWidths: sheet.colWidths,
       selectedRows,
       selectedColumns,
-      ...(history.snapshot().redo.at(-1)?.validationRules ? { validationRules: rules } : {}),
+      ...validationHistoryBefore(rules, history.snapshot().redo.at(-1)?.validationChanges),
     });
     if (next) {
       replaceRowsFromHistory(next);
@@ -2404,7 +2428,7 @@ export default function App() {
                   { type: "reorder", axis: "column", ids, ifRevision: doc.revision },
                 ]);
               } else {
-                recordBeforeChange(true);
+                recordBeforeChange([{ type: "move", from, to }]);
                 replaceRows(moved.rows, true, false);
               }
               invalidateSearchScope();

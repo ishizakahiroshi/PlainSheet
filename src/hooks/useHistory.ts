@@ -12,7 +12,12 @@ export function cloneHistoryEntry(entry: HistoryEntry): HistoryEntry {
     colWidths: entry.colWidths ? { ...entry.colWidths } : undefined,
     selectedRows: entry.selectedRows ? [...entry.selectedRows] : undefined,
     selectedColumns: entry.selectedColumns ? [...entry.selectedColumns] : undefined,
-    validationRules: entry.validationRules ? structuredClone(entry.validationRules) : undefined,
+    validationChanges: entry.validationChanges
+      ? structuredClone(entry.validationChanges)
+      : undefined,
+    validationRemovedRules: entry.validationRemovedRules
+      ? structuredClone(entry.validationRemovedRules)
+      : undefined,
   };
 }
 
@@ -29,7 +34,12 @@ export function useHistory() {
     selection: Selection,
     extra: Pick<
       HistoryEntry,
-      "range" | "colWidths" | "selectedRows" | "selectedColumns" | "validationRules"
+      | "range"
+      | "colWidths"
+      | "selectedRows"
+      | "selectedColumns"
+      | "validationChanges"
+      | "validationRemovedRules"
     > = {},
   ): void {
     const next = [...undoRef.current, cloneHistoryEntry({ rows, selection, ...extra })].slice(

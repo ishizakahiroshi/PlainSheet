@@ -153,6 +153,7 @@ export function validateMutation(
   nextRows: readonly (readonly string[])[],
   rules: readonly ValidationRule[],
   changedCells?: readonly Selection[],
+  newlyApplicableRules: readonly { row: number; ruleId: string }[] = [],
 ): ValidationReport {
   const issues: ValidationIssue[] = [];
   const ruleErrors =
@@ -170,15 +171,16 @@ export function validateMutation(
   let totalIssues = 0;
   let rejectedIssues = 0;
   const seen = new Set<string>();
-  const check = ({ row, col }: Selection) => {
+  const check = ({ row, col }: Selection, onlyRuleId?: string) => {
     if (row < 0 || col < 0 || !Number.isInteger(row) || !Number.isInteger(col) || !nextRows[row])
       return;
-    const key = `${row}:${col}`;
-    if (seen.has(key)) return;
-    seen.add(key);
     const value = nextRows[row][col] ?? "";
     for (const { rule, pattern } of compiled) {
       if (rule.column !== col || (rule.skipHeader && row === 0)) continue;
+      if (onlyRuleId !== undefined && rule.id !== onlyRuleId) continue;
+      const key = `${row}:${col}:${rule.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       const valid =
         rule.kind === "required"
           ? value !== ""
@@ -206,7 +208,7 @@ export function validateMutation(
         });
     }
   };
-  if (changedCells) changedCells.forEach(check);
+  if (changedCells) changedCells.forEach((cell) => check(cell));
   else {
     const columns = [...new Set(compiled.map(({ rule }) => rule.column))];
     nextRows.forEach((row, rowIndex) =>
@@ -215,6 +217,12 @@ export function validateMutation(
           check({ row: rowIndex, col });
       }),
     );
+  }
+  // A moved header can become subject to a skip-header rule without changing
+  // its value. Check only that rule, not unrelated existing violations.
+  for (const { row, ruleId } of newlyApplicableRules) {
+    const rule = compiled.find((entry) => entry.rule.id === ruleId)?.rule;
+    if (rule) check({ row, col: rule.column }, ruleId);
   }
   return {
     allowed: rejectedIssues === 0 && ruleErrors.length === 0,
