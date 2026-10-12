@@ -158,12 +158,22 @@ describe("edition-specific names and keyboard discoverability", () => {
     expect(screen.getByRole("option", { name: "UTF-8 BOM" })).toBeEnabled();
   });
   it("focuses Help and includes save, newline and saved-order behavior", () => {
-    render(<HelpModal open onClose={vi.fn()} />);
+    const onClose = vi.fn();
+    render(<HelpModal open onClose={onClose} />);
+    const platform = screen.getByRole("combobox", { name: /Platform/ });
     const close = screen.getByRole("button", { name: t("close") });
-    expect(close).toHaveFocus();
+    expect(platform).toHaveFocus();
     expect(screen.getByText(t("sortSaveHelp"))).toBeInTheDocument();
     expect(screen.getByText(t("editNavigationHelp"))).toBeInTheDocument();
-    fireEvent.keyDown(close, { key: "Tab" });
+    fireEvent.keyDown(platform, { key: "Tab", shiftKey: true });
     expect(close).toHaveFocus();
+    fireEvent.keyDown(close, { key: "Tab" });
+    expect(platform).toHaveFocus();
+    fireEvent.keyDown(platform, { key: "Escape", isComposing: true });
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.keyDown(platform, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+    fireEvent.click(close);
+    expect(onClose).toHaveBeenCalledTimes(2);
   });
 });

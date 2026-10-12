@@ -14,6 +14,7 @@ type SettingsModalProps = {
   omitEmptyCells: boolean;
   theme: "light" | "dark" | "system";
   useHeaderRow?: boolean;
+  headerLocked?: boolean;
   onEncodingChange: (encoding: Encoding) => void;
   onNewlineChange: (newline: Newline) => void;
   onZebraChange: (enabled: boolean) => void;
@@ -36,6 +37,7 @@ export function SettingsModal({
   omitEmptyCells,
   theme,
   useHeaderRow = true,
+  headerLocked = false,
   onEncodingChange,
   onNewlineChange,
   onZebraChange,
@@ -162,6 +164,8 @@ export function SettingsModal({
             <label className="checkControl">
               <input
                 aria-label={t("useHeaderRow")}
+                disabled={headerLocked}
+                title={headerLocked ? "JSON/YAML requires a key row" : undefined}
                 type="checkbox"
                 checked={useHeaderRow}
                 onChange={(event) => onUseHeaderRowChange(event.target.checked)}

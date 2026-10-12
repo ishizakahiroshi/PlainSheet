@@ -24,6 +24,8 @@ export type FileFormat = "csv" | "tsv" | "markdown" | "json" | "yaml";
 export type SheetMeta = {
   filePath?: string;
   fileName?: string;
+  /** Session-only original text used to explain lossy export; never embedded in CSV. */
+  sourceText?: string;
   encoding: Encoding;
   newline: Newline;
   delimiter: Delimiter;
@@ -41,6 +43,8 @@ export type HistoryEntry = {
   colWidths?: ColumnWidthMap;
   selectedRows?: number[];
   selectedColumns?: number[];
+  validationChanges?: import("../lib/validationHistory").ValidationColumnChange[];
+  validationRemovedRules?: import("../lib/validation").ValidationRule[];
 };
 
 export type ColumnWidthMap = Record<number, number>;
@@ -73,3 +77,5 @@ export const EMPTY_SELECTION: Selection = {
   row: 0,
   col: 0,
 };
+
+export type CellEditIdentity = { documentId: string; rowId: string; columnId: string };

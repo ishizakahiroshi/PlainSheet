@@ -1,6 +1,7 @@
 use encoding_rs::{Encoding, EUC_JP, SHIFT_JIS, UTF_8, WINDOWS_1252};
 use std::borrow::Cow;
 use std::fs;
+use std::io::Read;
 use tauri_plugin_dialog::DialogExt;
 
 #[tauri::command]
@@ -32,6 +33,25 @@ async fn read_file(path: String) -> Result<DecodedText, String> {
     require_absolute(&path)?;
     let bytes = fs::read(&path).map_err(|error| format!("failed to read {path}: {error}"))?;
     decode_bytes(&bytes)
+}
+
+#[tauri::command]
+async fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
+    require_absolute(&path)?;
+    const LIMIT: u64 = 32 * 1024 * 1024;
+    let file = fs::File::open(&path).map_err(|error| format!("failed to open file: {error}"))?;
+    let metadata = file.metadata().map_err(|error| format!("failed to inspect file: {error}"))?;
+    if !metadata.is_file() || metadata.len() > LIMIT {
+        return Err("import preview requires a regular file of at most 32 MiB".to_string());
+    }
+    let mut bytes = Vec::new();
+    file.take(LIMIT + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("failed to read file: {error}"))?;
+    if bytes.len() as u64 > LIMIT {
+        return Err("import preview limit is 32 MiB".to_string());
+    }
+    Ok(bytes)
 }
 
 #[tauri::command]
@@ -156,6 +176,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             open_file_dialog,
             read_file,
+            read_file_bytes,
             write_file,
             save_file_dialog
         ])

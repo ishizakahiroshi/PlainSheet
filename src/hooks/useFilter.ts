@@ -68,6 +68,11 @@ export function useFilter() {
     setFilters(new Map());
   }, []);
 
+  const restore = useCallback(
+    (snapshot: [number, string[]][]) =>
+      setFilters(new Map(snapshot.map(([col, values]) => [col, new Set(values)]))),
+    [],
+  );
   const hasFilters = filters.size > 0;
 
   const getVisibleRows = useCallback(
@@ -78,11 +83,12 @@ export function useFilter() {
   return useMemo(
     () => ({
       filters,
+      restore,
       hasFilters,
       setColumnFilter,
       clearAll,
       getVisibleRows,
     }),
-    [filters, hasFilters, setColumnFilter, clearAll, getVisibleRows],
+    [filters, restore, hasFilters, setColumnFilter, clearAll, getVisibleRows],
   );
 }

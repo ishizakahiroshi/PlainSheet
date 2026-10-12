@@ -16,13 +16,21 @@ import {
   type ProvideEditorComponent,
 } from "@glideapps/glide-data-grid";
 import "@glideapps/glide-data-grid/dist/index.css";
-import { BUFFER_COLS, BUFFER_ROWS, MIN_GRID_COLS, MIN_GRID_ROWS } from "../types/sheet";
-import type { CellValue, ColumnWidthMap, Range } from "../types/sheet";
+import {
+  BUFFER_COLS,
+  BUFFER_ROWS,
+  MIN_GRID_COLS,
+  MIN_GRID_ROWS,
+  MAX_GRID_COLS,
+  MAX_GRID_ROWS,
+} from "../types/sheet";
+import type { CellValue, ColumnWidthMap, Range, CellEditIdentity } from "../types/sheet";
 import type { ContextMenuKind } from "./ContextMenu";
 import { columnName } from "../lib/columns";
 import { CellTextEditor, type RegisterEditorCommit } from "./CellTextEditor";
 import { dataEdge } from "../lib/gridOperations";
-import { fillSeries } from "../lib/autofill";
+import { translateFormula } from "../lib/formula";
+import { buildFillUpdates } from "../lib/autofill";
 
 type GlideSheetProps = {
   rows: CellValue[][];
@@ -43,14 +51,27 @@ type GlideSheetProps = {
   zebra: boolean;
   headerHighlight: boolean;
   freezeColumns?: number;
+  freezeRows?: number;
   zoom?: number;
-  onEdit: (row: number, col: number, value: string) => void;
+  fillMode?: "copy" | "series";
+  formulaEnabled?: boolean;
+  readOnly?: boolean;
+  displayValues?: (row: number, col: number) => string;
+  onFillPreview?: (updates: { row: number; col: number; value: string }[]) => void;
+  onCopy?: () => void;
+  onPasteText?: (text: string) => void;
+  onPasteHtml?: (html: string) => void;
+  onInputError?: (message: string) => void;
+  onEdit: (row: number, col: number, value: string, identity?: CellEditIdentity) => void;
+  getEditIdentity?: (row: number, col: number) => CellEditIdentity | undefined;
   onColumnResize: (col: number, width: number) => void;
   onSelectionChange: (selection: { row: number; col: number }, range: Range) => void;
   onRowsSelected?: (indexes: number[]) => void;
   onColumnsSelected?: (indexes: number[]) => void;
   onPasteGrid: (startRow: number, startCol: number, grid: CellValue[][]) => void;
-  onFill?: (updates: { row: number; col: number; value: string }[]) => void;
+  onFill?: (
+    updates: { row: number; col: number; value: string; identity?: CellEditIdentity }[],
+  ) => void;
   onCut?: () => void;
   onClear?: () => void;
   onColumnMove?: (from: number, to: number) => void;
@@ -61,6 +82,7 @@ type GlideSheetProps = {
     col: number,
     x: number,
     y: number,
+    preserveSelection?: boolean,
   ) => void;
   onHeaderMenuClick?: (
     col: number,
@@ -130,8 +152,19 @@ export function GlideSheet({
   zebra,
   headerHighlight,
   freezeColumns = 0,
+  freezeRows = 0,
   zoom = 1,
+  fillMode = "copy",
+  displayValues,
+  formulaEnabled = false,
+  readOnly = false,
+  onFillPreview,
+  onCopy,
+  onPasteText,
+  onPasteHtml,
+  onInputError,
   onEdit,
+  getEditIdentity,
   onColumnResize,
   onSelectionChange,
   onRowsSelected,
@@ -146,6 +179,7 @@ export function GlideSheet({
   onHeaderMenuClick,
 }: GlideSheetProps) {
   const ref = useRef<DataEditorRef>(null);
+  const [visibleColumns, setVisibleColumns] = useState({ start: 0, count: 8 });
   const f2EditingRef = useRef(false);
   const [gridSelection, setGridSelection] = useState<GridSelection>(EMPTY_SELECTION);
   const activeHitRef = useRef(activeSearchHit);
@@ -178,18 +212,41 @@ export function GlideSheet({
 
   const columns = useMemo<GridColumn[]>(
     () =>
-      Array.from({ length: Math.max(columnCount + BUFFER_COLS, MIN_GRID_COLS) }, (_, index) => ({
-        title: columnName(index),
-        id: String(index),
-        width: colWidths[index] ?? 120,
-        hasMenu: true,
-      })),
-    [columnCount, colWidths],
+      Array.from(
+        {
+          length: Math.min(
+            MAX_GRID_COLS,
+            Math.max(
+              columnCount + BUFFER_COLS,
+              MIN_GRID_COLS,
+              selection.col + 1,
+              (range?.endCol ?? 0) + 1,
+              (range?.startCol ?? 0) + 1,
+            ),
+          ),
+        },
+        (_, index) => ({
+          title: columnName(index),
+          id: String(index),
+          width: colWidths[index] ?? 120,
+          hasMenu: true,
+        }),
+      ),
+    [columnCount, colWidths, selection.col, range?.startCol, range?.endCol],
   );
 
   const rowCount = rowSourceIndexes
     ? Math.max(rows.length, 1)
-    : Math.max(rows.length + BUFFER_ROWS, MIN_GRID_ROWS);
+    : Math.min(
+        MAX_GRID_ROWS,
+        Math.max(
+          rows.length + BUFFER_ROWS,
+          MIN_GRID_ROWS,
+          selection.row + 1,
+          (range?.endRow ?? 0) + 1,
+          (range?.startRow ?? 0) + 1,
+        ),
+      );
   const rowHeight = Math.round(28 * zoom);
   const headerHeight = Math.round(32 * zoom);
   const fontSize = Math.max(11, Math.round(13 * zoom));
@@ -229,12 +286,13 @@ export function GlideSheet({
       return {
         kind: GridCellKind.Text,
         data,
-        displayData: data,
-        allowOverlay: toSourceRow(row) >= 0,
-        readonly: toSourceRow(row) < 0,
-      };
+        displayData: displayValues?.(toSourceRow(row), col) ?? data,
+        allowOverlay: !readOnly && toSourceRow(row) >= 0,
+        readonly: readOnly || toSourceRow(row) < 0,
+        editIdentity: getEditIdentity?.(toSourceRow(row), col),
+      } as GridCell & { editIdentity?: CellEditIdentity };
     },
-    [rows, toSourceRow],
+    [rows, toSourceRow, displayValues, readOnly, getEditIdentity],
   );
 
   const onCellEdited = useCallback(
@@ -243,7 +301,12 @@ export function GlideSheet({
         return;
       }
       const sourceRow = toSourceRow(cell[1]);
-      if (sourceRow >= 0) onEdit(sourceRow, cell[0], newValue.data);
+      if (sourceRow >= 0) {
+        const identity = (newValue as EditableGridCell & { editIdentity?: CellEditIdentity })
+          .editIdentity;
+        if (identity) onEdit(sourceRow, cell[0], newValue.data, identity);
+        else onEdit(sourceRow, cell[0], newValue.data);
+      }
     },
     [onEdit, toSourceRow],
   );
@@ -251,8 +314,8 @@ export function GlideSheet({
   const handleGridSelectionChange = useCallback(
     (next: GridSelection) => {
       if (rowSourceIndexes && rows.length === 0) return;
-      const maxRow = Math.max(0, rows.length + (rowSourceIndexes ? 0 : BUFFER_ROWS) - 1);
-      const maxCol = Math.max(0, columnCount + BUFFER_COLS - 1);
+      const maxRow = Math.max(0, rowCount - 1);
+      const maxCol = Math.max(0, columns.length - 1);
 
       const selectedRows = compactToIndexes(next.rows).filter((index) => index <= maxRow);
       const selectedCols = compactToIndexes(next.columns).filter((index) => index <= maxCol);
@@ -334,6 +397,8 @@ export function GlideSheet({
       columnCount,
       toSourceRow,
       rowSourceIndexes,
+      rowCount,
+      columns.length,
     ],
   );
 
@@ -386,6 +451,7 @@ export function GlideSheet({
       current: { cell: [col, row], range: { x: col, y: row, width: 1, height: 1 }, rangeStack: [] },
     });
     ref.current?.scrollTo(col, row);
+    ref.current?.focus();
   }, [focusCell?.nonce, focusCell?.row, focusCell?.col, toVisibleRow]);
 
   const rangeStartRow = range?.startRow;
@@ -393,8 +459,8 @@ export function GlideSheet({
   const rangeEndRow = range?.endRow;
   const rangeEndCol = range?.endCol;
   useEffect(() => {
-    const maxRow = Math.max(0, rows.length + (rowSourceIndexes ? 0 : BUFFER_ROWS) - 1);
-    const maxCol = Math.max(0, columnCount + BUFFER_COLS - 1);
+    const maxRow = Math.max(0, rowCount - 1);
+    const maxCol = Math.max(0, columns.length - 1);
     if (toVisibleRow(selection.row) < 0) {
       setGridSelection(EMPTY_SELECTION);
       return;
@@ -481,7 +547,36 @@ export function GlideSheet({
     rowSourceIndexes,
     selectedRowIndexes,
     selectedColumnIndexes,
+    rowCount,
+    columns.length,
   ]);
+
+  const fillUpdates = useCallback(
+    (source: Rectangle, dest: Rectangle, mode: "copy" | "series") => {
+      if (source.width * source.height > 500_000 || dest.width * dest.height > 500_000) {
+        onInputError?.("フィルは50万セルまで / Fill limit: 500,000 cells");
+        return [];
+      }
+      return buildFillUpdates(rowsRef.current, source, dest, { mode }).map((u) => {
+        const r =
+          source.y + ((((u.row - source.y) % source.height) + source.height) % source.height);
+        const c = source.x + ((((u.col - source.x) % source.width) + source.width) % source.width);
+        const raw = rowsRef.current[r]?.[c] ?? "";
+        return {
+          ...u,
+          row: toSourceRow(u.row),
+          value:
+            formulaEnabled && raw.startsWith("=")
+              ? translateFormula(raw, {
+                  rowDelta: toSourceRow(u.row) - toSourceRow(r),
+                  colDelta: u.col - c,
+                })
+              : u.value,
+        };
+      });
+    },
+    [formulaEnabled, toSourceRow, onInputError],
+  );
 
   const handleFillPattern = useCallback(
     (event: FillPatternEventArgs) => {
@@ -489,64 +584,13 @@ export function GlideSheet({
         return;
       }
       event.preventDefault();
-      const source = event.patternSource;
-      const dest = event.fillDestination;
-      const updates: { row: number; col: number; value: string }[] = [];
-      const data = rowsRef.current;
-
-      // Vertical fill (same columns as source, rows below/above).
-      if (dest.x === source.x && dest.width === source.width) {
-        for (let colOffset = 0; colOffset < source.width; colOffset += 1) {
-          const col = source.x + colOffset;
-          const sourceValues: string[] = [];
-          for (let rowOffset = 0; rowOffset < source.height; rowOffset += 1) {
-            sourceValues.push(data[source.y + rowOffset]?.[col] ?? "");
-          }
-          const filled = fillSeries(sourceValues, dest.height);
-          for (let rowOffset = 0; rowOffset < dest.height; rowOffset += 1) {
-            updates.push({
-              row: toSourceRow(dest.y + rowOffset),
-              col,
-              value: filled[rowOffset] ?? "",
-            });
-          }
-        }
-      } else if (dest.y === source.y && dest.height === source.height) {
-        // Horizontal fill.
-        for (let rowOffset = 0; rowOffset < source.height; rowOffset += 1) {
-          const visibleRow = source.y + rowOffset;
-          const sourceValues: string[] = [];
-          for (let colOffset = 0; colOffset < source.width; colOffset += 1) {
-            sourceValues.push(data[visibleRow]?.[source.x + colOffset] ?? "");
-          }
-          const filled = fillSeries(sourceValues, dest.width);
-          for (let colOffset = 0; colOffset < dest.width; colOffset += 1) {
-            updates.push({
-              row: toSourceRow(visibleRow),
-              col: dest.x + colOffset,
-              value: filled[colOffset] ?? "",
-            });
-          }
-        }
-      } else {
-        // Fallback: tile copy.
-        for (let rowOffset = 0; rowOffset < dest.height; rowOffset += 1) {
-          for (let colOffset = 0; colOffset < dest.width; colOffset += 1) {
-            const srcRow = source.y + (rowOffset % source.height);
-            const srcCol = source.x + (colOffset % source.width);
-            updates.push({
-              row: toSourceRow(dest.y + rowOffset),
-              col: dest.x + colOffset,
-              value: data[srcRow]?.[srcCol] ?? "",
-            });
-          }
-        }
-      }
+      const updates = fillUpdates(event.patternSource, event.fillDestination, fillMode);
       if (updates.length > 0) {
-        onFill(updates);
+        if (fillMode === "series" && onFillPreview) onFillPreview(updates);
+        else onFill(updates);
       }
     },
-    [onFill, toSourceRow],
+    [onFill, onFillPreview, fillMode, fillUpdates],
   );
 
   const handleKeyDownCapture = useCallback(
@@ -562,7 +606,41 @@ export function GlideSheet({
         f2EditingRef.current = true;
         return;
       }
+      if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+      if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+        event.preventDefault();
+        event.stopPropagation();
+        const row = gridSelection.current?.cell[1] ?? toVisibleRow(selection.row);
+        const col = gridSelection.current?.cell[0] ?? selection.col;
+        const columns = compactToIndexes(gridSelection.columns);
+        const selectedHeaderRows = compactToIndexes(gridSelection.rows);
+        const kind = columns.length ? "column" : selectedHeaderRows.length ? "row" : "cell";
+        onOpenContextMenu(
+          kind,
+          toSourceRow(selectedHeaderRows[0] ?? row),
+          columns[0] ?? col,
+          20,
+          120,
+          true,
+        );
+        return;
+      }
       const mod = event.ctrlKey || event.metaKey;
+      if (mod && event.key.toLowerCase() === "c" && onCopy) {
+        event.preventDefault();
+        event.stopPropagation();
+        onCopy();
+        return;
+      }
+      if (mod && ["d", "r"].includes(event.key.toLowerCase()) && gridSelection.current && onFill) {
+        event.preventDefault();
+        event.stopPropagation();
+        const dest = gridSelection.current.range;
+        const source =
+          event.key.toLowerCase() === "d" ? { ...dest, height: 1 } : { ...dest, width: 1 };
+        onFill(fillUpdates(source, dest, "copy"));
+        return;
+      }
       if (mod && event.key.toLowerCase() === "x" && onCut) {
         event.preventDefault();
         event.stopPropagation();
@@ -619,7 +697,20 @@ export function GlideSheet({
       handleGridSelectionChange({ ...EMPTY_SELECTION, current: { cell, range, rangeStack: [] } });
       ref.current?.scrollTo(next.col, next.row);
     },
-    [onCut, gridSelection, rows, columnCount, handleGridSelectionChange],
+    [
+      onCut,
+      onCopy,
+      onFill,
+      fillUpdates,
+      toSourceRow,
+      toVisibleRow,
+      selection,
+      onOpenContextMenu,
+      gridSelection,
+      rows,
+      columnCount,
+      handleGridSelectionChange,
+    ],
   );
 
   const textEditor = useCallback<ProvideEditorComponent<GridCell>>(
@@ -641,9 +732,80 @@ export function GlideSheet({
   );
 
   return (
-    <div className="glideSheet" onKeyDownCapture={handleKeyDownCapture}>
+    <div
+      className="glideSheet"
+      onKeyDownCapture={handleKeyDownCapture}
+      onPasteCapture={(event) => {
+        if (
+          !onPasteText ||
+          event.target instanceof HTMLInputElement ||
+          event.target instanceof HTMLTextAreaElement
+        )
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        const types = [...(event.clipboardData.types ?? [])];
+        const plain = event.clipboardData.getData("text/plain");
+        const html = event.clipboardData.getData("text/html");
+        if (types.includes("text/plain") || plain) onPasteText(plain);
+        else if (html && onPasteHtml) onPasteHtml(html);
+      }}
+    >
+      {freezeRows > 0 && (
+        <div className="frozenReference" aria-label="固定行の参照 / Frozen row references">
+          <span>
+            先頭{freezeRows}元行の表示対象だけ固定。編集は表から / Frozen references, edit in grid
+          </span>
+          <table>
+            <tbody>
+              {rows.flatMap((values, visibleRow) =>
+                toSourceRow(visibleRow) < freezeRows
+                  ? [
+                      <tr key={toSourceRow(visibleRow)}>
+                        <th scope="row">元{toSourceRow(visibleRow) + 1}</th>
+                        {Array.from(
+                          { length: Math.min(30, visibleColumns.count) },
+                          (_, offset) => visibleColumns.start + offset,
+                        ).map((col) => (
+                          <td key={col}>
+                            <button
+                              title={values[col] ?? ""}
+                              onClick={() => {
+                                onRowsSelected?.([]);
+                                onColumnsSelected?.([]);
+                                onSelectionChange({ row: toSourceRow(visibleRow), col }, null);
+                                ref.current?.scrollTo(col, visibleRow);
+                                ref.current?.focus();
+                              }}
+                            >
+                              {columnName(col)}: {values[col] ?? ""}
+                            </button>
+                          </td>
+                        ))}
+                      </tr>,
+                    ]
+                  : [],
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {rowSourceIndexes && (
+        <div role="status" className="rowOrientation">
+          表示{Math.max(0, toVisibleRow(selection.row)) + 1}行目 / 元の{selection.row + 1}行目 ·{" "}
+          {columnName(selection.col)}
+          {selection.row + 1}
+        </div>
+      )}
       <DataEditor
         ref={ref}
+        onVisibleRegionChanged={(region) =>
+          setVisibleColumns((prev) =>
+            prev.start === region.x && prev.count === region.width
+              ? prev
+              : { start: region.x, count: region.width },
+          )
+        }
         className="glideSheet__editor"
         width="100%"
         height="100%"
@@ -652,7 +814,7 @@ export function GlideSheet({
         theme={gridTheme}
         getRowThemeOverride={getRowThemeOverride}
         getCellContent={getCellContent}
-        keybindings={{ activateCell: "F2| |Enter|shift+Enter", downFill: true, rightFill: true }}
+        keybindings={{ activateCell: "F2| |Enter|shift+Enter", downFill: false, rightFill: false }}
         onFinishedEditing={() => {
           f2EditingRef.current = false;
         }}
@@ -668,6 +830,8 @@ export function GlideSheet({
                     row: toSourceRow(item.location[1]),
                     col: item.location[0],
                     value: item.value.data,
+                    identity: (item.value as EditableGridCell & { editIdentity?: CellEditIdentity })
+                      .editIdentity,
                   },
                 ]
               : [],
@@ -700,8 +864,8 @@ export function GlideSheet({
         onColumnResize={(_column, newSize, colIndex) => onColumnResize(colIndex, newSize)}
         onCellContextMenu={(cell, event) => {
           event.preventDefault();
-          const maxRow = Math.max(0, rows.length + (rowSourceIndexes ? 0 : BUFFER_ROWS) - 1);
-          const maxCol = Math.max(0, columnCount + BUFFER_COLS - 1);
+          const maxRow = Math.max(0, rowCount - 1);
+          const maxCol = Math.max(0, columns.length - 1);
           const visibleRow = Math.min(cell[1], maxRow);
           onOpenContextMenu(
             "cell",

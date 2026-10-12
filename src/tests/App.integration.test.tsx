@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 import App from "../App";
@@ -245,21 +245,25 @@ describe("production App wiring with a mocked canvas surface", () => {
     await load();
     act(() => grid().onEdit(1, 0, "edited"));
     fireEvent.click(screen.getByRole("button", { name: t("newTab") }));
-    vi.mocked(window.confirm).mockReturnValue(false);
     const event = { preventDefault: vi.fn() };
     await act(async () => {
       await native.handler!(event);
     });
     expect(event.preventDefault).toHaveBeenCalled();
     expect(native.destroy).not.toHaveBeenCalled();
-    vi.mocked(window.confirm).mockReturnValue(true).mockClear();
+    const firstDialog = screen.getByRole("dialog", { name: /Save before closing/ });
+    expect(within(firstDialog).getByText("sample.csv")).toBeInTheDocument();
+    fireEvent.click(within(firstDialog).getByRole("button", { name: /Back/ }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: t("windowClose") }));
-    expect(native.close).toHaveBeenCalledOnce();
+    expect(native.close).not.toHaveBeenCalled();
     await act(async () => {
       await native.handler!(event);
     });
-    expect(native.destroy).toHaveBeenCalledOnce();
-    expect(window.confirm).toHaveBeenCalledOnce();
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: /Discard and close/ }));
+    await waitFor(() => expect(native.destroy).toHaveBeenCalledOnce());
+    expect(window.confirm).not.toHaveBeenCalled();
   });
   it("blocks OS close during composition and commits a pending draft before asking to discard", async () => {
     Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
@@ -274,14 +278,17 @@ describe("production App wiring with a mocked canvas surface", () => {
     });
     expect(native.destroy).not.toHaveBeenCalled();
     expect(window.confirm).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.compositionEnd(input);
-    vi.mocked(window.confirm).mockReturnValue(false);
     await act(async () => {
       await native.handler!({ preventDefault: vi.fn() });
     });
     expect(grid().rows[1][0]).toBe("未確定");
-    expect(window.confirm).toHaveBeenCalledWith(t("confirmUnsaved"));
+    const dialog = screen.getByRole("dialog", { name: /Save before closing/ });
+    expect(within(dialog).getByText("sample.csv")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: /Back/ }));
     expect(native.destroy).not.toHaveBeenCalled();
+    expect(grid().rows[1][0]).toBe("未確定");
   });
   it("keeps the window open while saving and protects dirty state after save or destroy failure", async () => {
     Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
@@ -310,12 +317,17 @@ describe("production App wiring with a mocked canvas surface", () => {
     await act(async () => {
       await native.handler!({ preventDefault: vi.fn() });
     });
-    expect(screen.getByText(t("windowCloseFailed"))).toBeInTheDocument();
-    vi.mocked(window.confirm).mockReturnValue(false).mockClear();
+    fireEvent.click(screen.getByRole("button", { name: /Discard and close/ }));
+    await waitFor(() => expect(screen.getByText(t("windowCloseFailed"))).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Back/ }));
     await act(async () => {
       await native.handler!({ preventDefault: vi.fn() });
     });
-    expect(window.confirm).toHaveBeenCalledOnce();
+    expect(screen.getByRole("dialog", { name: /Save before closing/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { selected: true })).toHaveAccessibleName(
+      new RegExp(t("unsaved")),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Back/ }));
     expect(native.destroy).toHaveBeenCalledOnce();
   });
   it("closes clean documents without prompting and removes the OS listener on unmount", async () => {

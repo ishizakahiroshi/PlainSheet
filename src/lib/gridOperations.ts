@@ -1,3 +1,4 @@
+import { MAX_GRID_ROWS, MAX_GRID_COLS } from "../types/sheet";
 import type { CellValue, ColumnWidthMap, Range, Selection } from "../types/sheet";
 import { normalizeRange } from "./clipboard";
 import { cloneRows } from "../hooks/useSheet";
@@ -67,6 +68,12 @@ export function pasteIntoView(
   if (visible && (offset < 0 || offset + grid.length > visible.length)) return null;
   const destinations = grid.map((_, i) => (visible ? visible[offset + i] : startRow + i));
   const width = grid.reduce((max, row) => Math.max(max, row.length), 1);
+  if (
+    startCol + width > MAX_GRID_COLS ||
+    destinations.at(-1)! >= MAX_GRID_ROWS ||
+    grid.length * width > 500_000
+  )
+    return null;
   const next = cloneRows(rows);
   while (next.length <= destinations[destinations.length - 1]) next.push([]);
   grid.forEach((row, i) => {

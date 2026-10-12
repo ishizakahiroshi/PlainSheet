@@ -1,68 +1,76 @@
 import type { CellValue } from "../types/sheet";
+import { compareExactDecimals, parseExactDecimal } from "./decimal";
 
 export type SortDirection = "asc" | "desc";
+export type SortMode = "auto" | "text" | "numeric";
+export type SortKey = { colIndex: number; direction: SortDirection; mode?: SortMode };
+export type SortOptions = { headerRow?: boolean; mode?: SortMode };
 
-export type SortOptions = {
-  headerRow?: boolean;
-};
-
-/**
- * Sorts rows by a single column. Empty cells always sort to the end.
- * When every non-empty value is numeric, compares as numbers; otherwise localeCompare (ja).
- */
+/** Stable raw-string-preserving single-key sort. Empty cells always go last. */
 export function sortRows(
-  rows: CellValue[][],
+  rows: readonly (readonly CellValue[])[],
   colIndex: number,
   direction: SortDirection,
   options: SortOptions = {},
 ): CellValue[][] {
-  if (rows.length === 0 || colIndex < 0) {
-    return rows.map((row) => [...row]);
-  }
+  return sortRowsByKeys(rows, [{ colIndex, direction, mode: options.mode }], options);
+}
 
-  const headerRow = options.headerRow === true;
-  const header = headerRow && rows.length > 0 ? [...rows[0]!] : null;
-  const body = headerRow ? rows.slice(1) : rows.slice();
-  if (body.length === 0) {
-    return header ? [header] : [];
-  }
-
-  const numeric = body.every((row) => {
-    const value = (row[colIndex] ?? "").trim();
-    return value === "" || Number.isFinite(Number(value.replace(/,/g, "")));
-  });
-
-  const collator = new Intl.Collator("ja", { numeric: true, sensitivity: "base" });
-  const dir = direction === "asc" ? 1 : -1;
-
+/**
+ * Multi-key sort of complete rows, never a column-only shuffle. Auto chooses
+ * exact numeric comparison only when all nonempty values of that key parse.
+ * Auto preserves natural Japanese text ordering for mixed/text columns; explicit
+ * text mode disables natural numeric ordering. Numeric mode
+ * places valid numbers before nonnumeric text, which is compared as text;
+ * blanks remain last in either direction. Equal rows retain their input order.
+ */
+export function sortRowsByKeys(
+  rows: readonly (readonly CellValue[])[],
+  keys: readonly SortKey[],
+  options: Pick<SortOptions, "headerRow"> = {},
+): CellValue[][] {
+  const headerCount = options.headerRow && rows.length ? 1 : 0;
+  const body = rows.slice(headerCount);
+  const collator = new Intl.Collator("ja", { numeric: false, sensitivity: "base" });
+  const naturalCollator = new Intl.Collator("ja", { numeric: true, sensitivity: "base" });
+  const comparators = keys
+    .filter((key) => Number.isSafeInteger(key.colIndex) && key.colIndex >= 0)
+    .map((key) => {
+      const numeric =
+        key.mode === "numeric" ||
+        (key.mode !== "text" &&
+          body.every((row) => {
+            const value = (row[key.colIndex] ?? "").trim();
+            return value === "" || parseExactDecimal(value) !== null;
+          }));
+      return { key, numeric };
+    });
   const sorted = body
-    .map((row, index) => ({ row: [...row], index }))
+    .map((row, index) => ({ row, index }))
     .sort((a, b) => {
-      const aRaw = (a.row[colIndex] ?? "").trim();
-      const bRaw = (b.row[colIndex] ?? "").trim();
-      const aEmpty = aRaw === "";
-      const bEmpty = bRaw === "";
-      if (aEmpty && bEmpty) {
-        return a.index - b.index;
+      for (const { key, numeric } of comparators) {
+        const left = (a.row[key.colIndex] ?? "").trim();
+        const right = (b.row[key.colIndex] ?? "").trim();
+        if (left === "" && right === "") continue;
+        if (left === "") return 1;
+        if (right === "") return -1;
+        let compared: number;
+        if (numeric) {
+          const leftNumber = parseExactDecimal(left);
+          const rightNumber = parseExactDecimal(right);
+          if (leftNumber !== null && rightNumber === null) return -1;
+          if (leftNumber === null && rightNumber !== null) return 1;
+          compared =
+            leftNumber !== null && rightNumber !== null
+              ? compareExactDecimals(leftNumber, rightNumber)
+              : collator.compare(left, right);
+        } else {
+          compared = (key.mode === "text" ? collator : naturalCollator).compare(left, right);
+        }
+        if (compared !== 0) return compared * (key.direction === "asc" ? 1 : -1);
       }
-      if (aEmpty) {
-        return 1;
-      }
-      if (bEmpty) {
-        return -1;
-      }
-      let cmp: number;
-      if (numeric) {
-        cmp = Number(aRaw.replace(/,/g, "")) - Number(bRaw.replace(/,/g, ""));
-      } else {
-        cmp = collator.compare(aRaw, bRaw);
-      }
-      if (cmp === 0) {
-        return a.index - b.index;
-      }
-      return cmp * dir;
+      return a.index - b.index;
     })
-    .map((entry) => entry.row);
-
-  return header ? [header, ...sorted] : sorted;
+    .map(({ row }) => [...row]);
+  return headerCount ? [[...rows[0]!], ...sorted] : sorted;
 }

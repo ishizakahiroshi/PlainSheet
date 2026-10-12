@@ -79,7 +79,7 @@ export function FilterPopover({ state, rows, selected, onApply, onClose }: Filte
         top: Math.max(8, Math.min(state.y, window.innerHeight - 380)),
       }}
       onKeyDown={(event) => {
-        if (event.key === "Escape") {
+        if (event.key === "Escape" && !event.nativeEvent.isComposing && event.keyCode !== 229) {
           event.preventDefault();
           event.stopPropagation();
           onClose();

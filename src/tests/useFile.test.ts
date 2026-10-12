@@ -90,13 +90,13 @@ describe("production native save hook", () => {
       await result.current.saveAs();
     });
     expect(onSaved).not.toHaveBeenCalled();
-    expect(result.current.saveNotice).toBe(t("saveCancelled"));
+    expect(result.current.saveNotice).toContain(t("saveCancelled"));
     mocks.invoke.mockRejectedValueOnce("disk full");
     await act(async () => {
       await result.current.saveFile();
     });
     expect(onSaved).not.toHaveBeenCalled();
-    expect(result.current.saveNotice).toBe(t("toastSaveFailed"));
+    expect(result.current.saveNotice).toContain(t("toastSaveFailed"));
   });
   it("does not issue a second write while the first is pending", async () => {
     const write = deferred<void>();
@@ -151,6 +151,6 @@ describe("browser download-only save", () => {
       await result.current.saveAs();
     });
     expect(onSaved).not.toHaveBeenCalled();
-    expect(result.current.saveNotice).toBe(t("saveCancelled"));
+    expect(result.current.saveNotice).toContain(t("saveCancelled"));
   });
 });

@@ -11,6 +11,7 @@ import {
 import { parseTableText, serializeTableText, type SerializeOptions } from "../lib/formats";
 import { t } from "../lib/i18n";
 import { cloneRows } from "./useSheet";
+import type { ImportPreviewRequest, ImportPreviewResult } from "../lib/importPreview";
 import type { SaveCompletion, SaveSnapshot } from "../lib/saveState";
 import type { CellValue, Delimiter, FileFormat, SheetMeta } from "../types/sheet";
 
@@ -28,6 +29,17 @@ type UseFileOptions = {
   onToast: (message: string) => void;
   /** Called when a filesystem path is opened/saved (Tauri recent-files list). */
   onRecentPath?: (path: string) => void;
+  requestImportPreview?: (request: ImportPreviewRequest) => Promise<ImportPreviewResult | null>;
+  beforeSave?: (
+    snapshot: SaveSnapshot,
+    chooseName: boolean,
+  ) => Promise<"save" | "saveAs" | "cancel">;
+};
+
+export type SaveOutcome = {
+  status: "direct" | "download" | "cancelled" | "failed" | "busy";
+  snapshot?: SaveSnapshot;
+  savedMeta?: SheetMeta;
 };
 
 type FileDropPayload =
@@ -44,8 +56,12 @@ export function useFile({
   getMeta,
   onToast,
   onRecentPath,
+  requestImportPreview,
+  beforeSave,
 }: UseFileOptions) {
   const saveBusyRef = useRef(false);
+  const savingTargetRef = useRef("");
+  const [saveTargetId, setSaveTargetId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
   const loadGenerationRef = useRef(0);
@@ -57,6 +73,24 @@ export function useFile({
     async (path: string) => {
       const generation = ++loadGenerationRef.current;
       try {
+        if (requestImportPreview) {
+          const bytes = new Uint8Array(await invoke<number[]>("read_file_bytes", { path }));
+          if (generation !== loadGenerationRef.current) return;
+          const result = await requestImportPreview({ bytes, fileName: fileNameFromPath(path) });
+          if (!result || generation !== loadGenerationRef.current) return;
+          loadData(result.rows, {
+            filePath: path,
+            fileName: fileNameFromPath(path),
+            encoding: result.encoding,
+            newline: result.newline,
+            delimiter: result.delimiter,
+            format: result.format,
+            sourceText: result.content,
+          });
+          onRecentPath?.(path);
+          onToast(t("toastLoaded"));
+          return;
+        }
         const { content, encoding } = await invoke<{ content: string; encoding: string }>(
           "read_file",
           { path },
@@ -85,14 +119,26 @@ export function useFile({
         onToast(t("toastLoadFailed"));
       }
     },
-    [loadData, onToast, onRecentPath],
+    [loadData, onToast, onRecentPath, requestImportPreview],
   );
   loadPathRef.current = loadPath;
 
   const openFile = useCallback(async () => {
     try {
       if (!isTauriRuntime()) {
-        await openBrowserFile(loadData, onToast);
+        const generation = ++loadGenerationRef.current;
+        const current = () => generation === loadGenerationRef.current;
+        await openBrowserFile(
+          (rows, meta) => {
+            if (current()) loadData(rows, meta);
+          },
+          (message) => {
+            if (current()) onToast(message);
+          },
+          requestImportPreview
+            ? (request) => (current() ? requestImportPreview(request) : Promise.resolve(null))
+            : undefined,
+        );
         return;
       }
       const path = await invoke<string | null>("open_file_dialog");
@@ -102,37 +148,61 @@ export function useFile({
     } catch {
       onToast(t("toastLoadFailed"));
     }
-  }, [loadData, loadPath, onToast]);
+  }, [loadData, loadPath, onToast, requestImportPreview]);
 
   const performSave = useCallback(
-    async (chooseName: boolean) => {
+    async (
+      chooseName: boolean,
+      explicitSnapshot?: SaveSnapshot,
+      derivedRows?: CellValue[][],
+    ): Promise<SaveOutcome> => {
       if (saveBusyRef.current) {
-        setSaveNotice(t("saving"));
-        return;
+        setSaveNotice(`${savingTargetRef.current}: ${t("saving")}`);
+        return { status: "busy" };
       }
       // Capture before any await: dialogs and I/O must never read another tab's live data.
-      const snapshot: SaveSnapshot = {
-        documentId: getDocumentId(),
-        rows: cloneRows(getRows()),
-        meta: { ...getMeta() },
-      };
+      const snapshot: SaveSnapshot = explicitSnapshot
+        ? {
+            ...explicitSnapshot,
+            rows: cloneRows(explicitSnapshot.rows),
+            meta: { ...explicitSnapshot.meta },
+          }
+        : {
+            documentId: getDocumentId(),
+            rows: cloneRows(getRows()),
+            meta: { ...getMeta() },
+          };
       const currentMeta = snapshot.meta;
-      const defaultName = currentMeta.fileName ?? "untitled.csv";
+      const defaultName = derivedRows
+        ? (currentMeta.fileName ?? "untitled.csv").replace(/(\.[^.]+)?$/, ".values$1")
+        : (currentMeta.fileName ?? "untitled.csv");
+      const operation = chooseName ? "Save As" : "Save";
+      const targetLabel = `${defaultName} (${operation})`;
+      savingTargetRef.current = targetLabel;
+      setSaveTargetId(snapshot.documentId);
       saveBusyRef.current = true;
       setSaving(true);
       setSaveNotice(null);
       try {
+        if (beforeSave) {
+          const choice = await beforeSave(snapshot, chooseName);
+          if (choice === "cancel") {
+            setSaveNotice(`${targetLabel}: ${t("saveCancelled")}`);
+            return { status: "cancelled", snapshot };
+          }
+          if (choice === "saveAs") chooseName = true;
+        }
         if (!isTauriRuntime()) {
           const fileName = chooseName ? window.prompt(t("downloadAs"), defaultName) : defaultName;
           if (!fileName) {
-            setSaveNotice(t("saveCancelled"));
-            return;
+            setSaveNotice(`${targetLabel}: ${t("saveCancelled")}`);
+            return { status: "cancelled", snapshot };
           }
           const format = chooseName ? formatFromPath(fileName) : (currentMeta.format ?? "csv");
           const delimiter =
             format === currentMeta.format ? currentMeta.delimiter : delimiterFromFormat(format);
           const content = serializeTableText(
-            snapshot.rows,
+            derivedRows ?? snapshot.rows,
             format,
             delimiter,
             currentMeta.newline,
@@ -141,22 +211,40 @@ export function useFile({
           const encoding =
             encodingForFormat(format, currentMeta.encoding) === "utf-8-bom" ? "utf-8-bom" : "utf-8";
           downloadText((encoding === "utf-8-bom" ? "\uFEFF" : "") + content, fileName);
-          onSaved({
-            snapshot,
-            patch: { fileName, format, delimiter, encoding },
-            method: "download",
-          });
+          if (!derivedRows)
+            onSaved({
+              snapshot,
+              patch: { fileName, format, delimiter, encoding },
+              method: "download",
+            });
           setSaveNotice(t("browserDownloadNotice", { name: fileName }));
           onToast(t("toastDownloadStarted"));
-          return;
+          return {
+            status: "download",
+            snapshot,
+            savedMeta: { ...snapshot.meta, fileName, format, delimiter, encoding },
+          };
         }
         const path =
           chooseName || !currentMeta.filePath
             ? await invoke<string | null>("save_file_dialog", { defaultName })
             : currentMeta.filePath;
         if (!path) {
-          setSaveNotice(t("saveCancelled"));
-          return;
+          setSaveNotice(`${targetLabel}: ${t("saveCancelled")}`);
+          return { status: "cancelled", snapshot };
+        }
+        if (derivedRows && path === currentMeta.filePath) {
+          setSaveNotice(
+            `${targetLabel}: 計算値は原本と異なる名前へ書き出してください / Choose a different file for values`,
+          );
+          return { status: "cancelled", snapshot };
+        }
+        if (chooseName && path === currentMeta.filePath && beforeSave) {
+          const choice = await beforeSave(snapshot, false);
+          if (choice !== "save") {
+            setSaveNotice(`${targetLabel}: ${t("saveCancelled")}`);
+            return { status: "cancelled", snapshot };
+          }
         }
         const format =
           chooseName || !currentMeta.filePath
@@ -166,43 +254,71 @@ export function useFile({
           format === currentMeta.format ? currentMeta.delimiter : delimiterFromFormat(format);
         const encoding = encodingForFormat(format, currentMeta.encoding);
         const content = serializeTableText(
-          snapshot.rows,
+          derivedRows ?? snapshot.rows,
           format,
           delimiter,
           currentMeta.newline,
           serializeOptions(currentMeta),
         );
         await invoke("write_file", { path, content, encoding });
-        onSaved({
-          snapshot,
-          patch: { filePath: path, fileName: fileNameFromPath(path), format, delimiter, encoding },
-          method: "direct",
-        });
+        if (!derivedRows)
+          onSaved({
+            snapshot,
+            patch: {
+              filePath: path,
+              fileName: fileNameFromPath(path),
+              format,
+              delimiter,
+              encoding,
+              sourceText: content,
+            },
+            method: "direct",
+          });
         onRecentPath?.(path);
         setSaveNotice(t("savedFileNotice", { name: fileNameFromPath(path) }));
         onToast(t("toastSaved"));
+        return {
+          status: "direct",
+          snapshot,
+          savedMeta: {
+            ...snapshot.meta,
+            filePath: path,
+            fileName: fileNameFromPath(path),
+            format,
+            delimiter,
+            encoding,
+            sourceText: content,
+          },
+        };
       } catch (error) {
         const message = saveErrorMessage(error);
-        setSaveNotice(message);
-        onToast(message);
+        setSaveNotice(`${targetLabel}: ${message}`);
+        onToast(`${targetLabel}: ${message}`);
+        return { status: "failed", snapshot };
       } finally {
         saveBusyRef.current = false;
         setSaving(false);
       }
     },
-    [getDocumentId, getMeta, getRows, onSaved, onToast, onRecentPath],
+    [getDocumentId, getMeta, getRows, onSaved, onToast, onRecentPath, beforeSave],
   );
 
-  const saveAs = useCallback(() => performSave(true), [performSave]);
-  const saveFile = useCallback(() => performSave(false), [performSave]);
+  const saveAs = useCallback(async () => {
+    await performSave(true);
+  }, [performSave]);
+  const saveFile = useCallback(async () => {
+    await performSave(false);
+  }, [performSave]);
 
   const loadSample = useCallback(async () => {
+    const generation = ++loadGenerationRef.current;
     try {
       const response = await fetch(`${import.meta.env.BASE_URL}sample.csv`);
       if (!response.ok) {
         throw new Error("sample file is unavailable");
       }
       const content = await response.text();
+      if (generation !== loadGenerationRef.current) return;
       const rows = parseTableText(content, "csv", ",");
       loadData(rows, {
         fileName: "sample.csv",
@@ -226,7 +342,20 @@ export function useFile({
         event.preventDefault();
         const file = event.dataTransfer?.files[0];
         if (file) {
-          void loadBrowserFile(file, loadData, onToastRef.current);
+          const generation = ++loadGenerationRef.current;
+          const current = () => generation === loadGenerationRef.current;
+          void loadBrowserFile(
+            file,
+            (rows, meta) => {
+              if (current()) loadData(rows, meta);
+            },
+            (message) => {
+              if (current()) onToastRef.current(message);
+            },
+            requestImportPreview
+              ? (request) => (current() ? requestImportPreview(request) : Promise.resolve(null))
+              : undefined,
+          );
         }
       };
       window.addEventListener("dragover", handleDragOver);
@@ -265,11 +394,13 @@ export function useFile({
         unlisten();
       }
     };
-  }, [loadData]);
+  }, [loadData, requestImportPreview]);
 
   return {
     saving,
     saveNotice,
+    saveTargetId,
+    saveDocument: performSave,
     openFile,
     saveFile,
     saveAs,
@@ -324,6 +455,7 @@ function extractDropPath(payload: FileDropPayload): string | null {
 async function openBrowserFile(
   loadData: UseFileOptions["loadData"],
   onToast: UseFileOptions["onToast"],
+  requestImportPreview?: UseFileOptions["requestImportPreview"],
 ): Promise<void> {
   const fsWindow = fsAccessWindow();
   if (fsWindow?.showOpenFilePicker) {
@@ -336,7 +468,7 @@ async function openBrowserFile(
         return;
       }
       const file = await handle.getFile();
-      await loadBrowserFile(file, loadData, onToast);
+      await loadBrowserFile(file, loadData, onToast, requestImportPreview);
       return;
     } catch (error) {
       // User cancel → AbortError; fall through only for unexpected errors.
@@ -356,7 +488,7 @@ async function openBrowserFile(
     input.click();
   });
   if (file) {
-    await loadBrowserFile(file, loadData, onToast);
+    await loadBrowserFile(file, loadData, onToast, requestImportPreview);
   }
 }
 
@@ -364,8 +496,27 @@ async function loadBrowserFile(
   file: File,
   loadData: UseFileOptions["loadData"],
   onToast: UseFileOptions["onToast"],
+  requestImportPreview?: UseFileOptions["requestImportPreview"],
 ): Promise<void> {
   try {
+    if (requestImportPreview) {
+      if (file.size > 32 * 1024 * 1024) throw new Error("Import preview limit is 32 MiB");
+      const result = await requestImportPreview({
+        bytes: new Uint8Array(await file.arrayBuffer()),
+        fileName: file.name,
+      });
+      if (!result) return;
+      loadData(result.rows, {
+        fileName: file.name,
+        encoding: result.encoding,
+        delimiter: result.delimiter,
+        newline: result.newline,
+        format: result.format,
+        sourceText: result.content,
+      });
+      onToast(t("toastLoaded"));
+      return;
+    }
     const format = formatFromPath(file.name);
     let content = "";
     let rows: CellValue[][];

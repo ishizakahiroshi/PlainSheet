@@ -23,6 +23,7 @@ export type ContextMenuState = {
   col: number;
   x: number;
   y: number;
+  preserveSelection?: boolean;
 } | null;
 
 type ContextMenuProps = {
