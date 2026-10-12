@@ -1,62 +1,152 @@
+import {
+  formatExactDecimal,
+  offsetExactDecimal,
+  parseExactDecimal,
+  subtractExactDecimals,
+  type ExactDecimal,
+} from "./decimal";
+
+export type FillMode = "copy" | "series";
+export type FillRectangle = { x: number; y: number; width: number; height: number };
+export type FillUpdate = { row: number; col: number; value: string };
+
+const modulo = (value: number, size: number) => ((value % size) + size) % size;
+
 /**
- * Builds a fill series from source values for the given target length.
- * - Pure numbers → arithmetic sequence (step from last two values, or +1)
- * - Trailing number ("item1") → increments the trailing number
- * - Otherwise → cycle-copy the source values
+ * Builds the continuation after the seeds (the historical helper contract).
+ * Explicit copy repeats raw values. Series uses exact decimal arithmetic or a
+ * same-prefix digit suffix; date-looking values and other text repeat verbatim.
  */
-export function fillSeries(sourceValues: string[], targetCount: number): string[] {
-  if (targetCount <= 0) {
-    return [];
-  }
-  if (sourceValues.length === 0) {
-    return Array.from({ length: targetCount }, () => "");
-  }
-
-  const numbers = sourceValues.map(parsePlainNumber);
-  if (numbers.every((value) => value !== null)) {
-    const numeric = numbers as number[];
-    const step =
-      numeric.length >= 2 ? numeric[numeric.length - 1]! - numeric[numeric.length - 2]! : 1;
-    const start = numeric[numeric.length - 1]!;
-    return Array.from({ length: targetCount }, (_, index) => String(start + step * (index + 1)));
-  }
-
-  const trailing = sourceValues.map(parseTrailingNumber);
-  if (trailing.every((value) => value !== null)) {
-    const entries = trailing as { prefix: string; number: number; width: number }[];
-    const last = entries[entries.length - 1]!;
-    const prev = entries.length >= 2 ? entries[entries.length - 2]! : null;
-    const step = prev ? last.number - prev.number : 1;
-    return Array.from({ length: targetCount }, (_, index) => {
-      const next = last.number + step * (index + 1);
-      const body = String(Math.abs(next)).padStart(last.width, "0");
-      return `${last.prefix}${next < 0 ? `-${body}` : body}`;
-    });
-  }
-
-  return Array.from({ length: targetCount }, (_, index) => sourceValues[index % sourceValues.length]!);
+export function fillSeries(
+  sourceValues: readonly string[],
+  targetCount: number,
+  mode: FillMode = "series",
+): string[] {
+  if (!Number.isSafeInteger(targetCount) || targetCount <= 0) return [];
+  const at = seriesValueAt(sourceValues, mode);
+  return Array.from({ length: targetCount }, (_, index) => at(sourceValues.length + index));
 }
 
-function parsePlainNumber(value: string): number | null {
-  const trimmed = value.trim().replace(/,/g, "");
-  if (trimmed === "" || !/^-?\d+(\.\d+)?$/.test(trimmed)) {
-    return null;
+/**
+ * Glide's destination includes the seed rectangle. Return only extension cells,
+ * never writes to seeds. Coordinates stay in the caller's visible row space;
+ * the caller must map each result to its source row exactly once before commit.
+ * Both upward/leftward and downward/rightward fill follow the same axis. A
+ * two-axis destination tiles raw values rather than inventing a 2-D series.
+ */
+export function buildFillUpdates(
+  rows: readonly (readonly string[])[],
+  source: FillRectangle,
+  destination: FillRectangle,
+  options: { mode?: FillMode } = {},
+): FillUpdate[] {
+  if (!validRectangle(source) || !validRectangle(destination)) return [];
+  const mode = options.mode ?? "series";
+  const vertical = destination.x === source.x && destination.width === source.width;
+  const horizontal = destination.y === source.y && destination.height === source.height;
+  const readers = new Map<number, (index: number) => string>();
+  if (vertical) {
+    for (let col = source.x; col < source.x + source.width; col += 1) {
+      readers.set(
+        col,
+        seriesValueAt(
+          Array.from(
+            { length: source.height },
+            (_, offset) => rows[source.y + offset]?.[col] ?? "",
+          ),
+          mode,
+        ),
+      );
+    }
+  } else if (horizontal) {
+    for (let row = source.y; row < source.y + source.height; row += 1) {
+      readers.set(
+        row,
+        seriesValueAt(
+          Array.from({ length: source.width }, (_, offset) => rows[row]?.[source.x + offset] ?? ""),
+          mode,
+        ),
+      );
+    }
   }
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) ? parsed : null;
+  const updates: FillUpdate[] = [];
+  for (let row = destination.y; row < destination.y + destination.height; row += 1) {
+    for (let col = destination.x; col < destination.x + destination.width; col += 1) {
+      if (
+        row >= source.y &&
+        row < source.y + source.height &&
+        col >= source.x &&
+        col < source.x + source.width
+      )
+        continue;
+      const value = vertical
+        ? readers.get(col)!(row - source.y)
+        : horizontal
+          ? readers.get(row)!(col - source.x)
+          : (rows[source.y + modulo(row - source.y, source.height)]?.[
+              source.x + modulo(col - source.x, source.width)
+            ] ?? "");
+      updates.push({ row, col, value });
+    }
+  }
+  return updates;
 }
 
-function parseTrailingNumber(
-  value: string,
-): { prefix: string; number: number; width: number } | null {
-  const match = value.match(/^(.*?)(-?\d+)$/);
-  if (!match) {
-    return null;
+function validRectangle(rectangle: FillRectangle): boolean {
+  return (
+    [rectangle.x, rectangle.y, rectangle.width, rectangle.height].every(Number.isSafeInteger) &&
+    rectangle.x >= 0 &&
+    rectangle.y >= 0 &&
+    rectangle.width > 0 &&
+    rectangle.height > 0
+  );
+}
+
+function seriesValueAt(values: readonly string[], mode: FillMode): (index: number) => string {
+  if (values.length === 0) return () => "";
+  const cycle = (index: number) => values[modulo(index, values.length)]!;
+  if (mode === "copy") return cycle;
+  const numbers = values.map(parseExactDecimal);
+  if (numbers.every((value): value is ExactDecimal => value !== null)) {
+    return exactSequence(values, numbers);
   }
-  const digits = match[2]!.replace("-", "");
-  const number = Number(match[2]);
-  if (!Number.isFinite(number)) {
-    return null;
+  // Dates are intentionally text: the user can copy them without a guessed
+  // calendar or accidentally treating the date's '-' as a negative suffix.
+  if (values.some((value) => /^\s*\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:\D|$)/.test(value))) return cycle;
+  const suffixes = values.map((value) => value.match(/^(.*?\D)(\d+)$/));
+  if (
+    suffixes.every((value) => value !== null) &&
+    suffixes.every((value) => value![1] === suffixes[0]![1]) &&
+    /\p{L}/u.test(suffixes[0]![1]!)
+  ) {
+    const prefix = suffixes[0]![1]!;
+    const digits = suffixes.map((value) => value![2]!);
+    const suffixNumbers = digits.map(parseExactDecimal);
+    if (!suffixNumbers.every((value): value is ExactDecimal => value !== null)) return cycle;
+    const at = exactSequence(digits, suffixNumbers);
+    return (index) =>
+      index >= 0 && index < values.length ? values[index]! : `${prefix}${at(index)}`;
   }
-  return { prefix: match[1]!, number, width: digits.length };
+  return cycle;
+}
+
+function exactSequence(
+  values: readonly string[],
+  numbers: ExactDecimal[],
+): (index: number) => string {
+  const lastIndex = numbers.length - 1;
+  const unit = { coefficient: 1n, scale: 0 };
+  const forwardStep =
+    numbers.length > 1 ? subtractExactDecimals(numbers[lastIndex]!, numbers[lastIndex - 1]!) : unit;
+  const backwardStep = numbers.length > 1 ? subtractExactDecimals(numbers[1]!, numbers[0]!) : unit;
+  return (index) => {
+    if (index >= 0 && index <= lastIndex) return values[index]!;
+    const anchor = index < 0 ? 0 : lastIndex;
+    const result = offsetExactDecimal(
+      numbers[anchor]!,
+      index < 0 ? backwardStep : forwardStep,
+      index - anchor,
+    );
+    return formatExactDecimal(result, values[anchor]);
+  };
 }

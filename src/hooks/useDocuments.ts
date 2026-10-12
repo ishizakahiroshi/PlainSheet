@@ -242,7 +242,16 @@ export function useDocuments(initial?: DocumentSnapshot) {
     );
   }, []);
 
+  const replaceDocumentRows = useCallback((id: string, rows: CellValue[][]) => {
+    setDocuments((current) =>
+      current.map((doc) =>
+        doc.id === id ? { ...doc, rows: cloneRows(rows), meta: { ...doc.meta, dirty: true } } : doc,
+      ),
+    );
+  }, []);
+
   return {
+    replaceDocumentRows,
     completeSave,
     documents,
     activeId: active.id,

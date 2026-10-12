@@ -17,6 +17,7 @@ import {
   Plus,
   MoveHorizontal,
 } from "lucide-react";
+import { shortcutLabel } from "../lib/commands";
 import { t } from "../lib/i18n";
 import { ActionButton } from "./ActionButton";
 
@@ -65,7 +66,7 @@ export function Toolbar(p: ToolbarProps) {
           className="toolbar__button"
           type="button"
           aria-label={t("open")}
-          tooltip={`${t("open")} (Ctrl+O)`}
+          tooltip={`${t("open")} (${shortcutLabel("open")})`}
           onClick={p.onOpen}
         >
           <FolderOpen size={16} aria-hidden="true" />
@@ -75,7 +76,7 @@ export function Toolbar(p: ToolbarProps) {
           className="toolbar__button toolbar__button--primary"
           type="button"
           aria-label={saveLabel}
-          tooltip={`${saveLabel} (Ctrl+S)`}
+          tooltip={`${saveLabel} (${shortcutLabel("save")})`}
           disabled={p.saving}
           onClick={p.onSave}
         >
@@ -86,7 +87,7 @@ export function Toolbar(p: ToolbarProps) {
           className="toolbar__button"
           type="button"
           aria-label={saveAsLabel}
-          tooltip={`${saveAsLabel} (Ctrl+Shift+S)`}
+          tooltip={`${saveAsLabel} (${shortcutLabel("saveAs")})`}
           disabled={p.saving}
           onClick={p.onSaveAs}
         >
@@ -99,7 +100,7 @@ export function Toolbar(p: ToolbarProps) {
           className="toolbar__button"
           type="button"
           aria-label={t("search")}
-          tooltip={`${t("search")} (Ctrl+F)`}
+          tooltip={`${t("search")} (${shortcutLabel("find")})`}
           onClick={p.onSearch}
         >
           <Search size={16} aria-hidden="true" />
@@ -109,7 +110,7 @@ export function Toolbar(p: ToolbarProps) {
           className="toolbar__iconButton"
           type="button"
           aria-label={t("undo")}
-          tooltip={`${t("undo")} (Ctrl+Z)`}
+          tooltip={`${t("undo")} (${shortcutLabel("undo")})`}
           disabled={!p.canUndo}
           onClick={p.onUndo}
         >
@@ -119,7 +120,7 @@ export function Toolbar(p: ToolbarProps) {
           className="toolbar__iconButton"
           type="button"
           aria-label={t("redo")}
-          tooltip={`${t("redo")} (Ctrl+Y / Ctrl+Shift+Z)`}
+          tooltip={`${t("redo")} (${shortcutLabel("redo")})`}
           disabled={!p.canRedo}
           onClick={p.onRedo}
         >
@@ -129,7 +130,7 @@ export function Toolbar(p: ToolbarProps) {
           className="toolbar__button"
           type="button"
           aria-label={t("copyPlainText")}
-          tooltip={`${t("copyPlainText")} (Ctrl+C)`}
+          tooltip={`${t("copyPlainText")} (${shortcutLabel("copy")})`}
           onClick={p.onCopy}
         >
           <Clipboard size={16} aria-hidden="true" />

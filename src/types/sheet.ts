@@ -24,6 +24,8 @@ export type FileFormat = "csv" | "tsv" | "markdown" | "json" | "yaml";
 export type SheetMeta = {
   filePath?: string;
   fileName?: string;
+  /** Session-only original text used to explain lossy export; never embedded in CSV. */
+  sourceText?: string;
   encoding: Encoding;
   newline: Newline;
   delimiter: Delimiter;

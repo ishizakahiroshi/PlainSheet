@@ -10,7 +10,7 @@ export function useDialogFocus(ref: RefObject<HTMLElement>, open: boolean): void
         dialog.querySelectorAll<HTMLElement>(
           'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]',
         ),
-      );
+      ).sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
     elements()[0]?.focus();
     const trap = (event: KeyboardEvent) => {
       if (event.key !== "Tab") return;

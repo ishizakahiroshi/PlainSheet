@@ -1,6 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDialogFocus } from "../hooks/useDialogFocus";
 import { isTauriRuntime } from "../hooks/useFile";
+import { shortcutLabel, currentPlatform, type Platform } from "../lib/commands";
 import { t } from "../lib/i18n";
 
 type HelpModalProps = {
@@ -27,13 +28,14 @@ const shortcuts = [
 
 export function HelpModal({ open, onClose }: HelpModalProps) {
   const dialog = useRef<HTMLElement>(null);
+  const [platform, setPlatform] = useState<Platform>(currentPlatform);
   useDialogFocus(dialog, open);
   useEffect(() => {
     if (!open) {
       return;
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !event.isComposing && event.keyCode !== 229) {
         event.preventDefault();
         onClose();
       }
@@ -60,11 +62,33 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
         <p>{isTauriRuntime() ? t("appSaveHint") : t("browserSaveHint")}</p>
         <p>{t("sortSaveHelp")}</p>
         <p>{t("searchScopeHelp")}</p>
+        <label>
+          キー表示 / Platform{" "}
+          <select value={platform} onChange={(e) => setPlatform(e.target.value as Platform)}>
+            <option value="windows">Windows / Linux (Ctrl)</option>
+            <option value="mac">macOS (Command)</option>
+          </select>
+        </label>
+        <p>
+          macOSのCommand+Hはアプリ非表示のため保持します。OS・ブラウザ・配列によりキーが優先される場合はボタンを使用してください。
+        </p>
+        <p>
+          操作を探す: {shortcutLabel("commands", platform)}
+          。列の操作は名前付きボタンまたはShift+F10。
+        </p>
         <table className="shortcutTable">
           <tbody>
             {shortcuts.map(([key, label]) => (
               <tr key={key}>
-                <th>{key}</th>
+                <th>
+                  {key === "Ctrl+H"
+                    ? shortcutLabel("replace", platform)
+                    : key === "Ctrl+Z / Ctrl+Y"
+                      ? `${shortcutLabel("undo", platform)} / ${shortcutLabel("redo", platform)}`
+                      : platform === "mac"
+                        ? key.replaceAll("Ctrl", "Command")
+                        : key}
+                </th>
                 <td>{t(label)}</td>
               </tr>
             ))}

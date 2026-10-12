@@ -1,3 +1,4 @@
+import { FeatureDialog } from "./components/FeatureDialog";
 import { FilterX } from "lucide-react";
 import { ActionButton } from "./components/ActionButton";
 import { flushSync } from "react-dom";
@@ -9,8 +10,13 @@ import {
   moveColumn,
   sameRows,
 } from "./lib/gridOperations";
-import { completedSaveMeta } from "./lib/saveState";
-import { collectSearchMatches } from "./lib/search";
+import { ImportPreview } from "./components/ImportPreview";
+import type { ImportPreviewRequest, ImportPreviewResult } from "./lib/importPreview";
+import { createConversionPreview } from "./lib/conversionPreview";
+import { completedSaveMeta, sameSaveContent, type SaveSnapshot } from "./lib/saveState";
+import { CommandSearch } from "./components/CommandSearch";
+import { type Command, dispatchCommand, shortcutCommand } from "./lib/commands";
+import { collectSearchMatches, compileSearch, replaceSearchValue } from "./lib/search";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -28,10 +34,39 @@ import { TabBar } from "./components/TabBar";
 import { TitleBar } from "./components/TitleBar";
 import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
-import { parseClipboardText, rangeTsv, normalizeRange } from "./lib/clipboard";
+import {
+  createClipboardSnapshot,
+  resolveClipboardText,
+  clipboardNeedsFormatChoice,
+  normalizeRange,
+  type ClipboardSnapshot,
+  type ClipboardFormat,
+} from "./lib/clipboard";
 import { setLocale, t } from "./lib/i18n";
 import { parseCellRef } from "./lib/cellref";
-import { sortRows, type SortDirection } from "./lib/sort";
+import { NamedViewsPanel } from "./components/NamedViewsPanel";
+import { namedViewStore, viewMatchesCurrent } from "./lib/namedViews";
+import { SharingPanel } from "./components/SharingPanel";
+import { useCollaboration } from "./hooks/useCollaboration";
+import {
+  activeIds,
+  insertAxisActions,
+  deleteAxisActions,
+  sharedDocumentRows,
+} from "./lib/collaboration";
+import { CleanupPanel } from "./components/CleanupPanel";
+import { ValidationPanel } from "./components/ValidationPanel";
+import { RecoveryPanel } from "./components/RecoveryPanel";
+import { createRecoveryStore, type RecoveryState } from "./lib/recovery";
+import { validateMutation, type ValidationRule, type ValidationReport } from "./lib/validation";
+import {
+  evaluateFormulaSheet,
+  exportFormulaRows,
+  rewriteFormulasForStructure,
+  translateFormula,
+} from "./lib/formula";
+import { createDocumentView, type DocumentView } from "./lib/viewState";
+import { sortRows, sortRowsByKeys, type SortKey, type SortDirection } from "./lib/sort";
 import { MAX_ZOOM, MIN_ZOOM, pushRecentFile, ZOOM_STEP } from "./lib/settings";
 import { useDocuments, type ActiveDocumentLive, type DocumentSnapshot } from "./hooks/useDocuments";
 import { isTauriRuntime, useFile } from "./hooks/useFile";
@@ -54,12 +89,101 @@ export default function App() {
   const workspace = useDocuments();
   const { settings, update: updateSettings } = useSettings();
   const filter = useFilter();
+  const viewStatesRef = useRef(new Map<string, DocumentView>());
+  const [view, setView] = useState<DocumentView>(createDocumentView);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const filterRef = useRef(filter.filters);
+  filterRef.current = filter.filters;
+  const [rulesById, setRulesById] = useState<Record<string, ValidationRule[]>>({});
+  const rules = rulesById[workspace.activeId] ?? [];
+  const [validationReport, setValidationReport] = useState<ValidationReport | null>(null);
+  const [validationOpen, setValidationOpen] = useState(false);
+  const [cleanupOpen, setCleanupOpen] = useState<{
+    rows: CellValue[][];
+    cells: Selection[];
+    documentId: string;
+  } | null>(null);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [sharingOpen, setSharingOpen] = useState(false);
+  const [namedViewsOpen, setNamedViewsOpen] = useState(false);
+  const [activeViewById, setActiveViewById] = useState<Record<string, string | null>>({});
+  const [recoveryStore] = useState(() => {
+    try {
+      return createRecoveryStore(window.localStorage, isTauriRuntime() ? "desktop" : "browser");
+    } catch {
+      return createRecoveryStore(
+        {
+          getItem() {
+            throw new Error("Storage unavailable");
+          },
+          setItem() {
+            throw new Error("Storage unavailable");
+          },
+          removeItem() {
+            throw new Error("Storage unavailable");
+          },
+        },
+        isTauriRuntime() ? "desktop" : "browser",
+      );
+    }
+  });
+  const [recoveryState, setRecoveryState] = useState<RecoveryState | null>(() => {
+    const result = recoveryStore.inspect();
+    return result.ok ? result.value : null;
+  });
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  useEffect(() => {
+    const result = recoveryStore.inspect();
+    if (result.ok && result.value.enabled && result.value.drafts.length) setRecoveryOpen(true);
+  }, [recoveryStore]);
+  const [sortOpen, setSortOpen] = useState(false);
+  const [sortKeys, setSortKeys] = useState<SortKey[]>([
+    { colIndex: 0, direction: "asc", mode: "auto" },
+  ]);
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [filterPopover, setFilterPopover] = useState<FilterPopoverState>(null);
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchFocusNonce, setSearchFocusNonce] = useState(0);
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [searchScope, setSearchScope] = useState<"sheet" | "visible" | "selection">("visible");
+  const [searchSelection, setSearchSelection] = useState<{
+    documentId: string;
+    cells: Set<string>;
+    label: string;
+  } | null>(null);
+  const checkpointsRef = useRef(new Map<string, { rows: CellValue[][]; meta: SheetMeta }>());
+  const [importRequest, setImportRequest] = useState<{
+    request: ImportPreviewRequest;
+    resolve: (value: ImportPreviewResult | null) => void;
+  } | null>(null);
+  const [savePreview, setSavePreview] = useState<{
+    name: string;
+    detail: string;
+    resolve: (value: "save" | "saveAs" | "cancel") => void;
+  } | null>(null);
+  const [closeRequest, setCloseRequest] = useState<{
+    ids: string[];
+    window: boolean;
+    downloaded?: boolean;
+  } | null>(null);
+  const [closeBusy, setCloseBusy] = useState(false);
+  const copiedOriginRef = useRef<{ rows: number[]; columns: number[] } | null>(null);
+  const clipboardSnapshotRef = useRef<ClipboardSnapshot | null>(null);
+  const [pastePreview, setPastePreview] = useState<{
+    text: string;
+    apply: (format: ClipboardFormat) => void;
+  } | null>(null);
+  const [pasteFormat, setPasteFormat] = useState<ClipboardFormat>("single-column");
+  const [fillMode, setFillMode] = useState<"copy" | "series">("copy");
+  const [pendingPreview, setPendingPreview] = useState<{
+    title: string;
+    detail: string;
+    apply: () => void;
+  } | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -172,6 +296,42 @@ export default function App() {
     }, 2000);
   }, []);
 
+  const collaboration = useCollaboration({
+    activeId: workspace.activeId,
+    getRows: (id) =>
+      id === activeDocumentIdRef.current
+        ? rowsRef.current
+        : documentsRef.current.find((d) => d.id === id)?.rows,
+    applyRows: (id, rows) => {
+      workspace.replaceDocumentRows(id, rows);
+      if (id === activeDocumentIdRef.current) {
+        sheet.replaceRows(rows, true, false);
+        setSearchSelection(null);
+      }
+    },
+    onError: showToast,
+  });
+  const sharingHistory = collaboration.state?.snapshot?.history ?? [];
+  const canUndo = collaboration.client
+    ? !collaboration.readOnly &&
+      sharingHistory.some(
+        (e) =>
+          e.memberId === collaboration.state?.memberId &&
+          !e.undoOf &&
+          !sharingHistory.some((u) => u.undoOf === e.id),
+      )
+    : history.canUndo;
+  const canRedo = collaboration.client
+    ? !collaboration.readOnly && sharingHistory.some((e) => Boolean(e.undoOf))
+    : history.canRedo;
+  const replaceRows = (next: CellValue[][], dirty = true, recalcWidths = false) => {
+    if (collaboration.client) {
+      collaboration.replaceMatrix(next);
+      return;
+    }
+    sheet.replaceRows(next, dirty, recalcWidths);
+  };
+
   const finishPendingEdit = useCallback(() => {
     let ready = true;
     flushSync(() => {
@@ -195,10 +355,22 @@ export default function App() {
 
   const applyDocument = useCallback(
     (doc: DocumentSnapshot) => {
+      viewStatesRef.current.set(activeDocumentIdRef.current, {
+        ...viewRef.current,
+        filters: [...filterRef.current].map(([col, values]) => [col, [...values]]),
+      });
+      const nextView = viewStatesRef.current.get(doc.id) ?? createDocumentView();
+      setView(nextView);
+      filter.restore(nextView.filters);
       sheet.restoreState(doc.rows, doc.meta, doc.colWidths);
       history.restore(doc.history.undo, doc.history.redo);
       selectionState.setSelectionRange(doc.selection, doc.range);
-      filter.clearAll();
+      setSearchSelection(null);
+      setValidationReport(null);
+      setCleanupOpen(null);
+      setSortOpen(false);
+      setPendingPreview(null);
+      setPastePreview(null);
       setFocusCell(null);
       setSelectedRows([]);
       setSelectedColumns([]);
@@ -226,6 +398,8 @@ export default function App() {
       if (!finishPendingEdit()) return;
       if (isBlankStarter()) {
         workspace.replaceActiveContent(rows, meta);
+        setView(createDocumentView());
+        viewStatesRef.current.delete(activeDocumentIdRef.current);
         sheet.loadData(rows, meta);
         history.reset();
         selectionState.setSelection({ row: 0, col: 0 });
@@ -251,7 +425,39 @@ export default function App() {
   const file = useFile({
     loadData: loadIntoWorkspace,
     getDocumentId: () => activeDocumentIdRef.current,
+    requestImportPreview: (request) =>
+      new Promise((resolve) => {
+        setImportRequest((previous) => {
+          previous?.resolve(null);
+          return { request, resolve };
+        });
+      }),
+    beforeSave: async (snapshot, chooseName) => {
+      if (chooseName || !isTauriRuntime() || !snapshot.meta.filePath || !snapshot.meta.sourceText)
+        return "save";
+      const preview = createConversionPreview({
+        content: snapshot.meta.sourceText,
+        format: snapshot.meta.format ?? "csv",
+        rows: snapshot.rows,
+        delimiter: snapshot.meta.delimiter,
+        newline: snapshot.meta.newline,
+        omitEmptyCells: snapshot.meta.omitEmptyCells,
+      });
+      if (!preview.hasLoss) return "save";
+      return new Promise((resolve) =>
+        setSavePreview({
+          name: snapshot.meta.fileName ?? "untitled",
+          detail: JSON.stringify(preview, null, 2),
+          resolve,
+        }),
+      );
+    },
     onSaved: (completion) => {
+      if (completion.method === "direct")
+        checkpointsRef.current.set(completion.snapshot.documentId, {
+          rows: cloneRows(completion.snapshot.rows),
+          meta: { ...completion.snapshot.meta, ...completion.patch },
+        });
       workspace.completeSave(completion);
       if (activeDocumentIdRef.current === completion.snapshot.documentId) {
         sheet.setMeta(completedSaveMeta(rowsRef.current, metaRef.current, completion));
@@ -285,7 +491,15 @@ export default function App() {
     const dirty =
       metaRef.current.dirty ||
       documentsRef.current.some((doc) => doc.id !== activeDocumentIdRef.current && doc.meta.dirty);
-    if (dirty && !window.confirm(t("confirmUnsaved"))) return false;
+    if (dirty) {
+      const ids = documentsRef.current
+        .filter((doc) =>
+          doc.id === activeDocumentIdRef.current ? metaRef.current.dirty : doc.meta.dirty,
+        )
+        .map((doc) => doc.id);
+      setCloseRequest({ ids, window: true });
+      return false;
+    }
     closeApprovedRef.current = true;
     return true;
   }, [finishPendingEdit, showToast]);
@@ -327,6 +541,14 @@ export default function App() {
   const newFile = useCallback(() => {
     if (!finishPendingEdit()) return;
     if (isBlankStarter()) {
+      setView(createDocumentView());
+      viewStatesRef.current.delete(activeDocumentIdRef.current);
+      checkpointsRef.current.delete(activeDocumentIdRef.current);
+      setRulesById((current) => {
+        const next = { ...current };
+        delete next[activeDocumentIdRef.current];
+        return next;
+      });
       sheet.loadData([[""]], { fileName: undefined, format: "csv", delimiter: "," });
       history.reset();
       selectionState.setSelection({ row: 0, col: 0 });
@@ -361,25 +583,121 @@ export default function App() {
   const closeTab = useCallback(
     (id: string) => {
       if (!finishPendingEdit()) return;
+      if (collaboration.hasSession(id)) {
+        showToast(
+          "共有から退出してからタブを閉じてください / Leave sharing before closing the tab",
+        );
+        if (id === workspace.activeId) setSharingOpen(true);
+        return;
+      }
       const target = workspace.documents.find((doc) => doc.id === id);
       if (!target) {
         return;
       }
       const dirty = id === workspace.activeId ? metaRef.current.dirty : target.meta.dirty;
-      if (dirty && !window.confirm(t("confirmCloseTab"))) {
+      if (saveRequestsRef.current > 0 || file.saving) {
+        showToast(t("saving"));
+        return;
+      }
+      if (dirty) {
+        setCloseRequest({ ids: [id], window: false });
         return;
       }
       const result = workspace.closeDocument(id, getLive());
       if (result.closed && result.next) {
+        namedViewStore.forgetDocument(id);
+        viewStatesRef.current.delete(id);
+        checkpointsRef.current.delete(id);
         applyDocument(result.next);
       }
     },
-    [workspace, getLive, applyDocument, finishPendingEdit],
+    [workspace, getLive, applyDocument, finishPendingEdit, file.saving, showToast],
   );
 
+  const finishClose = async () => {
+    if (!closeRequest || closeBusy || saveRequestsRef.current > 0 || !finishPendingEdit()) return;
+    if (closeRequest.window) {
+      closeApprovedRef.current = true;
+      try {
+        await getCurrentWindow().destroy();
+        setCloseRequest(null);
+      } catch {
+        closeApprovedRef.current = false;
+        showToast(t("windowCloseFailed"));
+      }
+    } else {
+      const result = workspace.closeDocument(closeRequest.ids[0], getLive());
+      if (result.closed && result.next) applyDocument(result.next);
+      setCloseRequest(null);
+    }
+  };
+  const saveThenClose = async () => {
+    if (!closeRequest || closeBusy || !finishPendingEdit()) return;
+    setCloseBusy(true);
+    saveRequestsRef.current += 1;
+    let downloaded = false;
+    let success = true;
+    for (const id of closeRequest.ids) {
+      const doc = documentsRef.current.find((item) => item.id === id);
+      if (!doc) continue;
+      const snapshot: SaveSnapshot = {
+        documentId: id,
+        rows: id === activeDocumentIdRef.current ? rowsRef.current : doc.rows,
+        meta: id === activeDocumentIdRef.current ? metaRef.current : doc.meta,
+      };
+      const outcome = await file.saveDocument(false, snapshot);
+      if (outcome.status !== "direct" && outcome.status !== "download") {
+        success = false;
+        break;
+      }
+      const live =
+        id === activeDocumentIdRef.current
+          ? { rows: rowsRef.current, meta: metaRef.current }
+          : documentsRef.current.find((d) => d.id === id);
+      if (!live || !sameSaveContent(live.rows, live.meta, snapshot)) {
+        showToast("保存中に変更されました。閉じずに内容を確認してください。");
+        success = false;
+        break;
+      }
+      downloaded ||= outcome.status === "download";
+    }
+    saveRequestsRef.current -= 1;
+    setCloseBusy(false);
+    if (!success) return;
+    if (downloaded) {
+      setCloseRequest({ ...closeRequest, downloaded: true });
+      return;
+    }
+    if (closeRequest.window) {
+      closeApprovedRef.current = true;
+      try {
+        await getCurrentWindow().destroy();
+        setCloseRequest(null);
+      } catch {
+        closeApprovedRef.current = false;
+        showToast(t("windowCloseFailed"));
+      }
+    } else {
+      const result = workspace.closeDocument(closeRequest.ids[0], getLive());
+      if (result.closed && result.next) applyDocument(result.next);
+      setCloseRequest(null);
+    }
+  };
+
+  useEffect(() => {
+    const checkpoint = checkpointsRef.current.get(workspace.activeId);
+    if (!checkpoint) return;
+    const dirty = !sameSaveContent(sheet.rows, sheet.meta, checkpoint);
+    if (dirty !== sheet.meta.dirty) sheet.setMeta({ dirty });
+  }, [sheet.rows, sheet.meta, workspace.activeId]);
+
   const visibleRows = useMemo(
-    () => filter.getVisibleRows(sheet.rows, settings.useHeaderRow),
-    [filter, sheet.rows, settings.useHeaderRow],
+    () => filter.getVisibleRows(sheet.rows, view.useHeaderRow),
+    [filter, sheet.rows, view.useHeaderRow],
+  );
+  const formulaEvaluation = useMemo(
+    () => evaluateFormulaSheet(sheet.rows, { enabled: view.formulaEnabled }),
+    [sheet.rows, view.formulaEnabled],
   );
   const displayRows = useMemo(() => visibleRows.map((row) => row.values), [visibleRows]);
   const rowSourceIndexes = useMemo(
@@ -409,10 +727,51 @@ export default function App() {
     [rowSourceIndexes],
   );
 
-  const searchResult = useMemo(
-    () => collectSearchMatches(sheet.rows, buildMatcher(query, searchOptions), visibleSet),
-    [sheet.rows, query, searchOptions, visibleSet],
+  const compiledSearch = useMemo(() => compileSearch(query, searchOptions), [query, searchOptions]);
+  const inSearchScope = useCallback(
+    (row: number, col: number) =>
+      searchScope === "sheet" ||
+      (searchScope === "visible"
+        ? !visibleSet || visibleSet.has(row)
+        : searchSelection?.documentId === workspace.activeId &&
+          searchSelection.cells.has(`${row}:${col}`)),
+    [searchScope, visibleSet, searchSelection, workspace.activeId],
   );
+  const searchResult = useMemo(
+    () => collectSearchMatches(sheet.rows, compiledSearch.matcher, null, inSearchScope),
+    [sheet.rows, compiledSearch, inSearchScope],
+  );
+  const changeSearchScope = (scope: "sheet" | "visible" | "selection") => {
+    if (scope === "selection") {
+      const range = normalizeRange(selectionToRange(selectionRef.current, rangeRef.current));
+      const indexes = selectionIndexes(
+        rowsRef.current,
+        range,
+        visibleMapRef.current,
+        selectedRowsRef.current,
+        selectedColumnsRef.current,
+      );
+      const cells = new Set(indexes.rows.flatMap((r) => indexes.columns.map((c) => `${r}:${c}`)));
+      setSearchSelection({
+        documentId: activeDocumentIdRef.current,
+        cells,
+        label: `${referenceForSelection(selectionRef.current, rangeRef.current)} (${cells.size} cells)`,
+      });
+    }
+    setSearchScope(scope);
+    setActiveSearchIndex(0);
+  };
+  const openSearch = () => {
+    if (!finishPendingEdit()) return;
+    setSearchOpen(true);
+    setSearchFocusNonce((n) => n + 1);
+  };
+  const invalidateSearchScope = () => {
+    setSearchSelection(null);
+    if (searchScope === "selection")
+      showToast("選択範囲を再設定してください / Reset search selection");
+  };
+
   const searchHits = searchResult.hits;
   const searchHitSet = useMemo(
     () => new Set(searchHits.map((hit) => `${hit.row}:${hit.col}`)),
@@ -438,6 +797,7 @@ export default function App() {
   const selectedReference = referenceForSelection(selectionState.selection, selectionState.range);
 
   const recordBeforeChange = useCallback(() => {
+    if (collaboration.client) return;
     history.record(sheet.rows, selectionState.selection, {
       range: selectionState.range,
       colWidths: sheet.colWidths,
@@ -452,9 +812,42 @@ export default function App() {
     sheet.colWidths,
     selectedRows,
     selectedColumns,
+    collaboration.client,
   ]);
 
+  const validateNext = (next: CellValue[][]) => {
+    if (collaboration.readOnly) {
+      showToast("閲覧専用または権限失効 / Read-only sharing session");
+      return false;
+    }
+    const report = validateMutation(sheet.rows, next, rules);
+    setValidationReport(report.totalIssues || report.ruleErrors.length ? report : null);
+    if (!report.allowed) {
+      showToast("入力ルールにより操作全体を拒否しました / Entire change rejected by validation");
+      return false;
+    }
+    return true;
+  };
+
+  useEffect(() => {
+    if (!recoveryState?.enabled || !sheet.meta.dirty) return;
+    const id = workspace.activeId;
+    const rows = sheet.rows;
+    const meta = sheet.meta;
+    const timer = window.setTimeout(() => {
+      const result = recoveryStore.writeSnapshot({ documentId: id, rows, meta });
+      if (!result.ok) setRecoveryError(result.error);
+      else {
+        setRecoveryError(null);
+        const current = recoveryStore.inspect();
+        if (current.ok) setRecoveryState(current.value);
+      }
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [sheet.rows, sheet.meta, workspace.activeId, recoveryState?.enabled, recoveryStore]);
+
   const replaceRowsFromHistory = (entry: HistoryEntry) => {
+    invalidateSearchScope();
     sheet.restoreState(
       entry.rows,
       { ...sheet.meta, dirty: true },
@@ -468,8 +861,13 @@ export default function App() {
   const commitCell = (row: number, col: number, value: string, reselect: boolean) => {
     const previousValue = sheet.rows[row]?.[col] ?? "";
     if (previousValue !== value) {
+      const next = cloneRows(sheet.rows);
+      while (next.length <= row) next.push([]);
+      while (next[row].length <= col) next[row].push("");
+      next[row][col] = value;
+      if (!validateNext(next)) return;
       recordBeforeChange();
-      sheet.updateCell(row, col, value);
+      replaceRows(next, true, false);
     }
     if (reselect) {
       selectionState.selectCell(row, col, false);
@@ -480,8 +878,13 @@ export default function App() {
     if (workspace.activeId !== activeDocumentIdRef.current || row < 0) return;
     const previousValue = sheet.rows[row]?.[col] ?? "";
     if (previousValue !== value) {
+      const next = cloneRows(sheet.rows);
+      while (next.length <= row) next.push([]);
+      while (next[row].length <= col) next[row].push("");
+      next[row][col] = value;
+      if (!validateNext(next)) return;
       recordBeforeChange();
-      sheet.updateCell(row, col, value);
+      replaceRows(next, true, false);
     }
   };
 
@@ -489,16 +892,34 @@ export default function App() {
     const selected =
       overrideRange ?? selectionToRange(selectionState.selection, selectionState.range);
     const normalized = normalizeRange(selected);
-    const indexes = selectionIndexes(
-      sheet.rows,
-      normalized,
-      rowSourceIndexes,
-      overrideRange ? [] : selectedRows,
-      overrideRange ? [] : selectedColumns,
-    );
+    const rowCount = rowSourceIndexes
+      ? rowSourceIndexes.filter((r) => r >= normalized.startRow && r <= normalized.endRow).length
+      : (overrideRange ? 0 : selectedRows.length) || normalized.endRow - normalized.startRow + 1;
+    const colCount =
+      (overrideRange ? 0 : selectedColumns.length) || normalized.endCol - normalized.startCol + 1;
+    if (rowCount * colCount > 500_000) {
+      showToast("コピーは50万セルまで / Copy limit: 500,000 cells");
+      return false;
+    }
+    const indexes = {
+      rows: rowSourceIndexes
+        ? rowSourceIndexes.filter(
+            (r) =>
+              r >= normalized.startRow &&
+              r <= normalized.endRow &&
+              (overrideRange || !selectedRows.length || selectedRows.includes(r)),
+          )
+        : !overrideRange && selectedRows.length
+          ? selectedRows
+          : Array.from({ length: rowCount }, (_, n) => normalized.startRow + n),
+      columns:
+        !overrideRange && selectedColumns.length
+          ? selectedColumns
+          : Array.from({ length: colCount }, (_, n) => normalized.startCol + n),
+    };
     if (indexes.rows.length === 0 || indexes.columns.length === 0) return false;
-    const text = rangeTsv(
-      indexes.rows.map((row) => indexes.columns.map((col) => sheet.rows[row][col] ?? "")),
+    const snapshot = createClipboardSnapshot(
+      indexes.rows.map((row) => indexes.columns.map((col) => sheet.rows[row]?.[col] ?? "")),
       {
         startCol: 0,
         endCol: indexes.columns.length - 1,
@@ -511,7 +932,9 @@ export default function App() {
       return false;
     }
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(snapshot.text);
+      clipboardSnapshotRef.current = snapshot;
+      copiedOriginRef.current = indexes;
       showToast(
         t("toastCopiedRange", {
           rows: indexes.rows.length,
@@ -559,8 +982,9 @@ export default function App() {
       overrideRange ? [] : selectedColumns,
     );
     if (sameRows(sheet.rows, next)) return;
+    if (!validateNext(next)) return;
     recordBeforeChange();
-    sheet.replaceRows(next, true, false);
+    replaceRows(next, true, false);
   };
 
   const cutSelection = async (overrideRange?: Exclude<Range, null>) => {
@@ -588,8 +1012,9 @@ export default function App() {
       return;
     }
     if (!sameRows(sheet.rows, pasted.rows)) {
+      if (!validateNext(pasted.rows)) return;
       recordBeforeChange();
-      sheet.replaceRows(pasted.rows, true, false);
+      replaceRows(pasted.rows, true, false);
     }
     selectionState.selectRange(pasted.range);
     setSelectedRows([]);
@@ -613,10 +1038,92 @@ export default function App() {
         showToast(t("clipboardContextChanged"));
         return;
       }
-      pasteGrid(row, col, parseClipboardText(text));
+      acceptClipboardText(text, row, col, context);
     } catch {
       showToast(t("toastClipboardUnavailable"));
     }
+  };
+
+  const acceptClipboardText = (
+    text: string,
+    row = selectionRef.current.row,
+    col = selectionRef.current.col,
+    context = clipboardContext(),
+  ) => {
+    const apply = (format: ClipboardFormat = "auto") => {
+      if (!clipboardContextValid(context)) {
+        showToast(t("clipboardContextChanged"));
+        return;
+      }
+      let grid = resolveClipboardText(text, clipboardSnapshotRef.current ?? undefined, format);
+      if (
+        view.formulaEnabled &&
+        clipboardSnapshotRef.current?.text === text &&
+        copiedOriginRef.current
+      ) {
+        const origin = copiedOriginRef.current;
+        const offset = rowSourceIndexes?.indexOf(row) ?? row;
+        grid = grid.map((values, r) =>
+          values.map((value, c) =>
+            translateFormula(value, {
+              rowDelta: (rowSourceIndexes?.[offset + r] ?? row + r) - origin.rows[r],
+              colDelta: col + c - origin.columns[c],
+            }),
+          ),
+        );
+      }
+      pasteGrid(row, col, grid);
+    };
+    if (clipboardSnapshotRef.current?.text !== text && clipboardNeedsFormatChoice(text)) {
+      setPasteFormat("single-column");
+      setPastePreview({ text, apply });
+    } else apply();
+  };
+
+  const applyUpdates = (updates: { row: number; col: number; value: string }[]) => {
+    if (
+      workspace.activeId !== activeDocumentIdRef.current ||
+      sheet.rows !== rowsRef.current ||
+      rowSourceIndexes !== visibleMapRef.current
+    ) {
+      showToast(t("clipboardContextChanged"));
+      return;
+    }
+    if (!updates.length || updates.some((u) => u.row < 0 || (visibleSet && !visibleSet.has(u.row))))
+      return;
+    if (updates.every((u) => (sheet.rows[u.row]?.[u.col] ?? "") === u.value)) return;
+    const next = cloneRows(sheet.rows);
+    for (const u of updates) {
+      while (next.length <= u.row) next.push([]);
+      while (next[u.row].length <= u.col) next[u.row].push("");
+      next[u.row][u.col] = u.value;
+    }
+    if (!validateNext(next)) return;
+    recordBeforeChange();
+    replaceRows(next, true, false);
+  };
+
+  const previewUpdates = (updates: { row: number; col: number; value: string }[]) => {
+    const context = clipboardContext();
+    setPendingPreview({
+      title: "連番の確認 / Fill series",
+      detail:
+        `元のセルは変更しません。${updates.length} cells. 数値は正確な10進数、同じ接頭語の番号は連番、日付風・不明な文字列はコピーします。\n` +
+        updates
+          .slice(0, 12)
+          .map(
+            (u) =>
+              `${columnName(u.col)}${u.row + 1}: ${sheet.rows[u.row]?.[u.col] ?? ""} → ${u.value}`,
+          )
+          .join("\n"),
+      apply: () => {
+        if (!clipboardContextValid(context)) {
+          showToast(t("clipboardContextChanged"));
+          return;
+        }
+        applyUpdates(updates);
+      },
+    });
   };
 
   const openContextMenu = (
@@ -687,6 +1194,10 @@ export default function App() {
   };
 
   const ensureRowOpsAllowed = (): boolean => {
+    if (collaboration.readOnly) {
+      showToast("閲覧専用 / Read-only");
+      return false;
+    }
     if (filter.hasFilters) {
       showToast(t("toastFilterBlocksRowOps"));
       return false;
@@ -702,8 +1213,47 @@ export default function App() {
       return;
     }
     const base = contextMenu?.row ?? selectionState.selection.row;
+    if (collaboration.client) {
+      const doc = collaboration.client.getDocument()!;
+      const index = Math.min(base + offset, activeIds(doc, "row").length);
+      collaboration.structure(
+        insertAxisActions(doc, "row", index, rowsToInsert),
+        view.formulaEnabled
+          ? (rows) =>
+              rewriteFormulasForStructure(rows, {
+                type: "insert",
+                axis: "row",
+                index,
+                count: rowsToInsert,
+              })
+          : undefined,
+      );
+      invalidateSearchScope();
+      return;
+    }
     recordBeforeChange();
-    sheet.insertRows(base + offset, rowsToInsert);
+    invalidateSearchScope();
+    if (view.formulaEnabled) {
+      const index = Math.max(0, Math.min(base + offset, sheet.rows.length));
+      const next = cloneRows(sheet.rows);
+      next.splice(
+        index,
+        0,
+        ...Array.from({ length: rowsToInsert }, () =>
+          Array.from({ length: Math.max(1, sheet.columnCount) }, () => ""),
+        ),
+      );
+      replaceRows(
+        rewriteFormulasForStructure(next, {
+          type: "insert",
+          axis: "row",
+          index,
+          count: rowsToInsert,
+        }),
+        true,
+        false,
+      );
+    } else sheet.insertRows(base + offset, rowsToInsert);
   };
 
   const insertColumn = (offset: 0 | 1) => {
@@ -711,8 +1261,51 @@ export default function App() {
       return;
     }
     const base = contextMenu?.col ?? selectionState.selection.col;
+    setRulesById((current) => ({ ...current, [workspace.activeId]: [] }));
+    if (rules.length)
+      showToast(
+        "列構造が変わるため入力ルールを解除しました / Rules cleared after column structure change",
+      );
+    if (collaboration.client) {
+      const doc = collaboration.client.getDocument()!;
+      const index = Math.min(base + offset, activeIds(doc, "column").length);
+      collaboration.structure(
+        insertAxisActions(doc, "column", index, colsToInsert),
+        view.formulaEnabled
+          ? (rows) =>
+              rewriteFormulasForStructure(rows, {
+                type: "insert",
+                axis: "col",
+                index,
+                count: colsToInsert,
+              })
+          : undefined,
+      );
+      invalidateSearchScope();
+      return;
+    }
     recordBeforeChange();
-    sheet.insertColumns(base + offset, colsToInsert);
+    invalidateSearchScope();
+    if (view.formulaEnabled) {
+      const index = Math.max(0, Math.min(base + offset, sheet.columnCount));
+      const next = sheet.rows.map((row) => {
+        const copy = [...row];
+        while (copy.length < index) copy.push("");
+        copy.splice(index, 0, ...Array.from({ length: colsToInsert }, () => ""));
+        return copy;
+      });
+      sheet.insertColumns(base + offset, colsToInsert);
+      replaceRows(
+        rewriteFormulasForStructure(next, {
+          type: "insert",
+          axis: "col",
+          index,
+          count: colsToInsert,
+        }),
+        true,
+        false,
+      );
+    } else sheet.insertColumns(base + offset, colsToInsert);
   };
 
   const deleteRowWithConfirm = () => {
@@ -729,8 +1322,46 @@ export default function App() {
           showToast(t("clipboardContextChanged"));
           return;
         }
+        if (collaboration.client) {
+          const doc = collaboration.client.getDocument()!;
+          collaboration.structure(
+            deleteAxisActions(doc, "row", indexes),
+            view.formulaEnabled
+              ? (rows) =>
+                  [...new Set(indexes)]
+                    .sort((a, b) => b - a)
+                    .reduce(
+                      (next, index) =>
+                        rewriteFormulasForStructure(next, {
+                          type: "delete",
+                          axis: "row",
+                          index,
+                          count: 1,
+                        }),
+                      rows,
+                    )
+              : undefined,
+          );
+          invalidateSearchScope();
+          return;
+        }
         recordBeforeChange();
-        sheet.deleteRows(indexes);
+        invalidateSearchScope();
+        if (view.formulaEnabled) {
+          let next = cloneRows(sheet.rows);
+          for (const index of [...new Set(indexes)]
+            .filter((n) => n >= 0 && n < next.length)
+            .sort((a, b) => b - a)) {
+            next.splice(index, 1);
+            next = rewriteFormulasForStructure(next, {
+              type: "delete",
+              axis: "row",
+              index,
+              count: 1,
+            });
+          }
+          replaceRows(next.length ? next : [[""]], true, false);
+        } else sheet.deleteRows(indexes);
         const nextRow = Math.max(0, Math.min(...indexes) - 1);
         selectionState.selectCell(nextRow, selectionState.selection.col, false);
         setSelectedRows([]);
@@ -754,8 +1385,52 @@ export default function App() {
           showToast(t("clipboardContextChanged"));
           return;
         }
+        setRulesById((current) => ({ ...current, [workspace.activeId]: [] }));
+        if (rules.length)
+          showToast(
+            "列構造変更のため入力ルールを解除 / Validation rules cleared after column change",
+          );
+        if (collaboration.client) {
+          const doc = collaboration.client.getDocument()!;
+          collaboration.structure(
+            deleteAxisActions(doc, "column", indexes),
+            view.formulaEnabled
+              ? (rows) =>
+                  [...new Set(indexes)]
+                    .sort((a, b) => b - a)
+                    .reduce(
+                      (next, index) =>
+                        rewriteFormulasForStructure(next, {
+                          type: "delete",
+                          axis: "col",
+                          index,
+                          count: 1,
+                        }),
+                      rows,
+                    )
+              : undefined,
+          );
+          invalidateSearchScope();
+          return;
+        }
         recordBeforeChange();
-        sheet.deleteColumns(indexes);
+        invalidateSearchScope();
+        if (view.formulaEnabled) {
+          let next = cloneRows(sheet.rows);
+          for (const index of [...new Set(indexes)]
+            .filter((n) => n >= 0 && n < sheet.columnCount)
+            .sort((a, b) => b - a)) {
+            next = next.map((r) => r.filter((_, col) => col !== index));
+            next = rewriteFormulasForStructure(next, {
+              type: "delete",
+              axis: "col",
+              index,
+              count: 1,
+            });
+          }
+          sheet.deleteColumns(indexes);
+          replaceRows(next, true, false);
+        } else sheet.deleteColumns(indexes);
         const nextCol = Math.max(0, Math.min(...indexes) - 1);
         selectionState.selectCell(selectionState.selection.row, nextCol, false);
         setSelectedColumns([]);
@@ -763,15 +1438,54 @@ export default function App() {
     });
   };
 
+  const applySortedRows = (sorted: CellValue[][]) => {
+    if (collaboration.client) {
+      const doc = collaboration.client.getDocument()!;
+      const raw = sharedDocumentRows(doc);
+      const ids = activeIds(doc, "row");
+      const pools = new Map<string, string[]>();
+      raw.forEach((row, i) => {
+        const key = JSON.stringify(row);
+        pools.set(key, [...(pools.get(key) ?? []), ids[i]]);
+      });
+      const order = sorted.map((row) => pools.get(JSON.stringify(row))?.shift());
+      if (order.some((id) => !id)) {
+        showToast("同期後に並べ替えを再確認 / Recheck sort after sync");
+        return;
+      }
+      collaboration.submit([
+        { type: "reorder", axis: "row", ids: order as string[], ifRevision: doc.revision },
+      ]);
+      return;
+    }
+    replaceRows(sorted, true, false);
+  };
+
   const applySort = (col: number, direction: SortDirection) => {
     recordBeforeChange();
+    invalidateSearchScope();
     const sorted = sortRows(sheet.rows, col, direction, {
-      headerRow: settings.useHeaderRow,
+      headerRow: view.useHeaderRow,
     });
-    sheet.replaceRows(sorted, true, false);
+    applySortedRows(sorted);
   };
 
   const runUndo = () => {
+    if (collaboration.client) {
+      const client = collaboration.client;
+      const state = client.getState();
+      const entry = state.snapshot?.history
+        .slice()
+        .reverse()
+        .find(
+          (e) =>
+            e.memberId === state.memberId &&
+            !e.undoOf &&
+            !state.snapshot?.history.some((u) => u.undoOf === e.id),
+        );
+      if (entry) void client.undo(entry.id).catch((error) => showToast(String(error)));
+      return;
+    }
     const previous = history.undo({
       rows: sheet.rows,
       selection: selectionState.selection,
@@ -786,6 +1500,11 @@ export default function App() {
   };
 
   const runRedo = () => {
+    if (collaboration.client) {
+      setSharingOpen(true);
+      showToast("共有履歴から戻す内容を選んでください / Choose a shared history entry");
+      return;
+    }
     const next = history.redo({
       rows: sheet.rows,
       selection: selectionState.selection,
@@ -815,46 +1534,77 @@ export default function App() {
     if (!hit) {
       return;
     }
-    const matcher = buildMatcher(query, searchOptions);
+    const matcher = compiledSearch.matcher;
     if (!matcher) {
       return;
     }
     const singleShot = new RegExp(matcher.source, matcher.flags.replace("g", ""));
     const previous = sheet.rows[hit.row]?.[hit.col] ?? "";
-    const replaced = previous.replace(singleShot, () => replacement);
+    const replaced = replaceSearchValue(
+      previous,
+      singleShot,
+      replacement,
+      Boolean(searchOptions.regex && searchOptions.groups),
+      true,
+    );
     if (replaced === previous) {
       return;
     }
-    recordBeforeChange();
     const next = cloneRows(sheet.rows);
     next[hit.row][hit.col] = replaced;
-    sheet.replaceRows(next, true, false);
+    if (!validateNext(next)) return;
+    recordBeforeChange();
+    replaceRows(next, true, false);
     setSearchScrollNonce((nonce) => nonce + 1);
   };
 
   const replaceAll = () => {
-    const matcher = buildMatcher(query, searchOptions);
+    const matcher = compiledSearch.matcher;
     if (!matcher) {
       return;
     }
     let count = 0;
-    const next = sheet.rows.map((row, rowIndex) =>
-      visibleSet && !visibleSet.has(rowIndex)
-        ? [...row]
-        : row.map((cell) =>
-            cell.replace(matcher, () => {
-              count += 1;
-              return replacement;
-            }),
-          ),
+    const next = sheet.rows.map((row, r) =>
+      row.map((cell, c) => {
+        if (!inSearchScope(r, c)) return cell;
+        const value = replaceSearchValue(
+          cell,
+          matcher,
+          replacement,
+          Boolean(searchOptions.regex && searchOptions.groups),
+        );
+        if (value !== cell) count += 1;
+        return value;
+      }),
     );
-    if (count === 0) {
+    if (!count) {
       showToast(t("toastSearchDone", { count }));
       return;
     }
-    recordBeforeChange();
-    sheet.replaceRows(next, true, false);
-    showToast(t("toastSearchDone", { count }));
+    const context = clipboardContext();
+    setPendingPreview({
+      title: "全置換の確認 / Replace all preview",
+      detail:
+        `${count} cells. ${searchScope === "sheet" ? "非表示行も含む / Includes hidden rows" : "指定範囲のみ / Scoped cells"}\n` +
+        sheet.rows
+          .flatMap((row, r) =>
+            row.flatMap((v, c) =>
+              next[r][c] !== v ? [`${columnName(c)}${r + 1}: ${v} → ${next[r][c]}`] : [],
+            ),
+          )
+          .slice(0, 20)
+          .join("\n"),
+      apply: () => {
+        if (!clipboardContextValid(context)) {
+          showToast(t("clipboardContextChanged"));
+          return;
+        }
+        if (!validateNext(next)) return;
+        recordBeforeChange();
+        replaceRows(next, true, false);
+        showToast(t("toastSearchDone", { count }));
+      },
+    });
   };
 
   const handleJump = (ref: ReturnType<typeof parseCellRef>) => {
@@ -891,6 +1641,117 @@ export default function App() {
     updateSettings({ zoom: next });
   };
 
+  const targetName = sheet.meta.fileName ?? "untitled";
+  const activeNamedView = namedViewStore
+    .document(workspace.activeId, targetName)
+    .views.find((v) => v.id === activeViewById[workspace.activeId]);
+  const namedViewModified = activeNamedView
+    ? !viewMatchesCurrent(activeNamedView, filter.filters, sheet.colWidths)
+    : false;
+  const commands: Command[] = [
+    { id: "new", label: "新規 / New", aliases: "blank", run: newFile },
+    {
+      id: "open",
+      label: "開く / Open",
+      aliases: "import 読込",
+      run: () => {
+        if (finishPendingEdit()) void file.openFile();
+      },
+    },
+    {
+      id: "save",
+      label: "保存 / Save",
+      aliases: "download export",
+      disabled: file.saving ? "保存中 / Saving" : undefined,
+      run: () => requestSave(),
+    },
+    {
+      id: "saveAs",
+      label: "別名保存 / Save As",
+      aliases: "download export copy",
+      disabled: file.saving ? "保存中 / Saving" : undefined,
+      run: () => requestSave(true),
+    },
+    { id: "find", label: "検索 / Find", aliases: "search 探す", run: openSearch },
+    { id: "replace", label: "置換 / Replace", aliases: "search replace", run: openSearch },
+    {
+      id: "undo",
+      label: "元に戻す / Undo",
+      aliases: "undo",
+      disabled: !canUndo ? "履歴なし / No history" : undefined,
+      run: runUndo,
+    },
+    {
+      id: "redo",
+      label: "やり直す / Redo",
+      aliases: "redo",
+      disabled: !canRedo ? "履歴なし / No history" : undefined,
+      run: runRedo,
+    },
+    { id: "copy", label: "コピー / Copy", aliases: "clipboard", run: () => void copySelection() },
+    {
+      id: "insertRow",
+      label: "行挿入 / Insert row",
+      aliases: "add row",
+      disabled: filter.hasFilters ? t("toastFilterBlocksRowOps") : undefined,
+      run: () => insertRow(1),
+    },
+    {
+      id: "insertColumn",
+      label: "列挿入 / Insert column",
+      aliases: "add column",
+      disabled: filter.hasFilters ? t("toastFilterBlocksRowOps") : undefined,
+      run: () => insertColumn(1),
+    },
+    {
+      id: "deleteRow",
+      label: "行削除 / Delete row",
+      aliases: "remove row",
+      disabled: filter.hasFilters ? t("toastFilterBlocksRowOps") : undefined,
+      run: deleteRowWithConfirm,
+    },
+    {
+      id: "deleteColumn",
+      label: "列削除 / Delete column",
+      aliases: "remove column",
+      disabled: filter.hasFilters ? t("toastFilterBlocksRowOps") : undefined,
+      run: deleteColumnWithConfirm,
+    },
+    {
+      id: "autoFit",
+      label: "幅を自動調整 / Auto fit width",
+      aliases: "列幅 column width",
+      run: () => sheet.autoFitColumns(),
+    },
+    {
+      id: "clearFilter",
+      label: "絞込み解除 / Clear filters",
+      aliases: "filter all",
+      disabled: !filter.hasFilters ? "絞込みなし / No filters" : undefined,
+      run: filter.clearAll,
+    },
+    {
+      id: "columnMenu",
+      label: "列の操作 / Column actions",
+      aliases: "filter sort menu",
+      run: () =>
+        openContextMenu(
+          "column",
+          selectionState.selection.row,
+          selectionState.selection.col,
+          20,
+          120,
+        ),
+    },
+    {
+      id: "settings",
+      label: "設定 / Settings",
+      aliases: "preferences",
+      run: () => setSettingsOpen(true),
+    },
+    { id: "help", label: "ヘルプ / Help", aliases: "shortcuts", run: () => setHelpOpen(true) },
+  ].map((c) => ({ ...c, target: `${targetName}: ${selectedReference}` })) as Command[];
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const target = event.target;
     const editingText =
@@ -898,33 +1759,15 @@ export default function App() {
       target instanceof HTMLTextAreaElement ||
       target instanceof HTMLSelectElement;
 
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "o") {
-      event.preventDefault();
-      if (finishPendingEdit()) void file.openFile();
-    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
-      event.preventDefault();
-      requestSave(event.shiftKey);
-    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
-      event.preventDefault();
-      setSearchOpen(true);
-    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "h") {
-      event.preventDefault();
-      setSearchOpen(true);
-    } else if (
-      (event.ctrlKey || event.metaKey) &&
-      event.key.toLowerCase() === "z" &&
-      !event.shiftKey &&
-      !editingText
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    const command = shortcutCommand(event.nativeEvent);
+    if (
+      command &&
+      (!editingText || ["open", "save", "saveAs", "find", "replace", "commands"].includes(command))
     ) {
       event.preventDefault();
-      runUndo();
-    } else if (
-      !editingText &&
-      (((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") ||
-        ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "z"))
-    ) {
-      event.preventDefault();
-      runRedo();
+      if (command === "commands") setCommandOpen(true);
+      else dispatchCommand(commands, command);
     } else if (
       !editingText &&
       (event.ctrlKey || event.metaKey) &&
@@ -959,8 +1802,8 @@ export default function App() {
 
   const hasData = sheet.rows.length > 0;
   const filterValueRows = useMemo(
-    () => (settings.useHeaderRow ? sheet.rows.slice(1) : sheet.rows),
-    [settings.useHeaderRow, sheet.rows],
+    () => (view.useHeaderRow ? sheet.rows.slice(1) : sheet.rows),
+    [view.useHeaderRow, sheet.rows],
   );
   const columnFilterSelected = filterPopover
     ? (filter.filters.get(filterPopover.col) ?? null)
@@ -989,33 +1832,198 @@ export default function App() {
         browser={!isTauriRuntime()}
         saving={file.saving}
         rowOpsDisabled={filter.hasFilters}
-        canUndo={history.canUndo}
-        canRedo={history.canRedo}
-        onNew={newFile}
-        onOpen={() => {
-          if (finishPendingEdit()) void file.openFile();
-        }}
-        onSave={() => requestSave()}
-        onSaveAs={() => requestSave(true)}
-        onSearch={() => setSearchOpen(true)}
-        onUndo={runUndo}
-        onRedo={runRedo}
-        onInsertRow={() => insertRow(1)}
-        onInsertColumn={() => insertColumn(1)}
-        onDeleteRow={deleteRowWithConfirm}
-        onDeleteColumn={deleteColumnWithConfirm}
-        onAutoFit={() => {
-          sheet.autoFitColumns();
-          showToast(t("toastAutoFit"));
-        }}
-        onCopy={() => void copySelection()}
-        onSettings={() => setSettingsOpen(true)}
-        onHelp={() => setHelpOpen(true)}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onNew={() => dispatchCommand(commands, "new")}
+        onOpen={() => dispatchCommand(commands, "open")}
+        onSave={() => dispatchCommand(commands, "save")}
+        onSaveAs={() => dispatchCommand(commands, "saveAs")}
+        onSearch={() => dispatchCommand(commands, "find")}
+        onUndo={() => dispatchCommand(commands, "undo")}
+        onRedo={() => dispatchCommand(commands, "redo")}
+        onInsertRow={() => dispatchCommand(commands, "insertRow")}
+        onInsertColumn={() => dispatchCommand(commands, "insertColumn")}
+        onDeleteRow={() => dispatchCommand(commands, "deleteRow")}
+        onDeleteColumn={() => dispatchCommand(commands, "deleteColumn")}
+        onAutoFit={() => dispatchCommand(commands, "autoFit")}
+        onCopy={() => dispatchCommand(commands, "copy")}
+        onSettings={() => dispatchCommand(commands, "settings")}
+        onHelp={() => dispatchCommand(commands, "help")}
       />
+      <div className="featureBar">
+        <button onClick={() => setCommandOpen(true)}>操作を探す / Commands</button>
+        <button onClick={() => dispatchCommand(commands, "columnMenu")}>
+          列の操作 / Column actions
+        </button>
+        <button onClick={() => setNamedViewsOpen(true)}>表示を保存・切替 / Named views</button>
+        {activeNamedView && (
+          <span role="status">
+            表示: {activeNamedView.name}
+            {namedViewModified ? "（変更あり / modified）" : ""} · {filter.filters.size}条件 ·{" "}
+            {Math.max(0, displayRows.length - (view.useHeaderRow && displayRows.length ? 1 : 0))}行
+          </span>
+        )}
+        <label>
+          先頭行 / First row{" "}
+          <select
+            value={view.useHeaderRow ? "header" : "data"}
+            disabled={sheet.meta.format === "json" || sheet.meta.format === "yaml"}
+            onChange={(e) => setView((v) => ({ ...v, useHeaderRow: e.target.value === "header" }))}
+          >
+            <option value="header">見出し / Header</option>
+            <option value="data">データ / Data</option>
+          </select>
+        </label>
+        <label>
+          固定行 / Frozen rows{" "}
+          <input
+            aria-label="固定行 / Frozen rows"
+            type="number"
+            min={0}
+            max={10}
+            value={view.freezeRows}
+            onChange={(e) =>
+              setView((v) => ({
+                ...v,
+                freezeRows: Math.max(0, Math.min(10, Number(e.target.value) || 0)),
+              }))
+            }
+          />
+        </label>
+        <button
+          onClick={() =>
+            setView((v) => ({ ...v, freezeRows: Math.min(10, selectionState.selection.row + 1) }))
+          }
+        >
+          選択行まで固定 / Freeze to row
+        </button>
+        <button onClick={() => setView((v) => ({ ...v, freezeRows: 0 }))}>
+          行固定解除 / Unfreeze rows
+        </button>
+        <button
+          onClick={() => {
+            if (finishPendingEdit()) setSortOpen(true);
+          }}
+        >
+          詳しく並べ替え / Sort
+        </button>
+        <button
+          onClick={() => {
+            if (!finishPendingEdit()) return;
+            const indexes = selectionIndexes(
+              sheet.rows,
+              selectionToRange(selectionState.selection, selectionState.range),
+              rowSourceIndexes,
+              selectedRows,
+              selectedColumns,
+            );
+            setCleanupOpen({
+              documentId: workspace.activeId,
+              rows: sheet.rows,
+              cells: indexes.rows.flatMap((row) => indexes.columns.map((col) => ({ row, col }))),
+            });
+          }}
+        >
+          整形 / Cleanup
+        </button>
+        <button onClick={() => setValidationOpen(true)}>
+          入力ルール / Validation ({rules.length})
+        </button>
+        <button onClick={() => setRecoveryOpen(true)}>
+          復元下書き / Recovery: {recoveryState?.enabled ? "ON" : "OFF"}
+        </button>
+        <button
+          onClick={() => {
+            if (finishPendingEdit()) setSharingOpen(true);
+          }}
+        >
+          共同編集 / Sharing: {collaboration.state?.status ?? "OFF"}
+        </button>
+        {collaboration.state && (
+          <span role="status">
+            {collaboration.state.endpoint} · pending={collaboration.state.pendingCount}{" "}
+            {collaboration.readOnly ? "閲覧専用 / Read only" : "編集可能 / Editable"}{" "}
+            {collaboration.state.error}
+          </span>
+        )}
+        <label>
+          <input
+            type="checkbox"
+            checked={view.formulaEnabled}
+            onChange={(e) => {
+              if (finishPendingEdit()) setView((v) => ({ ...v, formulaEnabled: e.target.checked }));
+            }}
+          />
+          数式計算 / Calculate formulas (opt-in)
+        </label>
+        <button
+          disabled={!view.formulaEnabled || file.saving}
+          onClick={() => {
+            if (!finishPendingEdit()) return;
+            const snapshot = {
+              documentId: activeDocumentIdRef.current,
+              rows: cloneRows(rowsRef.current),
+              meta: { ...metaRef.current },
+            };
+            saveRequestsRef.current += 1;
+            void file
+              .saveDocument(
+                true,
+                snapshot,
+                exportFormulaRows(snapshot.rows, "values", { enabled: true }),
+              )
+              .finally(() => {
+                saveRequestsRef.current -= 1;
+              });
+          }}
+        >
+          計算値を別名書出し / Export values copy
+        </button>
+        {view.formulaEnabled && (
+          <span>
+            通常保存は式。計算結果=
+            {formulaEvaluation.displayRows[selectionState.selection.row]?.[
+              selectionState.selection.col
+            ] ?? ""}{" "}
+            · errors={formulaEvaluation.errors.length}
+            。同一表・算術・比較・SUM/AVERAGE/MIN/MAX/COUNT/IF。並べ替え後もA1は位置参照。
+          </span>
+        )}
+        <label>
+          フィル / Fill{" "}
+          <select
+            value={fillMode}
+            onChange={(e) => setFillMode(e.target.value as "copy" | "series")}
+          >
+            <option value="copy">コピー / Copy</option>
+            <option value="series">連番を確認 / Preview series</option>
+          </select>
+        </label>
+      </div>
       <div className="editionNotice" role="status">
         <span>{isTauriRuntime() ? t("appSaveHint") : t("browserSaveHint")}</span>
-        {file.saveNotice ? <span className="saveNotice">{file.saveNotice}</span> : null}
+        {file.saveNotice ? (
+          <span className="saveNotice">
+            {file.saveNotice}{" "}
+            {file.saveTargetId && (
+              <button onClick={() => switchTab(file.saveTargetId!)}>対象へ / Open target</button>
+            )}
+          </span>
+        ) : null}
       </div>
+      {recoveryError && (
+        <p role="status" className="featureError">
+          復元下書きは保存できていません: {recoveryError}
+        </p>
+      )}
+      {validationReport && (
+        <details className="featureError">
+          <summary role="status">
+            入力ルール: {validationReport.totalIssues}件、拒否{validationReport.rejectedIssues}件
+          </summary>
+          <pre>{JSON.stringify(validationReport, null, 2)}</pre>
+        </details>
+      )}
       <span id="cell-edit-help" className="srOnly">
         {t("editNavigationHelp")}
       </span>
@@ -1024,7 +2032,7 @@ export default function App() {
           <strong>{t("filterActiveLabel")}</strong>
           <span>
             {t("filteredCount", { visible: displayRows.length, total: sheet.rows.length })}
-            {settings.useHeaderRow ? ` (${t("headerIncluded")})` : ""}
+            {view.useHeaderRow ? ` (${t("headerIncluded")})` : ""}
           </span>
           <ActionButton
             className="toolbar__button"
@@ -1039,6 +2047,17 @@ export default function App() {
         </div>
       )}
       <SearchPanel
+        focusNonce={searchFocusNonce}
+        error={compiledSearch.error}
+        scope={searchScope}
+        scopeLabel={
+          searchScope === "selection"
+            ? searchSelection?.documentId === workspace.activeId
+              ? searchSelection.label
+              : "対象なし。選択を再設定 / No target; reset selection"
+            : undefined
+        }
+        onScopeChange={changeSearchScope}
         filtered={filter.hasFilters}
         open={searchOpen}
         query={query}
@@ -1054,7 +2073,10 @@ export default function App() {
         onPrevious={() => jumpSearch(-1)}
         onReplace={replaceCurrent}
         onReplaceAll={replaceAll}
-        onClose={() => setSearchOpen(false)}
+        onClose={() => {
+          setSearchOpen(false);
+          setFocusCell({ ...selectionRef.current, nonce: Date.now() });
+        }}
       />
       {hasData ? (
         <>
@@ -1067,7 +2089,10 @@ export default function App() {
             onCommit={(row, col, value, reselect) => commitCell(row, col, value, reselect)}
             onJump={handleJump}
             registerCommit={registerEditorCommit}
-            disabled={visibleSet !== null && !visibleSet.has(selectionState.selection.row)}
+            disabled={
+              collaboration.readOnly ||
+              (visibleSet !== null && !visibleSet.has(selectionState.selection.row))
+            }
             onMove={(row, col, dr, dc) => {
               const nextRow = rowSourceIndexes
                 ? (rowSourceIndexes[
@@ -1086,6 +2111,9 @@ export default function App() {
             selectedColumnIndexes={selectedColumns}
             key={`grid-${workspace.activeId}`}
             rows={displayRows}
+            readOnly={collaboration.readOnly}
+            formulaEnabled={view.formulaEnabled}
+            displayValues={(row, col) => formulaEvaluation.displayRows[row]?.[col] ?? ""}
             rowSourceIndexes={rowSourceIndexes}
             columnCount={sheet.columnCount}
             colWidths={sheet.colWidths}
@@ -1098,7 +2126,8 @@ export default function App() {
             theme={effectiveTheme}
             zebra={settings.zebra}
             headerHighlight={settings.headerHighlight}
-            freezeColumns={settings.freezeColumns}
+            freezeColumns={view.freezeColumns}
+            freezeRows={view.freezeRows}
             zoom={settings.zoom}
             onEdit={editCell}
             registerCommit={registerEditorCommit}
@@ -1110,8 +2139,23 @@ export default function App() {
                 if (from !== to) showToast(t("moveDataColumnsOnly"));
                 return;
               }
-              recordBeforeChange();
-              sheet.replaceRows(moved.rows, true, false);
+              setRulesById((current) => ({ ...current, [workspace.activeId]: [] }));
+              if (rules.length)
+                showToast(
+                  "列移動のため入力ルールを解除 / Validation rules cleared after column move",
+                );
+              if (collaboration.client) {
+                const doc = collaboration.client.getDocument()!;
+                const ids = activeIds(doc, "column");
+                ids.splice(to, 0, ids.splice(from, 1)[0]);
+                collaboration.submit([
+                  { type: "reorder", axis: "column", ids, ifRevision: doc.revision },
+                ]);
+              } else {
+                recordBeforeChange();
+                replaceRows(moved.rows, true, false);
+              }
+              invalidateSearchScope();
               sheet.setColWidths(moved.widths);
               selectionState.selectColumn(to, sheet.rows.length);
               setSelectedRows([]);
@@ -1122,46 +2166,11 @@ export default function App() {
             onRowsSelected={setSelectedRows}
             onColumnsSelected={setSelectedColumns}
             onPasteGrid={pasteGrid}
-            onFill={(updates) => {
-              if (
-                workspace.activeId !== activeDocumentIdRef.current ||
-                sheet.rows !== rowsRef.current ||
-                rowSourceIndexes !== visibleMapRef.current
-              ) {
-                showToast(t("clipboardContextChanged"));
-                return;
-              }
-              if (
-                updates.length === 0 ||
-                updates.some(
-                  (update) => update.row < 0 || (visibleSet && !visibleSet.has(update.row)),
-                )
-              ) {
-                return;
-              }
-              if (
-                updates.every(
-                  (update) => (sheet.rows[update.row]?.[update.col] ?? "") === update.value,
-                )
-              )
-                return;
-              recordBeforeChange();
-              const next = cloneRows(sheet.rows);
-              let maxRow = next.length;
-              let maxCol = sheet.columnCount;
-              for (const update of updates) {
-                maxRow = Math.max(maxRow, update.row + 1);
-                maxCol = Math.max(maxCol, update.col + 1);
-              }
-              while (next.length < maxRow) {
-                next.push(Array.from({ length: maxCol }, () => ""));
-              }
-              for (const update of updates) {
-                while (next[update.row].length <= update.col) next[update.row].push("");
-                next[update.row]![update.col] = update.value;
-              }
-              sheet.replaceRows(next, true, false);
-            }}
+            onFill={applyUpdates}
+            onFillPreview={previewUpdates}
+            fillMode={fillMode}
+            onCopy={() => void copySelection()}
+            onPasteText={(text) => acceptClipboardText(text)}
             onCut={() => void cutSelection()}
             onOpenContextMenu={openContextMenu}
             onHeaderMenuClick={(col, bounds) => {
@@ -1199,7 +2208,13 @@ export default function App() {
         onClearFilter={() => {
           if (contextMenu) filter.setColumnFilter(contextMenu.col, null);
         }}
-        onClose={() => setContextMenu(null)}
+        onClose={() => {
+          setContextMenu(null);
+          window.setTimeout(() => {
+            if (!document.querySelector('[role="dialog"], .filterPopover'))
+              setFocusCell({ ...selectionRef.current, nonce: Date.now() });
+          }, 0);
+        }}
         onCut={() => {
           const range = rangeFromContextMenu();
           void cutSelection(range ?? undefined);
@@ -1248,17 +2263,20 @@ export default function App() {
         }}
         onFreezeToHere={() => {
           if (contextMenu) {
-            updateSettings({ freezeColumns: contextMenu.col + 1 });
+            setView((v) => ({ ...v, freezeColumns: contextMenu.col + 1 }));
           }
         }}
-        onUnfreeze={() => updateSettings({ freezeColumns: 0 })}
+        onUnfreeze={() => setView((v) => ({ ...v, freezeColumns: 0 }))}
       />
       <FilterPopover
         state={filterPopover}
         rows={filterValueRows}
         selected={columnFilterSelected}
         onApply={(col, allowed) => filter.setColumnFilter(col, allowed)}
-        onClose={() => setFilterPopover(null)}
+        onClose={() => {
+          setFilterPopover(null);
+          window.setTimeout(() => setFocusCell({ ...selectionRef.current, nonce: Date.now() }), 0);
+        }}
       />
       <ConfirmDialog
         open={pendingConfirm !== null}
@@ -1279,7 +2297,7 @@ export default function App() {
         csvFormulaGuard={sheet.meta.csvFormulaGuard}
         omitEmptyCells={sheet.meta.omitEmptyCells}
         theme={settings.theme}
-        useHeaderRow={settings.useHeaderRow}
+        useHeaderRow={view.useHeaderRow}
         onEncodingChange={(encoding) => sheet.setMeta({ encoding, dirty: true })}
         onNewlineChange={(newline) => sheet.setMeta({ newline, dirty: true })}
         onZebraChange={(zebra) => updateSettings({ zebra })}
@@ -1287,9 +2305,384 @@ export default function App() {
         onCsvFormulaGuardChange={(value) => sheet.setMeta({ csvFormulaGuard: value, dirty: true })}
         onOmitEmptyCellsChange={(value) => sheet.setMeta({ omitEmptyCells: value, dirty: true })}
         onThemeChange={(theme) => updateSettings({ theme })}
-        onUseHeaderRowChange={(useHeaderRow) => updateSettings({ useHeaderRow })}
+        onUseHeaderRowChange={(useHeaderRow) => setView((v) => ({ ...v, useHeaderRow }))}
         onClose={() => setSettingsOpen(false)}
       />
+      {namedViewsOpen && (
+        <NamedViewsPanel
+          documentId={workspace.activeId}
+          fileName={sheet.meta.fileName}
+          rows={sheet.rows}
+          filters={filter.filters}
+          colWidths={sheet.colWidths}
+          headerRow={view.useHeaderRow}
+          visibleCount={Math.max(
+            0,
+            displayRows.length - (view.useHeaderRow && displayRows.length ? 1 : 0),
+          )}
+          activeViewId={activeViewById[workspace.activeId]}
+          onApply={(preset) => {
+            filter.restore(preset.filters);
+            sheet.setColWidths(preset.colWidths);
+            setActiveViewById((current) => ({ ...current, [workspace.activeId]: preset.id }));
+          }}
+          onClose={() => setNamedViewsOpen(false)}
+        />
+      )}
+      {sharingOpen && (
+        <SharingPanel
+          rows={sheet.rows}
+          client={collaboration.client}
+          state={collaboration.state}
+          onClose={() => setSharingOpen(false)}
+          onDetached={() => {
+            collaboration.detach(workspace.activeId);
+            history.reset();
+          }}
+          onConnected={(client, mode) => {
+            if (mode === "join") {
+              const rows = sharedDocumentRows(client.getDocument()!);
+              const doc = workspace.openDocument(
+                rows,
+                {
+                  fileName: `shared-${client.getState().snapshot?.roomId}.csv`,
+                  filePath: undefined,
+                  dirty: true,
+                },
+                getLive(),
+              );
+              applyDocument(doc);
+              collaboration.attach(doc.id, client);
+            } else collaboration.attach(workspace.activeId, client);
+            history.reset();
+          }}
+        />
+      )}
+      {cleanupOpen && (
+        <CleanupPanel
+          rows={cleanupOpen.rows}
+          cells={cleanupOpen.cells}
+          hasHeader={view.useHeaderRow}
+          onClose={() => setCleanupOpen(null)}
+          onApply={(next, metadata) => {
+            if (
+              cleanupOpen.documentId !== activeDocumentIdRef.current ||
+              cleanupOpen.rows !== rowsRef.current
+            ) {
+              showToast(t("clipboardContextChanged"));
+              return;
+            }
+            if (!validateNext(next)) return;
+            const deleted = metadata?.deletedRows ?? [];
+            const rewrite = (rows: CellValue[][]) =>
+              view.formulaEnabled
+                ? [...deleted]
+                    .sort((a, b) => b - a)
+                    .reduce(
+                      (data, index) =>
+                        rewriteFormulasForStructure(data, {
+                          type: "delete",
+                          axis: "row",
+                          index,
+                          count: 1,
+                        }),
+                      rows,
+                    )
+                : rows;
+            if (deleted.length && collaboration.client)
+              collaboration.structure(
+                deleteAxisActions(collaboration.client.getDocument()!, "row", deleted),
+                rewrite,
+              );
+            else {
+              recordBeforeChange();
+              replaceRows(rewrite(next), true, false);
+            }
+            invalidateSearchScope();
+            setCleanupOpen(null);
+          }}
+        />
+      )}
+      {validationOpen && (
+        <ValidationPanel
+          key={workspace.activeId}
+          rows={sheet.rows}
+          rules={rules}
+          onRulesChange={(next) =>
+            setRulesById((current) => ({ ...current, [workspace.activeId]: next }))
+          }
+          onClose={() => setValidationOpen(false)}
+          onExportRules={(json) => {
+            const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "plainsheet-validation.json";
+            a.click();
+            window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+          }}
+        />
+      )}
+      {recoveryOpen && (
+        <RecoveryPanel
+          store={recoveryStore}
+          onStateChange={setRecoveryState}
+          onRestore={(copy) => {
+            if (!finishPendingEdit()) return;
+            const doc = workspace.openDocument(
+              copy.rows,
+              { ...copy.meta, filePath: undefined, dirty: true },
+              getLive(),
+            );
+            applyDocument(doc);
+            setRecoveryOpen(false);
+          }}
+          onClose={() => setRecoveryOpen(false)}
+        />
+      )}
+      {sortOpen && (
+        <FeatureDialog
+          title="複数列の並べ替え / Multi-column sort"
+          onClose={() => setSortOpen(false)}
+        >
+          <p>
+            {targetName}: 全列を一緒に移動、{sheet.rows.length - (view.useHeaderRow ? 1 : 0)}
+            データ行。非表示行も含みます。先頭行={view.useHeaderRow ? "見出し" : "データ"}。
+          </p>
+          <p>
+            数値は10進数を正確に比較。空値は末尾、日本語はja順、文字列モードは字句順。全キー同値は元順を維持。
+          </p>
+          {sortKeys.map((key, i) => (
+            <div key={i}>
+              <select
+                aria-label={`Sort column ${i + 1}`}
+                value={key.colIndex}
+                onChange={(e) =>
+                  setSortKeys((keys) =>
+                    keys.map((k, n) => (n === i ? { ...k, colIndex: Number(e.target.value) } : k)),
+                  )
+                }
+              >
+                {Array.from({ length: sheet.columnCount }, (_, c) => (
+                  <option key={c} value={c}>
+                    {columnName(c)}: {view.useHeaderRow ? sheet.rows[0]?.[c] : ""}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={key.direction}
+                onChange={(e) =>
+                  setSortKeys((keys) =>
+                    keys.map((k, n) =>
+                      n === i ? { ...k, direction: e.target.value as SortDirection } : k,
+                    ),
+                  )
+                }
+              >
+                <option value="asc">昇順 / Asc</option>
+                <option value="desc">降順 / Desc</option>
+              </select>
+              <select
+                value={key.mode}
+                onChange={(e) =>
+                  setSortKeys((keys) =>
+                    keys.map((k, n) =>
+                      n === i ? { ...k, mode: e.target.value as "auto" | "text" | "numeric" } : k,
+                    ),
+                  )
+                }
+              >
+                <option value="auto">自動 / Auto</option>
+                <option value="text">文字列 / Text</option>
+                <option value="numeric">数値 / Numeric</option>
+              </select>
+              <button
+                disabled={i === 0}
+                onClick={() =>
+                  setSortKeys((keys) => {
+                    const next = [...keys];
+                    [next[i - 1], next[i]] = [next[i], next[i - 1]];
+                    return next;
+                  })
+                }
+              >
+                上へ / Up
+              </button>
+              <button
+                disabled={sortKeys.length === 1}
+                onClick={() => setSortKeys((keys) => keys.filter((_, n) => n !== i))}
+              >
+                削除 / Remove
+              </button>
+            </div>
+          ))}
+          <button
+            onClick={() =>
+              setSortKeys((keys) => [...keys, { colIndex: 0, direction: "asc", mode: "auto" }])
+            }
+          >
+            キー追加 / Add key
+          </button>
+          <pre>
+            {JSON.stringify(
+              sortRowsByKeys(sheet.rows, sortKeys, { headerRow: view.useHeaderRow }).slice(0, 8),
+              null,
+              2,
+            )}
+          </pre>
+          <button onClick={() => setSortOpen(false)}>取消 / Cancel</button>
+          <button
+            onClick={() => {
+              const context = clipboardContext();
+              const data = sortRowsByKeys(sheet.rows, sortKeys, { headerRow: view.useHeaderRow });
+              const header = view.useHeaderRow;
+              setSortOpen(false);
+              setPendingPreview({
+                title: "並べ替え適用 / Apply sort",
+                detail: `${targetName}: 非表示行を含む全表、全列同時移動。\n${JSON.stringify(data.slice(0, 8))}`,
+                apply: () => {
+                  if (!clipboardContextValid(context) || viewRef.current.useHeaderRow !== header) {
+                    showToast(t("clipboardContextChanged"));
+                    return;
+                  }
+                  invalidateSearchScope();
+                  recordBeforeChange();
+                  applySortedRows(data);
+                },
+              });
+            }}
+          >
+            結果を確認 / Confirm preview
+          </button>
+        </FeatureDialog>
+      )}
+      {commandOpen && <CommandSearch commands={commands} onClose={() => setCommandOpen(false)} />}
+      {importRequest && (
+        <ImportPreview
+          request={importRequest.request}
+          onConfirm={(result) => {
+            importRequest.resolve(result);
+            setImportRequest(null);
+          }}
+          onCancel={() => {
+            importRequest.resolve(null);
+            setImportRequest(null);
+          }}
+        />
+      )}
+      {savePreview && (
+        <FeatureDialog
+          title={`${savePreview.name}: 上書き変換の確認`}
+          onClose={() => {
+            savePreview.resolve("cancel");
+            setSavePreview(null);
+          }}
+        >
+          <p>原本の型や表以外の文章は維持されません。別名保存を推奨します。</p>
+          <pre>{savePreview.detail}</pre>
+          <button
+            onClick={() => {
+              savePreview.resolve("saveAs");
+              setSavePreview(null);
+            }}
+          >
+            別名保存 / Save As
+          </button>
+          <button
+            onClick={() => {
+              savePreview.resolve("save");
+              setSavePreview(null);
+            }}
+          >
+            変換して上書き / Overwrite
+          </button>
+          <button
+            onClick={() => {
+              savePreview.resolve("cancel");
+              setSavePreview(null);
+            }}
+          >
+            取消 / Cancel
+          </button>
+        </FeatureDialog>
+      )}
+      {closeRequest && (
+        <FeatureDialog
+          title="変更を保存して閉じる / Save before closing"
+          onClose={() => {
+            if (!closeBusy) setCloseRequest(null);
+          }}
+        >
+          <ul>
+            {closeRequest.ids.map((id) => (
+              <li key={id}>
+                {documentsRef.current.find((d) => d.id === id)?.meta.fileName ?? "untitled"}
+              </li>
+            ))}
+          </ul>
+          <p>
+            {closeRequest.downloaded
+              ? "ダウンロード開始は保存完了の保証ではありません。保存先のファイルを確認してから閉じてください。"
+              : "保存失敗・取消・保存中の変更があれば閉じません。"}
+          </p>
+          <button disabled={closeBusy} onClick={() => setCloseRequest(null)}>
+            戻る / Back
+          </button>
+          <button disabled={closeBusy} onClick={() => void saveThenClose()}>
+            保存して閉じる / Save and close
+          </button>
+          <button disabled={closeBusy} onClick={() => void finishClose()}>
+            {closeRequest.downloaded
+              ? "保存先を確認したので閉じる / Confirm download and close"
+              : "保存せず閉じる / Discard and close"}
+          </button>
+        </FeatureDialog>
+      )}
+      {pastePreview && (
+        <FeatureDialog title="貼り付け形式 / Paste format" onClose={() => setPastePreview(null)}>
+          <p>区切りが曖昧です。元の形と隣のセルへの影響を確認してください。</p>
+          <label>
+            形式{" "}
+            <select
+              value={pasteFormat}
+              onChange={(e) => setPasteFormat(e.target.value as ClipboardFormat)}
+            >
+              <option value="single-column">1列 / Single column</option>
+              <option value="tsv">TSV</option>
+              <option value="csv">CSV</option>
+            </select>
+          </label>
+          <pre>
+            {JSON.stringify(
+              resolveClipboardText(pastePreview.text, undefined, pasteFormat).slice(0, 12),
+              null,
+              2,
+            )}
+          </pre>
+          <button onClick={() => setPastePreview(null)}>取消 / Cancel</button>
+          <button
+            onClick={() => {
+              pastePreview.apply(pasteFormat);
+              setPastePreview(null);
+            }}
+          >
+            適用 / Apply
+          </button>
+        </FeatureDialog>
+      )}
+      {pendingPreview && (
+        <FeatureDialog title={pendingPreview.title} onClose={() => setPendingPreview(null)}>
+          <pre>{pendingPreview.detail}</pre>
+          <button onClick={() => setPendingPreview(null)}>取消 / Cancel</button>
+          <button
+            onClick={() => {
+              pendingPreview.apply();
+              setPendingPreview(null);
+            }}
+          >
+            適用 / Apply
+          </button>
+        </FeatureDialog>
+      )}
       <Toast message={toast} />
     </div>
   );
@@ -1303,23 +2696,4 @@ function referenceForSelection(selection: Selection, range: Range): string {
   return `${columnName(normalized.startCol)}${normalized.startRow + 1}:${columnName(normalized.endCol)}${
     normalized.endRow + 1
   }`;
-}
-
-const MAX_QUERY_LENGTH = 2000;
-
-function buildMatcher(query: string, options: SearchOptions): RegExp | null {
-  if (query === "" || query.length > MAX_QUERY_LENGTH) {
-    return null;
-  }
-
-  const flags = `${options.caseSensitive ? "" : "i"}g`;
-  try {
-    return options.regex ? new RegExp(query, flags) : new RegExp(escapeRegExp(query), flags);
-  } catch {
-    return null;
-  }
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

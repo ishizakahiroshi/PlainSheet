@@ -135,8 +135,8 @@ describe("production Glide wrapper with the canvas renderer mocked", () => {
     const { editor } = setup();
     expect(editor().keybindings).toMatchObject({
       activateCell: "F2| |Enter|shift+Enter",
-      downFill: true,
-      rightFill: true,
+      downFill: false,
+      rightFill: false,
     });
     fireEvent.keyDown(screen.getByTestId("canvas-proxy"), { key: "F2" });
     const value = {

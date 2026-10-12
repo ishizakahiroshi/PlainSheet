@@ -41,3 +41,16 @@ export function completedSaveMeta(
     dirty: completion.method === "direct" && unchanged ? false : meta.dirty,
   };
 }
+
+export function sameSaveContent(
+  rows: CellValue[][],
+  meta: SheetMeta,
+  checkpoint: { rows: CellValue[][]; meta: SheetMeta },
+): boolean {
+  return (
+    sameRows(rows, checkpoint.rows) &&
+    (
+      ["encoding", "newline", "delimiter", "format", "csvFormulaGuard", "omitEmptyCells"] as const
+    ).every((key) => meta[key] === checkpoint.meta[key])
+  );
+}

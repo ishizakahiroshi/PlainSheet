@@ -35,6 +35,14 @@ async fn read_file(path: String) -> Result<DecodedText, String> {
 }
 
 #[tauri::command]
+async fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
+    require_absolute(&path)?;
+    let metadata = fs::metadata(&path).map_err(|error| format!("failed to inspect file: {error}"))?;
+    if metadata.len() > 32 * 1024 * 1024 { return Err("import preview limit is 32 MiB".to_string()); }
+    fs::read(&path).map_err(|error| format!("failed to read file: {error}"))
+}
+
+#[tauri::command]
 async fn write_file(path: String, content: String, encoding: Option<String>) -> Result<(), String> {
     require_absolute(&path)?;
     let target_encoding = encoding.unwrap_or_else(|| "utf-8".to_string());
@@ -156,6 +164,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             open_file_dialog,
             read_file,
+            read_file_bytes,
             write_file,
             save_file_dialog
         ])

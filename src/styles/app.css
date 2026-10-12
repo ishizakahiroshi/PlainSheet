@@ -951,3 +951,84 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+.featureDialog {
+  max-height: 85vh;
+  overflow: auto;
+  width: min(780px, 94vw);
+}
+.featureDialog label {
+  display: block;
+  margin: 0.6rem 0;
+}
+.featureDialog input,
+.featureDialog select {
+  max-width: 100%;
+}
+.featureDialog pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 35vh;
+  overflow: auto;
+}
+.featureDialog table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.featureDialog td,
+.featureDialog th {
+  border: 1px solid var(--border-color, #888);
+  padding: 0.3rem;
+  overflow-wrap: anywhere;
+}
+.featureBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  max-height: 25vh;
+  overflow: auto;
+  align-items: center;
+}
+.featureBar button,
+.featureBar label {
+  font-size: 0.8rem;
+}
+.featureError {
+  color: #b42318;
+}
+[data-theme="dark"] .featureError {
+  color: #ffb4a9;
+}
+.glideSheet {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.glideSheet__editor {
+  min-height: 80px;
+  flex: 1;
+}
+.frozenReference {
+  flex: 0 1 auto;
+  max-height: 24vh;
+  overflow: auto;
+  border-bottom: 2px solid #4883c8;
+  font-size: 0.75rem;
+}
+.frozenReference table {
+  border-collapse: collapse;
+}
+.frozenReference th {
+  white-space: nowrap;
+}
+.frozenReference button {
+  min-width: 90px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rowOrientation {
+  font-size: 0.75rem;
+}
