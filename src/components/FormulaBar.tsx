@@ -53,6 +53,7 @@ export function FormulaBar({ row, col, reference, value, onCommit, onJump }: For
           setRefInvalid(false);
         }}
         onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
           if (event.key === "Enter") {
             event.preventDefault();
             const parsed = parseCellRef(refDraft);
@@ -90,6 +91,7 @@ export function FormulaBar({ row, col, reference, value, onCommit, onJump }: For
           onCommit(target.current.row, target.current.col, draft, false);
         }}
         onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing || event.keyCode === 229) return;
           if (event.key === "Enter") {
             skipBlurCommit.current = true;
             onCommit(target.current.row, target.current.col, draft, true);

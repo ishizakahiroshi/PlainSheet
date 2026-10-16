@@ -63,6 +63,12 @@ export function useFilter() {
     setFilters(new Map());
   }, []);
 
+  const restore = useCallback(
+    (entries: [number, string[]][]) =>
+      setFilters(new Map(entries.map(([c, values]) => [c, new Set(values)]))),
+    [],
+  );
+
   const hasFilters = filters.size > 0;
 
   const getVisibleRows = useCallback(
@@ -76,8 +82,9 @@ export function useFilter() {
       hasFilters,
       setColumnFilter,
       clearAll,
+      restore,
       getVisibleRows,
     }),
-    [filters, hasFilters, setColumnFilter, clearAll, getVisibleRows],
+    [filters, hasFilters, setColumnFilter, clearAll, getVisibleRows, restore],
   );
 }

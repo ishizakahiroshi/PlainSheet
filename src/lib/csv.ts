@@ -94,7 +94,14 @@ export function serializeCsv(
 ): string {
   const lineBreak = newline === "CRLF" ? "\r\n" : "\n";
   return rows
-    .map((row) => row.map((cell) => serializeCell(cell, delimiter, sanitizeFormulas)).join(delimiter))
+    .map((row, index) => {
+      const line = row
+        .map((cell) => serializeCell(cell, delimiter, sanitizeFormulas))
+        .join(delimiter);
+      // An unquoted final blank record is indistinguishable from a trailing
+      // line ending (or an empty file). Keep its real row position explicit.
+      return index === rows.length - 1 && line === "" ? '""' : line;
+    })
     .join(lineBreak);
 }
 

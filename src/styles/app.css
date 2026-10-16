@@ -569,8 +569,7 @@ button:disabled {
   place-items: center;
   background:
     linear-gradient(90deg, rgba(29, 110, 216, 0.08) 1px, transparent 1px),
-    linear-gradient(rgba(32, 133, 101, 0.08) 1px, transparent 1px),
-    var(--bg);
+    linear-gradient(rgba(32, 133, 101, 0.08) 1px, transparent 1px), var(--bg);
   background-size: 42px 42px;
 }
 
@@ -741,4 +740,56 @@ button:disabled {
   background: var(--surface);
   box-shadow: var(--shadow);
   color: var(--text);
+}
+
+.contextMenu {
+  max-width: min(340px, calc(100vw - 8px));
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.contextMenu__heading {
+  font-weight: 700;
+  padding: 8px 12px 2px;
+}
+.contextMenu__detail {
+  font-size: 12px;
+  padding: 2px 12px 8px;
+  opacity: 0.8;
+}
+.contextMenu__reason {
+  display: block;
+  font-size: 11px;
+  white-space: normal;
+}
+.contextMenu__item:focus-visible {
+  outline: 2px solid var(--accent, #1d6ed8);
+  outline-offset: -2px;
+}
+.visibilityBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  max-height: 100px;
+  overflow-y: auto;
+}
+.visibilityBar button {
+  font-size: 12px;
+}
+
+.glideSheet {
+  position: relative;
+}
+.glideSheet__gap {
+  position: absolute;
+  z-index: 5;
+  min-width: 24px;
+  min-height: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--accent, #1d6ed8);
+  background: var(--bg, white);
+  color: var(--text, #18212f);
+  line-height: 14px;
 }
