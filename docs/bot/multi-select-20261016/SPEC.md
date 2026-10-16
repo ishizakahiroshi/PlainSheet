@@ -72,4 +72,3 @@ Automatic checks: `bun run test`, `bunx tsc --noEmit`, `bun run lint`, and exist
 The independent reviewer follows REVIEW. Local coordinator reads all changed lines and tests at the submitted SHA, sends one consolidated list, and verifies corrected results. Real canvas/browser/Windows clipboard/IME/native save acceptance needs actual observation in an authorized running product; source, mocks, CI and cross-compilation do not substitute for it. Leave these explicitly pending when the environment cannot observe them.
 
 Additional ideas recorded but not required: whitespace cleanup, duplicate-row deletion, selected-only file export. Do not implement these here or broaden to formula/collaboration features.
-

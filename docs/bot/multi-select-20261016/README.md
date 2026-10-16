@@ -48,4 +48,3 @@ Routine implementation choices are authorized inside SPEC. Stop only for a neces
 ## Completion states
 
 Source implementation, independent review, CI, local comprehensive review, real GUI/canvas/IME, and Windows OS clipboard/native save acceptance are separate states. No whole-task completion claim from test counts alone. The local coordinator will review the assembled candidate once, send one consolidated findings list, then recheck the corrected candidate. Do not require the user to retest each feature or relay findings.
-

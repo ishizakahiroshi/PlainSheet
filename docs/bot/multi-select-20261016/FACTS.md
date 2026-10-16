@@ -21,4 +21,3 @@ The source snapshot is not proof of the user's currently running executable or n
 
 Initial instruction publication commit / product diff baseline: `e676daae5224842ae238d4e0a8047cb0f2307f89`.
 Dedicated management Issue: https://github.com/ishizakahiroshi/PlainSheet/issues/5 .
-

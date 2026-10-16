@@ -16,4 +16,3 @@ Review these failure paths in particular:
 Output: reviewer identity/ownership, exact reviewed code SHA, diff baseline, paths read, commands/exit statuses, severity/reproduction/expected-versus-actual for each finding, fixed/rechecked findings at the revised SHA, and unobserved gates. No findings also requires this coverage statement. Publish the report under `docs/bot/multi-select-20261016/results/` and link it in the management Issue and board.
 
 The local coordinating AI reviews the assembled candidate independently after this report. Its findings return through the same task thread and Issue. Keep implementing bounded fixes until verified; the user is not the message carrier.
-
