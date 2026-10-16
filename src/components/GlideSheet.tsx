@@ -49,6 +49,8 @@ type GlideSheetProps = {
   zoom?: number;
   onEdit: (row: number, col: number, value: string) => void;
   onColumnResize: (col: number, width: number) => void;
+  onColumnResizeStart?: () => void;
+  onColumnResizeEnd?: (col: number, width: number) => void;
   onSelectionChange: (selection: { row: number; col: number }, range: Range) => void;
   onRowsSelected?: (indexes: number[]) => void;
   onColumnsSelected?: (indexes: number[]) => void;
@@ -141,6 +143,8 @@ export function GlideSheet({
   zoom = 1,
   onEdit,
   onColumnResize,
+  onColumnResizeStart,
+  onColumnResizeEnd,
   onSelectionChange,
   onRowsSelected,
   onColumnsSelected,
@@ -157,12 +161,22 @@ export function GlideSheet({
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewportNonce, setViewportNonce] = useState(0);
   const viewportKey = useRef("");
-  const onViewportChanged = useCallback((rect: Rectangle) => {
-    const key = `${rect.x}:${rect.y}:${rect.width}:${rect.height}`;
+  const onViewportChanged = useCallback((rect: Rectangle, tx: number, ty: number) => {
+    const key = `${rect.x}:${rect.y}:${rect.width}:${rect.height}:${tx}:${ty}`;
     if (key !== viewportKey.current) {
       viewportKey.current = key;
       setViewportNonce((value) => value + 1);
     }
+  }, []);
+  useEffect(() => {
+    const refresh = () => setViewportNonce((value) => value + 1);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(refresh);
+    if (containerRef.current) observer?.observe(containerRef.current);
+    window.addEventListener("resize", refresh);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", refresh);
+    };
   }, []);
   const [gapButtons, setGapButtons] = useState<
     { axis: "row" | "column"; indexes: number[]; left: number; top: number }[]
@@ -242,7 +256,7 @@ export function GlideSheet({
       }
     }
     setGapButtons(buttons);
-  }, [hiddenRows, hiddenColumns, toVisibleRow, toVisibleCol, viewportNonce]);
+  }, [hiddenRows, hiddenColumns, toVisibleRow, toVisibleCol, viewportNonce, colWidths, zoom]);
 
   const columns = useMemo<GridColumn[]>(
     () =>
@@ -433,11 +447,6 @@ export function GlideSheet({
     const col = toVisibleCol(sourceCol);
     const row = toVisibleRow(sourceRow);
     if (row < 0 || col < 0) return;
-    setGridSelection({
-      columns: CompactSelection.empty(),
-      rows: CompactSelection.empty(),
-      current: { cell: [col, row], range: { x: col, y: row, width: 1, height: 1 }, rangeStack: [] },
-    });
     ref.current?.scrollTo(col, row);
   }, [scrollNonce, toVisibleRow, toVisibleCol]);
 
@@ -448,11 +457,6 @@ export function GlideSheet({
     const row = toVisibleRow(focusCell.row);
     const col = toVisibleCol(focusCell.col);
     if (row < 0 || col < 0) return;
-    setGridSelection({
-      columns: CompactSelection.empty(),
-      rows: CompactSelection.empty(),
-      current: { cell: [col, row], range: { x: col, y: row, width: 1, height: 1 }, rangeStack: [] },
-    });
     ref.current?.scrollTo(col, row);
   }, [focusCell?.nonce, focusCell?.row, focusCell?.col, toVisibleRow, toVisibleCol]);
 
@@ -687,6 +691,10 @@ export function GlideSheet({
         }}
         gridSelection={gridSelection}
         onGridSelectionChange={handleGridSelectionChange}
+        onColumnResizeStart={() => onColumnResizeStart?.()}
+        onColumnResizeEnd={(_column, newSize, colIndex) =>
+          onColumnResizeEnd?.(toSourceCol(colIndex), newSize)
+        }
         onColumnResize={(_column, newSize, colIndex) =>
           onColumnResize(toSourceCol(colIndex), newSize)
         }

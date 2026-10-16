@@ -32,7 +32,13 @@ import { useSelection } from "./hooks/useSelection";
 import { useSettings } from "./hooks/useSettings";
 import { cloneRows } from "./hooks/useSheet";
 import { useSheet } from "./hooks/useSheet";
-import { emptyView, type HistoryEntry, type SheetView } from "./types/sheet";
+import {
+  emptyView,
+  MAX_GRID_ROWS,
+  MAX_GRID_COLS,
+  type HistoryEntry,
+  type SheetView,
+} from "./types/sheet";
 import { calculateColumnWidths } from "./lib/columnWidth";
 import {
   boundedIndexes,
@@ -83,6 +89,12 @@ export default function App() {
   const [focusCell, setFocusCell] = useState<{ row: number; col: number; nonce: number } | null>(
     null,
   );
+  const resizeTransaction = useRef<{
+    id: string;
+    entry: HistoryEntry;
+    widths: Record<number, number>;
+    ending: boolean;
+  } | null>(null);
   const [selectedRows, setSelectedRows] = useState<number[]>([]);
   const [selectedColumns, setSelectedColumns] = useState<number[]>([]);
 
@@ -445,11 +457,13 @@ export default function App() {
     if (target.kind === "row") {
       setSelectedRows(target.rowTargets.length ? target.rowTargets : [row]);
       setSelectedColumns([]);
-      selectionState.selectRow(target.anchor.row, sheet.columnCount);
+      if (!selectedRows.includes(row))
+        selectionState.selectRow(target.anchor.row, sheet.columnCount);
     } else if (target.kind === "column") {
       setSelectedColumns(target.columnTargets.length ? target.columnTargets : [col]);
       setSelectedRows([]);
-      selectionState.selectColumn(target.anchor.col, sheet.rows.length);
+      if (!selectedColumns.includes(col))
+        selectionState.selectColumn(target.anchor.col, sheet.rows.length);
     } else {
       setSelectedRows([]);
       setSelectedColumns([]);
@@ -519,20 +533,31 @@ export default function App() {
       clearSelectedCells(target);
     }
   };
+  // Only the immediate append row/column may expand the model. The distant
+  // canvas baseline is navigation space, not a request to allocate skipped cells.
+  const pasteAnchorReason = (row: number, col: number) =>
+    row < 0 || col < 0 || row > sheet.rows.length || col > sheet.columnCount
+      ? t("boundedPaste")
+      : undefined;
   const pasteReason = (target: SelectionTarget) =>
     filter.hasFilters
       ? t("filteredEdit")
       : !targetContiguous(target)
         ? t("contiguousRequired")
-        : undefined;
+        : pasteAnchorReason(target.anchor.row, target.anchor.col);
   const pasteGrid = (row: number, col: number, grid: CellValue[][], target = actionTarget()) => {
-    const reason = pasteReason(target);
+    const reason = pasteReason(target) ?? pasteAnchorReason(row, col);
     if (!guardMenu() || reason) {
       if (reason) showToast(reason);
       return;
     }
     const height = grid.length,
       width = grid.reduce((max, r) => Math.max(max, r.length), 0);
+    if (!height || !width) return;
+    if (row + height > MAX_GRID_ROWS || col + width > MAX_GRID_COLS) {
+      showToast(t("boundedPaste"));
+      return;
+    }
     if (
       view.hiddenRows.some((i) => i >= row && i < row + height) ||
       view.hiddenColumns.some((i) => i >= col && i < col + width)
@@ -540,7 +565,11 @@ export default function App() {
       showToast(t("hiddenPaste"));
       return;
     }
+    const shapeChanged =
+      row + height > sheet.rows.length ||
+      grid.some((_, ri) => col + width > (sheet.rows[row + ri]?.length ?? 0));
     if (
+      !shapeChanged &&
       !grid.some((r, ri) =>
         r.some((value, ci) => (sheet.rows[row + ri]?.[col + ci] ?? "") !== value),
       )
@@ -589,6 +618,33 @@ export default function App() {
       : !indexes.length && !insertion
         ? t("virtualTarget")
         : undefined;
+  const visibleSelection = (
+    proposed: Selection,
+    nextView: SheetView,
+    rowCount = sheet.rows.length,
+    columnCount = sheet.columnCount,
+  ): Selection => {
+    const filteredRows = filter.hasFilters
+      ? new Set(filter.getVisibleRows(sheet.rows).map((row) => row.sourceIndex))
+      : null;
+    const choose = (
+      index: number,
+      count: number,
+      hidden: number[],
+      allowed?: Set<number> | null,
+    ) => {
+      const hiddenSet = new Set(hidden);
+      const visible = (i: number) => !hiddenSet.has(i) && (!allowed || allowed.has(i));
+      if (index >= count || visible(index)) return index;
+      for (let i = 0; i < count; i += 1) if (visible(i)) return i;
+      // All hidden: select the first blank append cell, never hidden data.
+      return count;
+    };
+    return {
+      row: choose(proposed.row, rowCount, nextView.hiddenRows, filteredRows),
+      col: choose(proposed.col, columnCount, nextView.hiddenColumns),
+    };
+  };
   const remapState = (axis: "row" | "column", order: number[], selected: number[]) => {
     const mapping = new Map<number, number>();
     order.forEach((old, index) => {
@@ -611,6 +667,12 @@ export default function App() {
     setView(nextView);
     const nextSelection = {
       ...selectionState.selection,
+      ...(axis === "row" && selectedRows.length
+        ? { col: selectionState.range?.startCol ?? 0 }
+        : {}),
+      ...(axis === "column" && selectedColumns.length
+        ? { row: selectionState.range?.startRow ?? 0 }
+        : {}),
       [axis === "row" ? "row" : "col"]:
         selected[0] ??
         Math.min(
@@ -620,7 +682,14 @@ export default function App() {
           Math.max(0, order.length - 1),
         ),
     };
-    selectionState.setSelection(nextSelection);
+    selectionState.setSelection(
+      visibleSelection(
+        nextSelection,
+        nextView,
+        axis === "row" ? Math.max(1, order.length) : sheet.rows.length,
+        axis === "column" ? Math.max(1, order.length) : sheet.columnCount,
+      ),
+    );
     setSelectedRows(axis === "row" ? selected : remapOther(selectedRows, sheet.rows.length));
     setSelectedColumns(
       axis === "column" ? selected : remapOther(selectedColumns, sheet.columnCount),
@@ -746,12 +815,14 @@ export default function App() {
       : view[key].filter((i) => !indexes.includes(i));
     if (JSON.stringify(changed) === JSON.stringify(view[key])) return;
     recordBeforeChange();
-    setView({ ...currentView, [key]: changed });
+    const nextView = { ...currentView, [key]: changed };
+    setView(nextView);
     setSelectedRows([]);
     setSelectedColumns([]);
-    selectionState.setSelection({ row: 0, col: 0 });
+    selectionState.setSelection(visibleSelection({ row: 0, col: 0 }, nextView));
   };
   const showAll = () => {
+    if (!guardMenu()) return;
     if (!view.hiddenRows.length && !view.hiddenColumns.length) return;
     recordBeforeChange();
     setView({ ...currentView, hiddenRows: [], hiddenColumns: [] });
@@ -768,13 +839,64 @@ export default function App() {
     recordBeforeChange();
     sheet.setColWidths(widths);
   };
+  const startColumnResize = () => {
+    if (resizeTransaction.current) return;
+    resizeTransaction.current = {
+      id: workspace.activeId,
+      entry: snapshot(),
+      widths: { ...sheet.colWidths },
+      ending: false,
+    };
+  };
+  const dragColumnResize = (col: number, width: number) => {
+    const transaction = resizeTransaction.current;
+    if (!transaction) {
+      resizeColumns([col], width);
+      return;
+    }
+    if (transaction.id !== workspace.activeId) {
+      resizeTransaction.current = null;
+      return;
+    }
+    transaction.widths[col] = Math.max(48, Math.min(720, Math.round(width)));
+    sheet.setColWidths({ ...transaction.widths });
+  };
+  const endColumnResize = (col: number, width: number) => {
+    const transaction = resizeTransaction.current;
+    if (!transaction) return;
+    dragColumnResize(col, width);
+    if (transaction.ending) return;
+    transaction.ending = true;
+    // Glide emits the selected-column callbacks synchronously in one mouseup.
+    queueMicrotask(() => {
+      if (resizeTransaction.current !== transaction) return;
+      resizeTransaction.current = null;
+      if (revision.current.id !== transaction.id) return;
+      if (
+        Object.entries(transaction.widths).some(
+          ([key, value]) => value !== (transaction.entry.colWidths?.[Number(key)] ?? 120),
+        )
+      ) {
+        history.record(transaction.entry.rows, transaction.entry.selection, transaction.entry);
+      }
+    });
+  };
   const applySort = (col: number, direction: SortDirection) => {
+    if (!guardMenu()) return;
     const sorted = sortRows(sheet.rows, col, direction, { headerRow: settings.useHeaderRow });
     if (JSON.stringify(sorted) === JSON.stringify(sheet.rows)) return;
-    const available = sheet.rows.map((row, index) => ({ key: JSON.stringify(row), index }));
+    // Stable per-value queues preserve duplicate row identity in linear time
+    // after sorting, without repeated full-row searches or array splices.
+    const available = new Map<string, { indexes: number[]; next: number }>();
+    sheet.rows.forEach((row, index) => {
+      const key = JSON.stringify(row);
+      const bucket = available.get(key) ?? { indexes: [], next: 0 };
+      bucket.indexes.push(index);
+      available.set(key, bucket);
+    });
     const order = sorted.map((row) => {
-      const i = available.findIndex((entry) => entry.key === JSON.stringify(row));
-      return available.splice(i, 1)[0]!.index;
+      const bucket = available.get(JSON.stringify(row))!;
+      return bucket.indexes[bucket.next++]!;
     });
     recordBeforeChange();
     sheet.replaceRows(sorted, true, false);
@@ -789,14 +911,39 @@ export default function App() {
     if (next) replaceRowsFromHistory(next);
   };
 
+  const prepareNavigation = (row: number, col: number, endRow = row, endCol = col) => {
+    if (
+      filter.hasFilters &&
+      !filter.getVisibleRows(sheet.rows).some((r) => r.sourceIndex === row)
+    ) {
+      showToast(t("filteredEdit"));
+      return false;
+    }
+    const nextView = {
+      ...currentView,
+      hiddenRows: view.hiddenRows.filter((r) => r < row || r > endRow),
+      hiddenColumns: view.hiddenColumns.filter((c) => c < col || c > endCol),
+    };
+    if (
+      nextView.hiddenRows.length !== view.hiddenRows.length ||
+      nextView.hiddenColumns.length !== view.hiddenColumns.length
+    ) {
+      recordBeforeChange();
+      setView(nextView);
+    }
+    setSelectedRows([]);
+    setSelectedColumns([]);
+    return true;
+  };
   const jumpSearch = (direction: 1 | -1) => {
     if (searchHits.length === 0) {
       return;
     }
     const nextIndex = (activeSearchIndex + direction + searchHits.length) % searchHits.length;
+    const hit = searchHits[nextIndex];
+    if (!prepareNavigation(hit.row, hit.col)) return;
     setActiveSearchIndex(nextIndex);
     setSearchScrollNonce((nonce) => nonce + 1);
-    const hit = searchHits[nextIndex];
     selectionState.selectCell(hit.row, hit.col, false);
   };
 
@@ -850,10 +997,12 @@ export default function App() {
       return;
     }
     if (ref.kind === "cell") {
+      if (!prepareNavigation(ref.row, ref.col)) return;
       selectionState.selectCell(ref.row, ref.col, false);
       setFocusCell({ row: ref.row, col: ref.col, nonce: Date.now() });
       return;
     }
+    if (!prepareNavigation(ref.startRow, ref.startCol, ref.endRow, ref.endCol)) return;
     selectionState.selectRange({
       startRow: ref.startRow,
       startCol: ref.startCol,
@@ -1039,6 +1188,7 @@ export default function App() {
       menuItems.push({
         label: filter.filters.has(col) ? t("filterClear") : t("filter"),
         action: () => {
+          if (!guardMenu()) return;
           if (filter.filters.has(col)) filter.setColumnFilter(col, null);
           else setFilterPopover({ col, x: contextMenu.x, y: contextMenu.y });
         },
@@ -1047,10 +1197,17 @@ export default function App() {
       menuItems.push(
         {
           label: t("freezeToHere"),
-          action: () => setView({ ...currentView, freezeColumns: col + 1 }),
+          action: () => {
+            if (guardMenu()) setView({ ...currentView, freezeColumns: col + 1 });
+          },
           reason: !indexes.length ? t("virtualTarget") : undefined,
         },
-        { label: t("unfreeze"), action: () => setView({ ...currentView, freezeColumns: 0 }) },
+        {
+          label: t("unfreeze"),
+          action: () => {
+            if (guardMenu()) setView({ ...currentView, freezeColumns: 0 });
+          },
+        },
       );
     }
   }
@@ -1159,7 +1316,9 @@ export default function App() {
             freezeColumns={columnSourceIndexes.filter((c) => c < view.freezeColumns).length}
             zoom={settings.zoom}
             onEdit={editCell}
-            onColumnResize={(col, width) => resizeColumns([col], width)}
+            onColumnResize={dragColumnResize}
+            onColumnResizeStart={startColumnResize}
+            onColumnResizeEnd={endColumnResize}
             onSelectionChange={(sel, range) => {
               if (range) {
                 selectionState.selectRange(range);

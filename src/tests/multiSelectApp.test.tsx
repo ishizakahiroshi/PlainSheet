@@ -8,6 +8,7 @@ import {
   type DataEditorProps,
 } from "@glideapps/glide-data-grid";
 import App from "../App";
+import { parseCsv, serializeCsv } from "../lib/csv";
 import { setLocale } from "../lib/i18n";
 import { DEFAULT_SETTINGS, SETTINGS_STORAGE_KEY } from "../lib/settings";
 import type { CellValue } from "../types/sheet";
@@ -16,6 +17,7 @@ const harness = vi.hoisted(() => ({
   grid: null as DataEditorProps | null,
   fixture: [] as CellValue[][],
   saved: [] as CellValue[][],
+  bounds: { x: 30, y: 30, width: 120, height: 28 },
 }));
 vi.mock("@glideapps/glide-data-grid", async (original) => {
   const actual = await original<typeof import("@glideapps/glide-data-grid")>();
@@ -25,7 +27,7 @@ vi.mock("@glideapps/glide-data-grid", async (original) => {
       harness.grid = _props;
       React.useImperativeHandle(ref, () => ({
         scrollTo: vi.fn(),
-        getBounds: () => ({ x: 30, y: 30, width: 120, height: 28 }),
+        getBounds: () => harness.bounds,
         focus: vi.fn(),
       }));
       return <button data-testid="canvas-boundary">Test canvas boundary</button>;
@@ -125,6 +127,7 @@ const redo = () => fireEvent.click(screen.getByRole("button", { name: "Redo" }))
 beforeEach(() => {
   harness.grid = null;
   harness.saved = [];
+  harness.bounds = { x: 30, y: 30, width: 120, height: 28 };
   localStorage.clear();
   localStorage.setItem(
     SETTINGS_STORAGE_KEY,
@@ -442,5 +445,304 @@ describe("view, keyboard, and asynchronous integration", () => {
     expect(Number.parseInt(screen.getByRole("menu").style.top)).toBeLessThanOrEqual(236);
     await action(/^Copy/);
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("B2\tC2\nB3\tC3");
+  });
+});
+
+describe("consolidated review regressions: source targets and persisted shape", () => {
+  const save = () => fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  const key = async (key: string, ctrlKey = false) => {
+    await act(async () =>
+      fireEvent.keyDown(screen.getByTestId("canvas-boundary"), { key, ctrlKey }),
+    );
+  };
+  const jump = (reference: string) => {
+    const input = screen.getByRole("textbox", { name: "Name box" });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: reference } });
+    fireEvent.keyDown(input, { key: "Enter" });
+  };
+  it.each(["row", "column"] as const)(
+    "aligns every immediate edit target after hiding the first %s",
+    async (axis) => {
+      await start();
+      selection(axis, [0]);
+      await context(axis === "row" ? -1 : 0, 0, axis === "column");
+      await action(/^Hide/);
+      const sourceRow = axis === "row" ? 1 : 0,
+        sourceCol = axis === "column" ? 1 : 0;
+      expect(grid().gridSelection?.current?.cell).toEqual([0, 0]);
+      expect(screen.getByRole("textbox", { name: "Name box" })).toHaveValue(
+        axis === "row" ? "A2" : "B1",
+      );
+      expect(screen.getByRole("textbox", { name: "Cell content" })).toHaveValue(
+        originalRows()[sourceRow][sourceCol],
+      );
+      await key("c", true);
+      expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(
+        originalRows()[sourceRow][sourceCol],
+      );
+      const formula = screen.getByRole("textbox", { name: "Cell content" });
+      fireEvent.focus(formula);
+      fireEvent.change(formula, { target: { value: "visible edit" } });
+      fireEvent.keyDown(formula, { key: "Enter" });
+      save();
+      expect(harness.saved[sourceRow][sourceCol]).toBe("visible edit");
+      expect(harness.saved[0][0]).toBe("R1");
+      await key("Delete");
+      save();
+      expect(harness.saved[sourceRow][sourceCol]).toBe("");
+      expect(harness.saved[0][0]).toBe("R1");
+      await key("v", true);
+      save();
+      expect(harness.saved[sourceRow][sourceCol]).toBe("paste");
+      expect(harness.saved[0][0]).toBe("R1");
+    },
+  );
+  it.each(["row", "column"] as const)(
+    "keeps fallback selection visible after deleting beside a hidden %s",
+    async (axis) => {
+      await start();
+      selection(axis, [0]);
+      await context(axis === "row" ? -1 : 0, 0, axis === "column");
+      await action(/^Hide/);
+      selection(axis, [0]);
+      await context(axis === "row" ? -1 : 0, 0, axis === "column");
+      await action(axis === "row" ? /^Delete row/ : /^Delete col/);
+      fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+      expect(screen.getByRole("textbox", { name: "Name box" })).toHaveValue(
+        axis === "row" ? "A2" : "B1",
+      );
+      await key("Delete");
+      save();
+      expect(harness.saved[0][0]).toBe("R1");
+      expect(axis === "row" ? harness.saved[1][0] : harness.saved[0][1]).toBe("");
+    },
+  );
+  it.each(["row", "column"] as const)(
+    "uses an explicit blank append target with all %ss hidden",
+    async (axis) => {
+      await start();
+      selection(
+        axis,
+        Array.from({ length: axis === "row" ? 8 : 6 }, (_, i) => i),
+      );
+      await context(axis === "row" ? -1 : 0, 0, axis === "column");
+      await action(/^Hide/);
+      expect(screen.getByRole("textbox", { name: "Name box" })).toHaveValue(
+        axis === "row" ? "A9" : "G1",
+      );
+      expect(screen.getByRole("textbox", { name: "Cell content" })).toHaveValue("");
+      await key("Delete");
+      save();
+      expect(harness.saved).toEqual(originalRows());
+      await key("v", true);
+      save();
+      expect(axis === "row" ? harness.saved[8][0] : harness.saved[0][6]).toBe("paste");
+      expect(harness.saved.slice(0, 8).map((r) => r.slice(0, 6))).toEqual(originalRows());
+      undo();
+      save();
+      expect(harness.saved).toEqual(originalRows());
+    },
+  );
+  it.each(["row", "column"] as const)(
+    "replaces old whole-%s targets for Name box cells and rectangles",
+    async (axis) => {
+      await start();
+      selection(axis, [1, 3]);
+      jump("B3");
+      expect([...grid().gridSelection!.rows]).toEqual([]);
+      expect([...grid().gridSelection!.columns]).toEqual([]);
+      expect(grid().gridSelection?.current?.cell).toEqual([1, 2]);
+      await key("c", true);
+      expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith("B3");
+      await key("Delete");
+      expect(cell(1, 2)).toBe("");
+      expect(cell(1, 1)).toBe("B2");
+      selection(axis, [1, 3]);
+      jump("C5:D6");
+      expect(grid().gridSelection?.current?.range).toEqual({ x: 2, y: 4, width: 2, height: 2 });
+      await key("c", true);
+      expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith("C5\tD5\nC6\tD6");
+    },
+  );
+  it.each(["row", "column"] as const)(
+    "replaces whole-%s targets on search navigation and reveals hidden hits",
+    async (axis) => {
+      await start();
+      selection("row", [6]);
+      await context(-1, 6);
+      await action(/^Hide/);
+      selection(axis, [1, 3]);
+      fireEvent.click(screen.getByRole("button", { name: "Search" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Find" }), { target: { value: "B7" } });
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      expect(screen.getByRole("textbox", { name: "Name box" })).toHaveValue("B7");
+      expect(grid().gridSelection?.current?.cell).toEqual([1, 6]);
+      expect([...grid().gridSelection!.rows]).toEqual([]);
+      expect([...grid().gridSelection!.columns]).toEqual([]);
+      await key("c", true);
+      expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith("B7");
+    },
+  );
+  it("rejects distant virtual paste through menu, shortcut and native adapter without history", async () => {
+    await start();
+    await context(-1, 99999);
+    expect(
+      within(screen.getByRole("menu")).getByRole("menuitem", { name: /^Paste/ }),
+    ).toBeDisabled();
+    expect(screen.getByRole("menu")).toHaveTextContent("immediate next row/column");
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await key("v", true);
+    act(() => {
+      const paste = grid().onPaste;
+      if (typeof paste !== "function") throw new Error("App paste callback missing");
+      paste([0, 99999], [["far"]]);
+    });
+    save();
+    expect(harness.saved).toEqual(originalRows());
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+    expect(document.title.startsWith("●")).toBe(false);
+    expect(navigator.clipboard.readText).not.toHaveBeenCalled();
+  });
+  it("preserves all-empty clipboard dimensions, raw values and real CSV/TSV reopen shapes", async () => {
+    await start([[""]]);
+    rectangle(0, 0);
+    vi.mocked(navigator.clipboard.readText).mockResolvedValueOnce('""\n""\n""');
+    await key("v", true);
+    save();
+    expect(harness.saved).toEqual([[""], [""], [""]]);
+    expect(parseCsv(serializeCsv(harness.saved))).toEqual(harness.saved);
+    undo();
+    save();
+    expect(harness.saved).toEqual([[""]]);
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+    rectangle(0, 0);
+    vi.mocked(navigator.clipboard.readText).mockResolvedValueOnce('""\t""\t""');
+    await key("v", true);
+    save();
+    expect(harness.saved).toEqual([["", "", ""]]);
+    expect(parseCsv(serializeCsv(harness.saved, "\t"), "\t")).toEqual(harness.saved);
+    undo();
+    vi.mocked(navigator.clipboard.readText).mockResolvedValueOnce('""');
+    await key("v", true);
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+  });
+  it("retains cleared trailing single-column records through save serialization", async () => {
+    await start([["00123"], ["日本語"], ["900719925474099312345"], ["last"]]);
+    selection("row", [3]);
+    await context(-1, 3);
+    await action(/^Clear/);
+    save();
+    for (const delimiter of [",", "\t"] as const)
+      expect(parseCsv(serializeCsv(harness.saved, delimiter, "CRLF"), delimiter)).toEqual([
+        ["00123"],
+        ["日本語"],
+        ["900719925474099312345"],
+        [""],
+      ]);
+    undo();
+    expect(cell(0, 3)).toBe("last");
+  });
+  it("groups selected-column resize callbacks into one view-only undo, including a no-op drag", async () => {
+    await start();
+    selection("column", [1, 3]);
+    const before = grid().columns.map((c) => (c as SizedGridColumn).width);
+    const resize = (
+      phase: "onColumnResizeStart" | "onColumnResize" | "onColumnResizeEnd",
+      col: number,
+      width: number,
+    ) => grid()[phase]!({ title: String(col), width }, width, col, width);
+    act(() => resize("onColumnResizeStart", 1, before[1]));
+    act(() => resize("onColumnResize", 1, 200));
+    act(() => resize("onColumnResize", 1, 250));
+    await act(async () => {
+      resize("onColumnResize", 3, 250);
+      resize("onColumnResizeEnd", 1, 250);
+      resize("onColumnResizeEnd", 3, 250);
+    });
+    expect((grid().columns[1] as SizedGridColumn).width).toBe(250);
+    expect((grid().columns[3] as SizedGridColumn).width).toBe(250);
+    expect(document.title.startsWith("●")).toBe(false);
+    undo();
+    expect(grid().columns.map((c) => (c as SizedGridColumn).width)).toEqual(before);
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+    redo();
+    expect((grid().columns[1] as SizedGridColumn).width).toBe(250);
+    undo();
+    await act(async () => {
+      resize("onColumnResizeStart", 1, before[1]);
+      resize("onColumnResize", 1, 200);
+      resize("onColumnResizeEnd", 1, before[1]);
+    });
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+  });
+  it("repositions gap controls on smooth-scroll offsets, widths and viewport resize", async () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => ({
+      x: 0,
+      y: 0,
+      width: 600,
+      height: 400,
+      top: 0,
+      left: 0,
+      bottom: 400,
+      right: 600,
+      toJSON: () => ({}),
+    }));
+    await start();
+    selection("row", [1]);
+    await context(-1, 1);
+    harness.bounds = { x: 30, y: 80, width: 120, height: 28 };
+    await action(/^Hide/);
+    const gap = () =>
+      screen
+        .getAllByRole("button", { name: "Reveal hidden rows 2" })
+        .find((button) => button.classList.contains("glideSheet__gap"))!;
+    expect(gap().style.top).toBe("80px");
+    act(() => grid().onVisibleRegionChanged!({ x: 0, y: 0, width: 4, height: 8 }, 0, 0, {}));
+    harness.bounds = { ...harness.bounds, y: 70 };
+    act(() => grid().onVisibleRegionChanged!({ x: 0, y: 0, width: 4, height: 8 }, 0, -10, {}));
+    expect(gap().style.top).toBe("70px");
+    harness.bounds = { ...harness.bounds, y: 60 };
+    act(() => grid().onColumnResize!({ title: "A", width: 120 }, 150, 0, 150));
+    expect(gap().style.top).toBe("60px");
+    harness.bounds = { ...harness.bounds, y: 50 };
+    fireEvent(window, new Event("resize"));
+    expect(gap().style.top).toBe("50px");
+  });
+  it("executes keyboard Enter once and ignores composing Enter in the formula bar", async () => {
+    await start();
+    rectangle(0, 0);
+    const canvas = screen.getByTestId("canvas-boundary");
+    canvas.focus();
+    fireEvent.keyDown(canvas, { key: "ContextMenu" });
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+    await act(async () => fireEvent.keyDown(document.activeElement!, { key: "Enter" }));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).toBeNull();
+    const formula = screen.getByRole("textbox", { name: "Cell content" });
+    fireEvent.focus(formula);
+    fireEvent.change(formula, { target: { value: "composing" } });
+    fireEvent.keyDown(formula, { key: "Enter", isComposing: true });
+    save();
+    expect(harness.saved[0][0]).toBe("R1");
+  });
+  it("keeps duplicate-row visibility identity while sorting a representative medium table", async () => {
+    const fixture = Array.from({ length: 4000 }, (_, i) => [String(3999 - i), "00123", "日本語"]);
+    fixture[2] = [...fixture[1]];
+    await start(fixture);
+    selection("row", [1]);
+    await context(-1, 1);
+    await action(/^Hide/);
+    await context(0, 0, true);
+    await action(/^Sort ascending/);
+    save();
+    expect(harness.saved).toHaveLength(4000);
+    expect(harness.saved[3997]).toEqual(fixture[1]);
+    expect(harness.saved[3998]).toEqual(fixture[2]);
+    expect(screen.getByRole("button", { name: "Reveal hidden rows 3998" })).toBeInTheDocument();
+    undo();
+    save();
+    expect(harness.saved).toEqual(fixture);
+    expect(screen.getByRole("button", { name: "Reveal hidden rows 2" })).toBeInTheDocument();
   });
 });

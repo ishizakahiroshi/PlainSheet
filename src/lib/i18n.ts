@@ -2,6 +2,7 @@ export type Locale = "ja" | "en";
 
 const dictionaries = {
   ja: {
+    boundedPaste: "貼り付け先は実データ内または直後の行・列を選択してください",
     hiddenPaste: "貼り付け先に非表示の行・列があります。再表示してください",
     selectionRows: "{count} 行選択中",
     selectionColumns: "{count} 列選択中",
@@ -154,6 +155,7 @@ const dictionaries = {
     windowClose: "閉じる",
   },
   en: {
+    boundedPaste: "Paste into existing data or its immediate next row/column",
     hiddenPaste: "Reveal hidden rows and columns in the paste destination first",
     selectionRows: "{count} rows selected",
     selectionColumns: "{count} columns selected",

@@ -74,6 +74,11 @@ export function ContextMenu({ state, heading, detail, items, onClose }: ContextM
           ref.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [],
         );
         const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        if (event.key === "Enter") {
+          event.preventDefault();
+          buttons[current]?.click();
+          return;
+        }
         let next: number | undefined;
         if (event.key === "ArrowDown") next = (current + 1) % buttons.length;
         if (event.key === "ArrowUp") next = (current + buttons.length - 1) % buttons.length;
