@@ -6,7 +6,9 @@ Updated 2026-10-16. Consolidated correction candidate; whole-task acceptance is 
 - Initial code/review SHA: `0a0032e991ce893942564b487fb2f5ef6922ad8d`.
 - [Independent full review](results/independent-review-0a0032e9.md): six findings.
 - [Owner consolidated review](https://github.com/ishizakahiroshi/PlainSheet/issues/5#issuecomment-6206867467): overlapping target findings, empty paste shape and sort mapping.
-- [One correction batch and regression evidence](results/corrections-round-1.md).
+- [First correction batch](results/corrections-round-1.md), code `30213e268bd9141ea91a634de381a8714ecb566c`.
+- [Independent correction review](results/independent-review-30213e26.md): original six cases fixed; two related R1/R2 groups remained.
+- [Minimal final source-target corrections](results/corrections-round-2.md): four new App regressions; independent local probes now pass; final canonical-SHA review pending.
 
 - Work branch: `dots/multi-select-P-20261016-003`; Draft PR base: `develop`.
 - Fixed instructions: `5ee020fcd9aece26c7b74196959ba18958485746`.
@@ -22,8 +24,8 @@ Updated 2026-10-16. Consolidated correction candidate; whole-task acceptance is 
 | C1 selection/targets | [First candidate paths and checks](results/implementation.md); actual App/GlideSheet event and DOM tests | Independent/owner review, actual canvas |
 | C2 batch editing | Real hook/App tests for exact targets, count/anchors, failure/cancel, Undo and shape | Consolidated review corrections |
 | C3 width/movement/visibility | Width/history/document/source mapping tests; reveal controls | Full metadata edge review, real layout |
-| C4 candidate checks | TypeScript noEmit, ESLint, 15 files /152 tests passed with installed Node tools | Publish corrected SHA, independent exact-SHA re-review and existing PR CI |
-| Local comprehensive review | First full review received; findings addressed in this correction | Owner corrected-candidate recheck |
+| C4 candidate checks | TypeScript noEmit, ESLint, 15 files /156 tests passed with installed Node tools | Publish corrected SHA, independent exact-SHA re-review and existing PR CI |
+| Local comprehensive review | Initial owner five challenges passed at 30213e2; later independent filter/range boundaries corrected locally | Owner final corrected-candidate recheck |
 | Product GUI/native acceptance | Unobserved | Real canvas/IME/Windows clipboard/native save |
 
 Keep instructions, code, reviewed, CI and board SHAs distinct. The initial published SHA and PR are above; the correction SHA will be recorded after publication. Initial CI: Windows/macOS passed; Ubuntu failed unchanged Linux staging after frontend checks/native compilation. Artifact upload and release publishing were skipped; see correction evidence.  No implementation/self-test result claims independent review or product acceptance.

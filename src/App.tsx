@@ -358,6 +358,39 @@ export default function App() {
     [sheet.columnCount, view.hiddenColumns],
   );
 
+  // The App owns the active source coordinate. Filtering, structural edits and
+  // whole-axis context entry must never leave FormulaBar on a source cell that
+  // the adapter has to clamp to an unrelated visible highlight.
+  useEffect(() => {
+    const visibleRows = new Set(rowSourceIndexes);
+    const visibleColumns = new Set(columnSourceIndexes);
+    const current = selectionState.selection;
+    const row =
+      current.row < sheet.rows.length && !visibleRows.has(current.row)
+        ? (rowSourceIndexes[0] ?? sheet.rows.length)
+        : current.row;
+    const col =
+      current.col < sheet.columnCount && !visibleColumns.has(current.col)
+        ? (columnSourceIndexes[0] ?? sheet.columnCount)
+        : current.col;
+    if (row !== current.row || col !== current.col) selectionState.setSelection({ row, col });
+    const nextRows = selectedRows.filter((i) => i >= sheet.rows.length || visibleRows.has(i));
+    const nextColumns = selectedColumns.filter(
+      (i) => i >= sheet.columnCount || visibleColumns.has(i),
+    );
+    if (nextRows.length !== selectedRows.length) setSelectedRows(nextRows);
+    if (nextColumns.length !== selectedColumns.length) setSelectedColumns(nextColumns);
+  }, [
+    rowSourceIndexes,
+    columnSourceIndexes,
+    sheet.rows.length,
+    sheet.columnCount,
+    selectionState.selection.row,
+    selectionState.selection.col,
+    selectedRows,
+    selectedColumns,
+  ]);
+
   const searchHits = useMemo(
     () => findSearchHits(sheet.rows, query, searchOptions),
     [sheet.rows, query, searchOptions],
@@ -914,7 +947,10 @@ export default function App() {
   const prepareNavigation = (row: number, col: number, endRow = row, endCol = col) => {
     if (
       filter.hasFilters &&
-      !filter.getVisibleRows(sheet.rows).some((r) => r.sourceIndex === row)
+      filter
+        .getVisibleRows(sheet.rows)
+        .filter((r) => r.sourceIndex >= row && r.sourceIndex <= endRow).length !==
+        endRow - row + 1
     ) {
       showToast(t("filteredEdit"));
       return false;
@@ -1002,14 +1038,10 @@ export default function App() {
       setFocusCell({ row: ref.row, col: ref.col, nonce: Date.now() });
       return;
     }
-    if (!prepareNavigation(ref.startRow, ref.startCol, ref.endRow, ref.endCol)) return;
-    selectionState.selectRange({
-      startRow: ref.startRow,
-      startCol: ref.startCol,
-      endRow: ref.endRow,
-      endCol: ref.endCol,
-    });
-    setFocusCell({ row: ref.startRow, col: ref.startCol, nonce: Date.now() });
+    const range = normalizeRange(ref);
+    if (!prepareNavigation(range.startRow, range.startCol, range.endRow, range.endCol)) return;
+    selectionState.selectRange(range);
+    setFocusCell({ row: range.startRow, col: range.startCol, nonce: Date.now() });
   };
 
   const adjustZoom = (delta: number) => {

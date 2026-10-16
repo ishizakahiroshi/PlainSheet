@@ -457,7 +457,7 @@ describe("consolidated review regressions: source targets and persisted shape", 
   };
   const jump = (reference: string) => {
     const input = screen.getByRole("textbox", { name: "Name box" });
-    fireEvent.focus(input);
+    act(() => input.focus());
     fireEvent.change(input, { target: { value: reference } });
     fireEvent.keyDown(input, { key: "Enter" });
   };
@@ -482,7 +482,7 @@ describe("consolidated review regressions: source targets and persisted shape", 
         originalRows()[sourceRow][sourceCol],
       );
       const formula = screen.getByRole("textbox", { name: "Cell content" });
-      fireEvent.focus(formula);
+      act(() => formula.focus());
       fireEvent.change(formula, { target: { value: "visible edit" } });
       fireEvent.keyDown(formula, { key: "Enter" });
       save();
@@ -582,6 +582,91 @@ describe("consolidated review regressions: source targets and persisted shape", 
       expect([...grid().gridSelection!.columns]).toEqual([]);
       await key("c", true);
       expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith("B7");
+    },
+  );
+  it("refuses filtered Name box ranges with an excluded endpoint or interior row", async () => {
+    await start([
+      ["keep", "A"],
+      ["drop", "B"],
+      ["keep", "C"],
+    ]);
+    await context(0, 0, true);
+    await action(/^Filter$/);
+    fireEvent.click(screen.getByRole("checkbox", { name: "drop" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    rectangle(0, 0);
+    for (const reference of ["A1:A2", "A1:A3", "B3:A1"]) {
+      jump(reference);
+      expect(screen.getByRole("textbox", { name: "Name box" })).toHaveValue("A1");
+      expect(screen.getByRole("textbox", { name: "Cell content" })).toHaveValue("keep");
+      expect(grid().gridSelection?.current?.cell).toEqual([0, 0]);
+      expect(screen.getByRole("status")).toHaveTextContent("Clear filters before editing");
+    }
+    const formula = screen.getByRole("textbox", { name: "Cell content" });
+    act(() => formula.focus());
+    fireEvent.change(formula, { target: { value: "visible" } });
+    fireEvent.keyDown(formula, { key: "Enter" });
+    save();
+    expect(harness.saved[1]).toEqual(["drop", "B"]);
+    expect(harness.saved[0][0]).toBe("visible");
+  });
+  it("normalizes reversed Name box ranges before revealing hidden rows and columns", async () => {
+    await start();
+    selection("row", [1]);
+    await context(-1, 1);
+    await action(/^Hide/);
+    selection("column", [1]);
+    await context(1, 0, true);
+    await action(/^Hide/);
+    jump("C3:A1");
+    expect(grid().gridSelection?.current?.range).toEqual({ x: 0, y: 0, width: 3, height: 3 });
+    expect(screen.getByRole("textbox", { name: "Name box" })).toHaveValue("A1:C3");
+    expect(screen.getByRole("textbox", { name: "Cell content" })).toHaveValue("C3");
+    await key("c", true);
+    expect(navigator.clipboard.writeText).toHaveBeenLastCalledWith(
+      "R1\tB1\tC1\nR2\tB2\tC2\nR3\tB3\tC3",
+    );
+    undo();
+    expect(screen.getByRole("button", { name: "Reveal hidden rows 2" })).toBeInTheDocument();
+    redo();
+    expect(grid().gridSelection?.current?.range).toEqual({ x: 0, y: 0, width: 3, height: 3 });
+  });
+  it.each([false, true])(
+    "normalizes filtered active source after apply and new column context (%s)",
+    async (reopenColumn) => {
+      await start([
+        ["keep", "A"],
+        ["drop", "B"],
+      ]);
+      await context(0, 0, true);
+      await action(/^Filter$/);
+      fireEvent.click(screen.getByRole("checkbox", { name: "drop" }));
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+      if (reopenColumn) {
+        await context(1, 0, true);
+        fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+      }
+      expect(screen.getByRole("textbox", { name: "Name box" })).toHaveValue(
+        reopenColumn ? "B1" : "A1",
+      );
+      const formula = screen.getByRole("textbox", { name: "Cell content" });
+      expect(formula).toHaveValue(reopenColumn ? "A" : "keep");
+      act(() => formula.focus());
+      fireEvent.change(formula, { target: { value: "visible" } });
+      fireEvent.keyDown(formula, { key: "Enter" });
+      save();
+      expect(harness.saved[1]).toEqual(["drop", "B"]);
+      expect(harness.saved[0][reopenColumn ? 1 : 0]).toBe("visible");
+      undo();
+      save();
+      expect(harness.saved).toEqual([
+        ["keep", "A"],
+        ["drop", "B"],
+      ]);
+      redo();
+      save();
+      expect(harness.saved[1]).toEqual(["drop", "B"]);
+      expect(harness.saved[0][reopenColumn ? 1 : 0]).toBe("visible");
     },
   );
   it("rejects distant virtual paste through menu, shortcut and native adapter without history", async () => {
@@ -720,7 +805,7 @@ describe("consolidated review regressions: source targets and persisted shape", 
     expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("menu")).toBeNull();
     const formula = screen.getByRole("textbox", { name: "Cell content" });
-    fireEvent.focus(formula);
+    act(() => formula.focus());
     fireEvent.change(formula, { target: { value: "composing" } });
     fireEvent.keyDown(formula, { key: "Enter", isComposing: true });
     save();
