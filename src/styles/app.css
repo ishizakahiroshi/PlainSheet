@@ -113,6 +113,11 @@ button:disabled {
   border-bottom: 1px solid var(--border);
 }
 
+.toolbar {
+  flex-wrap: wrap;
+  padding: 4px 10px;
+}
+
 .toolbar__button,
 .toolbar__iconButton,
 .emptyState__actions button,
@@ -129,6 +134,12 @@ button:disabled {
   color: var(--text);
 }
 
+.toolbar > .toolbar__button,
+.toolbar > .toolbar__iconButton {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .toolbar__button {
   padding: 0 10px;
 }
@@ -143,6 +154,7 @@ button:disabled {
 }
 
 .toolbar__separator {
+  flex-shrink: 0;
   width: 1px;
   height: 24px;
   background: var(--border);
