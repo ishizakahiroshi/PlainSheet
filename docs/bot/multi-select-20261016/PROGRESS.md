@@ -1,33 +1,32 @@
-# P-20261016-003 PlainSheet: evidence board
+# P-20261016-003 PlainSheet: final evidence board
 
-Updated 2026-10-16. Consolidated correction candidate; whole-task acceptance is not yet established.
+Updated 2026-10-16. Source/automated review is complete; GUI/native acceptance and the owner's final disposition remain separate.
 
-- Draft PR: https://github.com/ishizakahiroshi/PlainSheet/pull/6 .
-- Initial code/review SHA: `0a0032e991ce893942564b487fb2f5ef6922ad8d`.
-- [Independent full review](results/independent-review-0a0032e9.md): six findings.
-- [Owner consolidated review](https://github.com/ishizakahiroshi/PlainSheet/issues/5#issuecomment-6206867467): overlapping target findings, empty paste shape and sort mapping.
-- [First correction batch](results/corrections-round-1.md), code `30213e268bd9141ea91a634de381a8714ecb566c`.
-- [Independent correction review](results/independent-review-30213e26.md): original six cases fixed; two related R1/R2 groups remained.
-- [Minimal final source-target corrections](results/corrections-round-2.md): four new App regressions; independent local probes now pass; final canonical-SHA review pending.
-
-- Work branch: `dots/multi-select-P-20261016-003`; Draft PR base: `develop`.
-- Fixed instructions: `5ee020fcd9aece26c7b74196959ba18958485746`.
-- Oracle/develop: `037c29ea4649efc81acc8f28824dca3df08e7450`.
-- Product diff baseline: `e676daae5224842ae238d4e0a8047cb0f2307f89`.
-- Management Issue: https://github.com/ishizakahiroshi/PlainSheet/issues/5 .
-- Formal receipt: https://github.com/ishizakahiroshi/PlainSheet/issues/5#issuecomment-6206514827 .
+- Branch: `dots/multi-select-P-20261016-003`; [Draft PR #6](https://github.com/ishizakahiroshi/PlainSheet/pull/6), base `develop`.
+- Final product/test code and independent reviewed SHA: `8dfc2b105bfe0449f7b8e78a4d8b9405ea86bffb`.
+- This board/report commit is documentation-only; the submitted head SHA is recorded after publication, with product/test blob equality checked against the code SHA.
+- Fixed instructions: `5ee020fcd9aece26c7b74196959ba18958485746`; review baseline: `e676daae5224842ae238d4e0a8047cb0f2307f89`.
+- Oracle/unchanged develop: `037c29ea4649efc81acc8f28824dca3df08e7450`.
+- [Management Issue #5](https://github.com/ishizakahiroshi/PlainSheet/issues/5); [formal receipt](https://github.com/ishizakahiroshi/PlainSheet/issues/5#issuecomment-6206514827).
 - Implementation owner: dots multi-select coordinator; separate reviewer: dots `review_multiselect_context_actions`.
 
-| Stage | Evidence | Remaining gate |
+| Stage | Actual evidence | Separate remaining gate |
 |---|---|---|
-| Instructions | All five fixed docs read; receipt above; branch/PR collision check | None for initial dispatch |
-| C1 selection/targets | [First candidate paths and checks](results/implementation.md); actual App/GlideSheet event and DOM tests | Independent/owner review, actual canvas |
-| C2 batch editing | Real hook/App tests for exact targets, count/anchors, failure/cancel, Undo and shape | Consolidated review corrections |
-| C3 width/movement/visibility | Width/history/document/source mapping tests; reveal controls | Full metadata edge review, real layout |
-| C4 candidate checks | TypeScript noEmit, ESLint, 15 files /156 tests passed with installed Node tools | Publish corrected SHA, independent exact-SHA re-review and existing PR CI |
-| Local comprehensive review | Initial owner five challenges passed at 30213e2; later independent filter/range boundaries corrected locally | Owner final corrected-candidate recheck |
-| Product GUI/native acceptance | Unobserved | Real canvas/IME/Windows clipboard/native save |
+| C1 selection/targets | Actual App/GlideSheet callbacks and DOM; whole row/column/rectangle preservation, counts, context/keyboard, stale-target guards and shared visible source invariant | Real canvas/modifiers/focus/IME |
+| C2 batch editing | Real App/hooks for exact discontiguous targets, insert/duplicate anchors, clipboard failure, cancel/no-op, bounded virtual paste, empty dimensions and CSV/TSV reopen | OS clipboard/native file save |
+| C3 width/movement/visibility | Selected widths and grouped drag Undo; block movement/state remap; document-local hidden state, gap/Show all, immediate formula/copy/edit/delete and all-hidden histories | Real pointer/layout/frozen-gap/smooth-scroll observation |
+| C4 local automated | Exact-source TypeScript noEmit, ESLint and diff check exit 0; 15 files /156 tests passed | Does not substitute for GUI/native |
+| Independent review | [Final exact-8dfc2 report](results/independent-review-8dfc2b10.md): no unresolved code findings; fresh 46/46 App tests including ten independent probes | Documentation-only source-equivalence verification after publication |
+| Owner Windows recheck | Owner reports 15 files /161 tests (156+5), lint and noEmit pass; final App SHA-256 matches; full correction diff read | Owner final acceptance record |
+| Exact-code CI | [Run 38843935107](https://github.com/ishizakahiroshi/PlainSheet/actions/runs/38843935107); see [final record](results/final-record.md) for per-job executed/skipped results | Pre-existing Linux staging failure remains outside feature scope; no all-green claim |
+| Real product GUI/native | Unobserved, no product launch/build authorized locally | Canvas/layout/IME, OS clipboard and native save/reopen |
 
-Keep instructions, code, reviewed, CI and board SHAs distinct. The initial published SHA and PR are above; the correction SHA will be recorded after publication. Initial CI: Windows/macOS passed; Ubuntu failed unchanged Linux staging after frontend checks/native compilation. Artifact upload and release publishing were skipped; see correction evidence.  No implementation/self-test result claims independent review or product acceptance.
+## Review history and final record
 
-One Issue progress-comment call was cancelled; that call is held without retry. The owner explicitly allowed distinct first source/test/docs publication and Draft PR submission, with new execution denials still stopping their own operations. The established task thread receives coordination while Issue publication is stopped. The earlier confirmed Issue receipt remains the public acknowledgment.
+- [First implementation](results/implementation.md), initial code `0a0032e991ce893942564b487fb2f5ef6922ad8d`.
+- [Six initial independent findings](results/independent-review-0a0032e9.md) and [owner consolidated findings](https://github.com/ishizakahiroshi/PlainSheet/issues/5#issuecomment-6206867467).
+- [First correction](results/corrections-round-1.md), code `30213e268bd9141ea91a634de381a8714ecb566c`; [owner's initial Windows recheck](https://github.com/ishizakahiroshi/PlainSheet/issues/5#issuecomment-6207030593).
+- [Later independent R1/R2 boundary failures](results/independent-review-30213e26.md) and [minimal final corrections](results/corrections-round-2.md). Earlier passes are not used to hide those failures.
+- [Final record](results/final-record.md): exact identities, command/exit/count evidence, source equality, CI, unobserved gates, scope and rollback.
+
+One Issue progress-comment call was cancelled and has not been retried or delegated. Distinct authorized Git/PR submissions succeeded. Coordination continues in the established task thread; the owner's final Issue record is separate. No changes to workflows, manifests, locks, native code, dependencies, persistence schema, other candidates or shared branches. No merge, release or deployment.
