@@ -6,7 +6,8 @@ Updated 2026-10-16. Shared task documents; progress state is recorded in managem
 - Work/instructions branch: `dots/multi-select-P-20261016-003`.
 - PR base: `develop`.
 - Oracle: `037c29ea4649efc81acc8f28824dca3df08e7450`.
-- Management Issue: assigned before dispatch.
+- Management Issue: https://github.com/ishizakahiroshi/PlainSheet/issues/5 .
+- Initial instruction publication / product diff baseline: `e676daae5224842ae238d4e0a8047cb0f2307f89`.
 - Scope/acceptance: [SPEC](SPEC.md); facts: [FACTS](FACTS.md); independent review: [REVIEW](REVIEW.md).
 - Local coordinator: Codex. dots implementation and independent review owners are confirmed at acknowledgment.
 

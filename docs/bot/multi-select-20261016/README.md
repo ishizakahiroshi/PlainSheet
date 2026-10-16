@@ -11,8 +11,8 @@ Implement the complete [SPEC.md](SPEC.md), in C1 → C2 → C3 → C4 order. The
 - Draft PR base: `develop`.
 - Behavior oracle and starting product SHA: `037c29ea4649efc81acc8f28824dca3df08e7450`.
 - Instructions: `docs/bot/multi-select-20261016/` on the work branch.
-- Dedicated management Issue: assigned immediately after initial instruction publication; the final URL will replace this sentence before dispatch.
-- Product review diff baseline: the first instructions-only commit, recorded in FACTS after publication. Keep it distinct from the behavior oracle, current instructions revision, product SHA, and reviewed SHA.
+- Dedicated management Issue: https://github.com/ishizakahiroshi/PlainSheet/issues/5 . Record all acknowledgment, questions, submissions and review outcomes here.
+- Product review diff baseline: first instructions-only commit `e676daae5224842ae238d4e0a8047cb0f2307f89`. Keep it distinct from the behavior oracle, current instructions revision, product SHA, and reviewed SHA.
 
 Start from this branch, not an older UX candidate. Existing PRs #1 and #4 and their remote branches are separate unfinished work. Do not merge, rebase, replace, or push them. Local changes outside this branch and private files are not inputs to this task. This bounded base intentionally matches the product source used to write this feature plan; any later integration of other UX candidates is a separate action.
 
