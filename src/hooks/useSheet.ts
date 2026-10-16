@@ -36,7 +36,7 @@ export function useSheet() {
       }
       const next = ensureSize(currentRows, rowIndex + 1, colIndex + 1);
       next[rowIndex][colIndex] = value;
-      return trimTrailingEmptyRows(next);
+      return next;
     });
     setMetaState((current) => ({ ...current, dirty: true }));
   }
@@ -56,7 +56,7 @@ export function useSheet() {
     const next = cloneRows(rows);
     const blank = () => Array.from({ length: Math.max(columnCount, 1) }, () => "");
     next.splice(boundedIndex, 0, ...Array.from({ length: n }, blank));
-    replaceRows(next);
+    replaceRows(next, true, false);
   }
 
   function insertRow(index: number): void {
@@ -77,9 +77,9 @@ export function useSheet() {
     // Never collapse to [] — that switches the UI to EmptyState mid-edit.
     // Keep a single blank row so the grid (and undo) stay available.
     if (next.length === 0) {
-      next.push([""]);
+      next.push(Array.from({ length: Math.max(columnCount, 1) }, () => ""));
     }
-    replaceRows(next);
+    replaceRows(next, true, false);
   }
 
   function deleteRow(index: number): void {
@@ -98,7 +98,15 @@ export function useSheet() {
       copy.splice(target, 0, ...Array.from({ length: n }, () => ""));
       return copy;
     });
-    replaceRows(next);
+    setColWidths((current) =>
+      Object.fromEntries(
+        Object.entries(current).map(([key, width]) => [
+          Number(key) >= target ? Number(key) + n : Number(key),
+          width,
+        ]),
+      ),
+    );
+    setRows(next, true);
   }
 
   function insertColumn(index: number): void {
@@ -128,7 +136,10 @@ export function useSheet() {
       }
       return remapped;
     });
-    setRows(next, true);
+    setRows(
+      next.map((row) => (row.length ? row : [""])),
+      true,
+    );
   }
 
   function deleteColumn(index: number): void {
@@ -172,10 +183,14 @@ export function useSheet() {
     if (!changed) {
       return;
     }
-    replaceRows(trimTrailingEmptyRows(next));
+    replaceRows(next, true, false);
   }
 
-  function pasteGrid(startRow: number, startCol: number, grid: CellValue[][]): Exclude<Range, null> {
+  function pasteGrid(
+    startRow: number,
+    startCol: number,
+    grid: CellValue[][],
+  ): Exclude<Range, null> {
     const rowCount = Math.max(grid.length, 1);
     // reduce instead of Math.max(...spread): a huge pasted grid would exceed
     // the engine's call-argument limit and throw mid-paste.
@@ -186,13 +201,74 @@ export function useSheet() {
         next[startRow + rowOffset][startCol + colOffset] = grid[rowOffset][colOffset];
       }
     }
-    replaceRows(trimTrailingEmptyRows(next));
+    replaceRows(next, true, false);
     return {
       startRow,
       startCol,
       endRow: startRow + rowCount - 1,
       endCol: startCol + colCount - 1,
     };
+  }
+
+  function clearTargets(rowIndexes: number[], columns: number[]): void {
+    const next = cloneRows(rows);
+    let changed = false;
+    for (const r of rowIndexes)
+      for (const c of columns) {
+        if (next[r]?.[c] !== undefined && next[r][c] !== "") {
+          next[r][c] = "";
+          changed = true;
+        }
+      }
+    if (changed) setRows(next);
+  }
+
+  function duplicateTargets(axis: "row" | "column", indexes: number[]): void {
+    if (!indexes.length) return;
+    const anchor = indexes[indexes.length - 1]! + 1;
+    if (axis === "row") {
+      const next = cloneRows(rows);
+      next.splice(anchor, 0, ...indexes.map((i) => [...rows[i]!]));
+      setRows(next);
+    } else {
+      setRows(
+        rows.map((row) => {
+          const next = [...row];
+          while (next.length < anchor) next.push("");
+          next.splice(anchor, 0, ...indexes.map((i) => row[i] ?? ""));
+          return next;
+        }),
+      );
+      const widths: ColumnWidthMap = {};
+      for (const [key, width] of Object.entries(colWidths))
+        widths[Number(key) >= anchor ? Number(key) + indexes.length : Number(key)] = width;
+      indexes.forEach((index, offset) => {
+        if (colWidths[index] !== undefined) widths[anchor + offset] = colWidths[index]!;
+      });
+      setColWidths(widths);
+    }
+  }
+
+  function moveTargets(axis: "row" | "column", indexes: number[], delta: -1 | 1): void {
+    if (!indexes.length) return;
+    const size = axis === "row" ? rows.length : columnCount;
+    const first = indexes[0]!,
+      last = indexes[indexes.length - 1]!;
+    if (first + delta < 0 || last + delta >= size || indexes.some((v, i) => v !== first + i))
+      return;
+    const order = Array.from({ length: size }, (_, i) => i);
+    const block = order.splice(first, indexes.length);
+    order.splice(first + delta, 0, ...block);
+    if (axis === "row") setRows(order.map((i) => [...rows[i]!]));
+    else {
+      setRows(rows.map((row) => order.map((i) => row[i] ?? "")));
+      const widths: ColumnWidthMap = { ...colWidths };
+      order.forEach((old, index) => {
+        delete widths[index];
+        if (colWidths[old] !== undefined) widths[index] = colWidths[old]!;
+      });
+      setColWidths(widths);
+    }
   }
 
   function autoFitColumns(): void {
@@ -241,6 +317,10 @@ export function useSheet() {
     autoFitColumn,
     setColumnWidth,
     restoreState,
+    setColWidths,
+    clearTargets,
+    duplicateTargets,
+    moveTargets,
   };
 }
 

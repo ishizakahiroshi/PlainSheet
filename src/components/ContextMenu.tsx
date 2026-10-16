@@ -1,252 +1,111 @@
-import {
-  ArrowDownAZ,
-  ArrowUpAZ,
-  Copy,
-  ClipboardPaste,
-  Columns3,
-  Filter,
-  Plus,
-  Scissors,
-  Snowflake,
-  Trash2,
-} from "lucide-react";
-import { useEffect, type ReactNode } from "react";
-import { t } from "../lib/i18n";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { SelectionTarget, TargetKind } from "../lib/selectionTarget";
 
-export type ContextMenuKind = "cell" | "row" | "column";
-
+export type ContextMenuKind = TargetKind;
 export type ContextMenuState = {
   kind: ContextMenuKind;
   row: number;
   col: number;
   x: number;
   y: number;
+  target: SelectionTarget;
+  documentId: string;
+  revision: number;
 } | null;
+export type ContextAction = { label: string; action: () => void; reason?: string };
 
 type ContextMenuProps = {
   state: ContextMenuState;
+  heading: string;
+  detail: string;
+  items: ContextAction[];
   onClose: () => void;
-  onCut?: () => void;
-  onCopy: () => void;
-  onPaste: () => void;
-  onClear: () => void;
-  onInsertRowAbove: () => void;
-  onInsertRowBelow: () => void;
-  onDeleteRow: () => void;
-  onInsertColLeft: () => void;
-  onInsertColRight: () => void;
-  onDeleteCol: () => void;
-  onAutoFitColumn: () => void;
-  onSortAsc?: () => void;
-  onSortDesc?: () => void;
-  onFilter?: () => void;
-  onFreezeToHere?: () => void;
-  onUnfreeze?: () => void;
-  filterActive?: boolean;
-  rowOpsDisabled?: boolean;
 };
 
-type MenuItem = {
-  label: string;
-  icon: ReactNode;
-  action: () => void;
-  disabled?: boolean;
-};
-
-export function ContextMenu({
-  state,
-  onClose,
-  onCut,
-  onCopy,
-  onPaste,
-  onClear,
-  onInsertRowAbove,
-  onInsertRowBelow,
-  onDeleteRow,
-  onInsertColLeft,
-  onInsertColRight,
-  onDeleteCol,
-  onAutoFitColumn,
-  onSortAsc,
-  onSortDesc,
-  onFilter,
-  onFreezeToHere,
-  onUnfreeze,
-  filterActive,
-  rowOpsDisabled,
-}: ContextMenuProps) {
-  useEffect(() => {
-    if (!state) {
-      return;
-    }
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Element && target.closest(".contextMenu")) {
-        return;
-      }
-      onClose();
+export function ContextMenu({ state, heading, detail, items, onClose }: ContextMenuProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const [position, setPosition] = useState({ left: 0, top: 0 });
+  useLayoutEffect(() => {
+    if (!state || !ref.current) return;
+    const node = ref.current;
+    returnFocus.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const place = () => {
+      const bounds = node.getBoundingClientRect();
+      setPosition({
+        left: Math.max(4, Math.min(state.x, window.innerWidth - bounds.width - 4)),
+        top: Math.max(4, Math.min(state.y, window.innerHeight - bounds.height - 4)),
+      });
     };
-    document.addEventListener("pointerdown", onPointerDown, true);
-    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+    place();
+    node.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("resize", place);
+      if (returnFocus.current?.isConnected) returnFocus.current.focus();
+    };
+  }, [state]);
+  useEffect(() => {
+    if (!state) return;
+    const dismiss = (event: PointerEvent) => {
+      if (event.target instanceof Node && !ref.current?.contains(event.target)) onClose();
+    };
+    document.addEventListener("pointerdown", dismiss, true);
+    return () => document.removeEventListener("pointerdown", dismiss, true);
   }, [state, onClose]);
-
-  if (!state) {
-    return null;
-  }
-
-  const commonCellItems: MenuItem[] = [
-    ...(onCut
-      ? [{ label: t("cut"), icon: <Scissors size={15} aria-hidden="true" />, action: onCut }]
-      : []),
-    { label: t("copy"), icon: <Copy size={15} aria-hidden="true" />, action: onCopy },
-    {
-      label: t("paste"),
-      icon: <ClipboardPaste size={15} aria-hidden="true" />,
-      action: onPaste,
-    },
-    { label: t("clearCells"), icon: <Trash2 size={15} aria-hidden="true" />, action: onClear },
-    {
-      label: t("insertRowAbove"),
-      icon: <Plus size={15} aria-hidden="true" />,
-      action: onInsertRowAbove,
-      disabled: rowOpsDisabled,
-    },
-    {
-      label: t("insertRowBelow"),
-      icon: <Plus size={15} aria-hidden="true" />,
-      action: onInsertRowBelow,
-      disabled: rowOpsDisabled,
-    },
-    {
-      label: t("deleteRow"),
-      icon: <Trash2 size={15} aria-hidden="true" />,
-      action: onDeleteRow,
-      disabled: rowOpsDisabled,
-    },
-  ];
-
-  const columnItems: MenuItem[] = [
-    ...(onSortAsc
-      ? [{ label: t("sortAsc"), icon: <ArrowUpAZ size={15} aria-hidden="true" />, action: onSortAsc }]
-      : []),
-    ...(onSortDesc
-      ? [
-          {
-            label: t("sortDesc"),
-            icon: <ArrowDownAZ size={15} aria-hidden="true" />,
-            action: onSortDesc,
-          },
-        ]
-      : []),
-    ...(onFilter
-      ? [
-          {
-            label: filterActive ? t("filterClear") : t("filter"),
-            icon: <Filter size={15} aria-hidden="true" />,
-            action: onFilter,
-          },
-        ]
-      : []),
-    ...(onFreezeToHere
-      ? [
-          {
-            label: t("freezeToHere"),
-            icon: <Snowflake size={15} aria-hidden="true" />,
-            action: onFreezeToHere,
-          },
-        ]
-      : []),
-    ...(onUnfreeze
-      ? [
-          {
-            label: t("unfreeze"),
-            icon: <Snowflake size={15} aria-hidden="true" />,
-            action: onUnfreeze,
-          },
-        ]
-      : []),
-    {
-      label: t("insertColLeft"),
-      icon: <Plus size={15} aria-hidden="true" />,
-      action: onInsertColLeft,
-      disabled: rowOpsDisabled,
-    },
-    {
-      label: t("insertColRight"),
-      icon: <Plus size={15} aria-hidden="true" />,
-      action: onInsertColRight,
-      disabled: rowOpsDisabled,
-    },
-    {
-      label: t("recalculateColumn"),
-      icon: <Columns3 size={15} aria-hidden="true" />,
-      action: onAutoFitColumn,
-    },
-    {
-      label: t("deleteCol"),
-      icon: <Trash2 size={15} aria-hidden="true" />,
-      action: onDeleteCol,
-      disabled: rowOpsDisabled,
-    },
-  ];
-
-  const rowItems: MenuItem[] = [
-    ...(onCut
-      ? [{ label: t("cut"), icon: <Scissors size={15} aria-hidden="true" />, action: onCut }]
-      : []),
-    { label: t("copy"), icon: <Copy size={15} aria-hidden="true" />, action: onCopy },
-    {
-      label: t("paste"),
-      icon: <ClipboardPaste size={15} aria-hidden="true" />,
-      action: onPaste,
-    },
-    {
-      label: t("insertRowAbove"),
-      icon: <Plus size={15} aria-hidden="true" />,
-      action: onInsertRowAbove,
-      disabled: rowOpsDisabled,
-    },
-    {
-      label: t("insertRowBelow"),
-      icon: <Plus size={15} aria-hidden="true" />,
-      action: onInsertRowBelow,
-      disabled: rowOpsDisabled,
-    },
-    {
-      label: t("deleteRow"),
-      icon: <Trash2 size={15} aria-hidden="true" />,
-      action: onDeleteRow,
-      disabled: rowOpsDisabled,
-    },
-  ];
-
-  const items = state.kind === "column" ? columnItems : state.kind === "row" ? rowItems : commonCellItems;
-
+  if (!state) return null;
   return (
     <div
+      ref={ref}
       className="contextMenu"
       role="menu"
-      aria-label={state.kind === "column" ? t("columnMenu") : state.kind === "row" ? t("rowMenu") : t("cellMenu")}
-      style={{ left: state.x, top: state.y }}
+      aria-label={heading}
+      style={position}
+      onKeyDown={(event) => {
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+        event.stopPropagation();
+        if (event.key === "Escape" || event.key === "Tab") {
+          event.preventDefault();
+          onClose();
+          return;
+        }
+        const buttons = Array.from(
+          ref.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [],
+        );
+        const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        let next: number | undefined;
+        if (event.key === "ArrowDown") next = (current + 1) % buttons.length;
+        if (event.key === "ArrowUp") next = (current + buttons.length - 1) % buttons.length;
+        if (event.key === "Home") next = 0;
+        if (event.key === "End") next = buttons.length - 1;
+        if (next !== undefined) {
+          event.preventDefault();
+          buttons[next]?.focus();
+        }
+      }}
     >
+      <div className="contextMenu__heading">{heading}</div>
+      <div className="contextMenu__detail">{detail}</div>
       {items.map((item) => (
         <button
-          className="contextMenu__item"
           key={item.label}
           type="button"
           role="menuitem"
-          aria-label={item.label}
-          disabled={item.disabled}
+          className="contextMenu__item"
+          disabled={Boolean(item.reason)}
+          title={item.reason}
           onClick={() => {
-            if (item.disabled) {
-              return;
+            if (!item.reason) {
+              item.action();
+              onClose();
             }
-            item.action();
-            onClose();
           }}
         >
-          {item.icon}
-          <span>{item.label}</span>
+          <span>
+            {item.label}
+            {item.reason && <small className="contextMenu__reason">{item.reason}</small>}
+          </span>
         </button>
       ))}
     </div>

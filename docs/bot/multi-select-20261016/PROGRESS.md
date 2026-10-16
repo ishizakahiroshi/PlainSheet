@@ -1,25 +1,25 @@
 # P-20261016-003 PlainSheet: evidence board
 
-Updated 2026-10-16. Shared task documents; progress state is recorded in management Issue comments.
+Updated 2026-10-16. Candidate implementation; whole-task acceptance is not yet established.
 
-- Repository: `ishizakahiroshi/PlainSheet`.
-- Work/instructions branch: `dots/multi-select-P-20261016-003`.
-- PR base: `develop`.
-- Oracle: `037c29ea4649efc81acc8f28824dca3df08e7450`.
+- Work branch: `dots/multi-select-P-20261016-003`; Draft PR base: `develop`.
+- Fixed instructions: `5ee020fcd9aece26c7b74196959ba18958485746`.
+- Oracle/develop: `037c29ea4649efc81acc8f28824dca3df08e7450`.
+- Product diff baseline: `e676daae5224842ae238d4e0a8047cb0f2307f89`.
 - Management Issue: https://github.com/ishizakahiroshi/PlainSheet/issues/5 .
-- Initial instruction publication / product diff baseline: `e676daae5224842ae238d4e0a8047cb0f2307f89`.
-- Scope/acceptance: [SPEC](SPEC.md); facts: [FACTS](FACTS.md); independent review: [REVIEW](REVIEW.md).
-- Local coordinator: Codex. dots implementation and independent review owners are confirmed at acknowledgment.
+- Formal receipt: https://github.com/ishizakahiroshi/PlainSheet/issues/5#issuecomment-6206514827 .
+- Implementation owner: dots multi-select coordinator; separate reviewer: dots `review_multiselect_context_actions`.
 
 | Stage | Evidence | Remaining gate |
 |---|---|---|
-| Instructions | First instructions publication and final dispatch revision are recorded after publication | Delivery/read-back and exact-revision acknowledgment |
-| C1 selection/targets | No submitted code yet | Actual entry-point/count/focus behavior |
-| C2 batch editing | No submitted code yet | Every edit action and real hook/App regressions |
-| C3 width/movement/visibility | No submitted code yet | Source mapping, document state and Undo |
-| C4 independent review/CI | No report or product SHA yet | Separate reviewer, post-fix review and exact-SHA CI |
-| Local comprehensive review | Pending submitted candidate | Full diff and consolidated correction loop |
-| Product GUI/native acceptance | Not performed by instruction publication | Real canvas/IME/Windows clipboard/native save |
+| Instructions | All five fixed docs read; receipt above; branch/PR collision check | None for initial dispatch |
+| C1 selection/targets | [First candidate paths and checks](results/implementation.md); actual App/GlideSheet event and DOM tests | Independent/owner review, actual canvas |
+| C2 batch editing | Real hook/App tests for exact targets, count/anchors, failure/cancel, Undo and shape | Consolidated review corrections |
+| C3 width/movement/visibility | Width/history/document/source mapping tests; reveal controls | Full metadata edge review, real layout |
+| C4 candidate checks | TypeScript noEmit, ESLint, 15 files /135 tests passed with installed Node tools | Canonical candidate publication, separate exact-SHA review and existing PR CI |
+| Local comprehensive review | Awaiting submitted candidate | Owner consolidated review and correction loop |
+| Product GUI/native acceptance | Unobserved | Real canvas/IME/Windows clipboard/native save |
 
-Keep instructions SHA, product code SHA, reviewed code SHA, CI SHA, and board commit distinct. Use Git history or a later receipt for this board's own commit. Link each reported state to a management Issue comment and evidence; do not mark entire work complete from a self-report or passed static tests.
+Keep instructions, code, reviewed, CI and board SHAs distinct. The submission receipt will establish the first published code SHA and PR. No implementation/self-test result claims independent review or product acceptance.
 
+One Issue progress-comment call was cancelled; that call is held without retry. The owner explicitly allowed distinct first source/test/docs publication and Draft PR submission, with new execution denials still stopping their own operations. The established task thread receives coordination while Issue publication is stopped. The earlier confirmed Issue receipt remains the public acknowledgment.
