@@ -1,5 +1,6 @@
 import { Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import appIcon from "../../assets/icon.svg";
 import { isTauriRuntime } from "../hooks/useFile";
 import { t } from "../lib/i18n";
 import type { SheetMeta } from "../types/sheet";
@@ -15,6 +16,15 @@ export function TitleBar({ meta }: TitleBarProps) {
   return (
     <header className="titleBar" data-tauri-drag-region>
       <div className="titleBar__brand" data-tauri-drag-region>
+        <img
+          className="titleBar__icon"
+          src={appIcon}
+          alt=""
+          width={20}
+          height={20}
+          draggable={false}
+          data-tauri-drag-region
+        />
         {t("appName")}
       </div>
       <div className="titleBar__file" data-tauri-drag-region>

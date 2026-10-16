@@ -53,8 +53,17 @@ button:disabled {
 }
 
 .titleBar__brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 700;
   color: var(--accent-strong);
+}
+
+.titleBar__icon {
+  display: block;
+  flex-shrink: 0;
+  pointer-events: none;
 }
 
 .titleBar__file {
