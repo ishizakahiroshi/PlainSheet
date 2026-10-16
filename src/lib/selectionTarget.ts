@@ -10,6 +10,9 @@ export type SelectionTarget = {
   anchor: Selection;
   rowTargets: number[];
   columnTargets: number[];
+  // Whole-axis selection may include editable padding beyond stored data.
+  // Keep it separate from bounded targets used by copy/delete/clear operations.
+  selectionIndexes: number[];
 };
 
 export const boundedIndexes = (indexes: readonly number[], size: number): number[] =>
@@ -59,6 +62,8 @@ export function resolveTarget(options: {
   let kind: TargetKind = selectedRows.length ? "row" : selectedColumns.length ? "column" : "cell";
   let rowTargets = boundedIndexes(selectedRows, rowCount);
   let columnTargets = boundedIndexes(selectedColumns, columnCount);
+  let rowSelection = boundedIndexes(selectedRows, Number.MAX_SAFE_INTEGER);
+  let columnSelection = boundedIndexes(selectedColumns, Number.MAX_SAFE_INTEGER);
   let anchor = { row: rect.startRow, col: rect.startCol };
   let cellRect = rect;
   if (context) {
@@ -83,6 +88,9 @@ export function resolveTarget(options: {
       kind = context.kind;
       rowTargets = kind === "row" ? boundedIndexes([context.row], rowCount) : [];
       columnTargets = kind === "column" ? boundedIndexes([context.col], columnCount) : [];
+      rowSelection = kind === "row" ? boundedIndexes([context.row], Number.MAX_SAFE_INTEGER) : [];
+      columnSelection =
+        kind === "column" ? boundedIndexes([context.col], Number.MAX_SAFE_INTEGER) : [];
       cellRect = {
         startRow: context.row,
         endRow: context.row,
@@ -98,6 +106,7 @@ export function resolveTarget(options: {
       kind,
       rowTargets,
       columnTargets: [],
+      selectionIndexes: rowSelection,
       rows: rowTargets,
       columns: indexesBetween(0, columnCount - 1, columnCount),
       anchor,
@@ -112,6 +121,7 @@ export function resolveTarget(options: {
       kind,
       rowTargets: [],
       columnTargets,
+      selectionIndexes: columnSelection,
       rows: filtered ? visibleRows : indexesBetween(0, rowCount - 1, rowCount),
       columns: columnTargets,
       anchor,
@@ -125,7 +135,15 @@ export function resolveTarget(options: {
   const columns = indexesBetween(cellRect.startCol, cellRect.endCol, columnCount).filter((i) =>
     colSet.has(i),
   );
-  return { kind, rows, columns, rowTargets: rows, columnTargets: columns, anchor };
+  return {
+    kind,
+    rows,
+    columns,
+    rowTargets: rows,
+    columnTargets: columns,
+    anchor,
+    selectionIndexes: [],
+  };
 }
 
 export function targetGrid(rows: CellValue[][], target: SelectionTarget): CellValue[][] {

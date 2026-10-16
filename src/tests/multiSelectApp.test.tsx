@@ -152,6 +152,100 @@ afterEach(() => {
 });
 
 describe("real App + GlideSheet public context paths", () => {
+  it("keeps all eight blank padding rows selected when opening and closing their context menu", async () => {
+    await start([[""]]);
+    const indexes = [1, 2, 3, 4, 5, 6, 7, 8];
+    selection("row", indexes);
+    expect([...grid().gridSelection!.rows]).toEqual(indexes);
+    await context(-1, 4);
+    expect([...grid().gridSelection!.rows]).toEqual(indexes);
+    expect(screen.getByRole("menu")).toHaveAccessibleName("8 rows selected");
+    expect(screen.getByRole("menu")).toHaveTextContent("2–9");
+    expect(
+      within(screen.getByRole("menu")).getByRole("menuitem", { name: /^Delete row/ }),
+    ).toBeDisabled();
+    expect(
+      within(screen.getByRole("menu")).getByRole("menuitem", { name: /^Copy/ }),
+    ).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect([...grid().gridSelection!.rows]).toEqual(indexes);
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+    await context(0, 4);
+    expect([...grid().gridSelection!.rows]).toEqual(indexes);
+    expect(screen.getByRole("menu")).toHaveAccessibleName("8 rows selected");
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    fireEvent.keyDown(screen.getByTestId("canvas-boundary"), { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu")).toHaveAccessibleName("8 rows selected");
+    expect([...grid().gridSelection!.rows]).toEqual(indexes);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    expect(harness.saved).toEqual([[""]]);
+  });
+  it("keeps mixed data and padding row selection while copying only the stored rows", async () => {
+    await start(originalRows().slice(0, 2));
+    const indexes = [0, 1, 2, 3, 4, 5, 6, 7];
+    selection("row", indexes);
+    await context(-1, 6);
+    expect([...grid().gridSelection!.rows]).toEqual(indexes);
+    expect(screen.getByRole("menu")).toHaveAccessibleName("8 rows selected");
+    expect(
+      within(screen.getByRole("menu")).getByRole("menuitem", { name: /^Copy/ }),
+    ).toHaveTextContent("(2)");
+    await action(/^Copy/);
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      originalRows()
+        .slice(0, 2)
+        .map((row) => row.join("\t"))
+        .join("\n"),
+    );
+    expect([...grid().gridSelection!.rows]).toEqual(indexes);
+  });
+  it("keeps noncontiguous padding columns selected without creating stored columns", async () => {
+    await start([[""]]);
+    const indexes = [2, 4, 6];
+    selection("column", indexes);
+    await context(4, 0, true);
+    expect([...grid().gridSelection!.columns]).toEqual(indexes);
+    expect(screen.getByRole("menu")).toHaveAccessibleName("3 columns selected");
+    expect(
+      within(screen.getByRole("menu")).getByRole("menuitem", { name: /^Delete column/ }),
+    ).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect([...grid().gridSelection!.columns]).toEqual(indexes);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    expect(harness.saved).toEqual([[""]]);
+  });
+  it("replaces the old selection with one outside padding row without materializing it", async () => {
+    const stored = originalRows().slice(0, 2);
+    await start(stored);
+    selection("row", [0, 1, 2, 3]);
+    await context(-1, 6);
+    expect([...grid().gridSelection!.rows]).toEqual([6]);
+    expect(screen.getByRole("menu")).toHaveAccessibleName("1 rows selected");
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    expect(harness.saved).toEqual(stored);
+  });
+  it("deletes only stored rows in a mixed padding selection and restores the full selection on undo", async () => {
+    const stored = originalRows().slice(0, 2);
+    await start(stored);
+    const indexes = [0, 1, 2, 3, 4, 5, 6, 7];
+    selection("row", indexes);
+    await context(-1, 6);
+    await action(/^Delete row/);
+    expect(screen.getByRole("dialog")).toHaveTextContent("Delete 2 targets: 1–2");
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    expect(harness.saved).toEqual([Array(6).fill("")]);
+    undo();
+    expect([...grid().gridSelection!.rows]).toEqual(indexes);
+    await context(-1, 6);
+    expect(screen.getByRole("menu")).toHaveAccessibleName("8 rows selected");
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    expect(harness.saved).toEqual(stored);
+  });
   it("preserves five whole rows through selected cell and row-marker context, replacing outside", async () => {
     await start();
     selection("row", [1, 2, 3, 4, 5]);
@@ -292,7 +386,7 @@ describe("real App + GlideSheet public context paths", () => {
   it("keeps virtual operations bounded and disables destructive actions", async () => {
     await start();
     await context(-1, 99999);
-    expect(screen.getByRole("menu")).toHaveAccessibleName("0 rows selected");
+    expect(screen.getByRole("menu")).toHaveAccessibleName("1 rows selected");
     expect(
       within(screen.getByRole("menu")).getByRole("menuitem", { name: /^Delete row/ }),
     ).toBeDisabled();

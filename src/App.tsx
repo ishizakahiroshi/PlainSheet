@@ -488,12 +488,12 @@ export default function App() {
   ) => {
     const target = liveTarget({ kind, row, col });
     if (target.kind === "row") {
-      setSelectedRows(target.rowTargets.length ? target.rowTargets : [row]);
+      setSelectedRows(target.selectionIndexes);
       setSelectedColumns([]);
       if (!selectedRows.includes(row))
         selectionState.selectRow(target.anchor.row, sheet.columnCount);
     } else if (target.kind === "column") {
-      setSelectedColumns(target.columnTargets.length ? target.columnTargets : [col]);
+      setSelectedColumns(target.selectionIndexes);
       setSelectedRows([]);
       if (!selectedColumns.includes(col))
         selectionState.selectColumn(target.anchor.col, sheet.rows.length);
@@ -1135,17 +1135,23 @@ export default function App() {
     : 0;
   const menuHeading =
     menuTarget?.kind === "row"
-      ? t("selectionRows", { count: menuCount })
+      ? t("selectionRows", { count: menuTarget.selectionIndexes.length })
       : menuTarget?.kind === "column"
-        ? t("selectionColumns", { count: menuCount })
+        ? t("selectionColumns", { count: menuTarget.selectionIndexes.length })
         : t("selectionCells", {
             rows: menuTarget?.rows.length ?? 0,
             cols: menuTarget?.columns.length ?? 0,
           });
   const menuDetail = menuTarget
     ? t("targetDetail", {
-        rows: targetRanges(menuTarget.rows) || "—",
-        cols: targetRanges(menuTarget.columns, true) || "—",
+        rows:
+          targetRanges(menuTarget.kind === "row" ? menuTarget.selectionIndexes : menuTarget.rows) ||
+          "—",
+        cols:
+          targetRanges(
+            menuTarget.kind === "column" ? menuTarget.selectionIndexes : menuTarget.columns,
+            true,
+          ) || "—",
       })
     : "";
   const menuItems: ContextAction[] = [];
