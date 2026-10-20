@@ -8,8 +8,7 @@
   },
   "allow": {
     "emails": [
-      "ishizakahiroshi.dev\u0040gmail.com",
-      "128x128\u00402x.png"
+      "ishizakahiroshi.dev\u0040gmail.com"
     ],
     "emailDomains": [
       "example.com",
