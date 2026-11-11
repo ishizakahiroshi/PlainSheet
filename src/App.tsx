@@ -69,7 +69,8 @@ export default function App() {
   const history = useHistory();
   const workspace = useDocuments();
   const { settings, update: updateSettings } = useSettings();
-  const filter = useFilter();
+  const filter = useFilter({ headerRow: settings.useHeaderRow });
+  const [loadNonce, setLoadNonce] = useState(0);
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const [filterPopover, setFilterPopover] = useState<FilterPopoverState>(null);
@@ -269,6 +270,7 @@ export default function App() {
 
   const loadIntoWorkspace = useCallback(
     (rows: CellValue[][], meta: Partial<SheetMeta>) => {
+      setLoadNonce((n) => n + 1);
       if (isBlankStarter()) {
         workspace.replaceActiveContent(rows, meta);
         sheet.loadData(rows, meta);
@@ -291,6 +293,7 @@ export default function App() {
     updateMeta: (meta) => sheet.setMeta(meta),
     getRows: () => rowsRef.current,
     getMeta: () => metaRef.current,
+    getActiveId: workspace.getActiveId,
     onToast: showToast,
     confirmDiscard: () => window.confirm(t("confirmUnsaved")),
     onRecentPath: (path) => {
@@ -301,7 +304,9 @@ export default function App() {
   });
 
   const newFile = useCallback(() => {
+    setLoadNonce((n) => n + 1);
     if (isBlankStarter()) {
+      file.resetSaveTarget?.();
       sheet.loadData([[""]], { fileName: undefined, format: "csv", delimiter: "," });
       history.reset();
       setView(emptyView());
@@ -313,7 +318,17 @@ export default function App() {
     }
     const doc = workspace.addBlankDocument(getLive());
     applyDocument(doc);
-  }, [isBlankStarter, sheet, history, selectionState, filter, workspace, getLive, applyDocument]);
+  }, [
+    isBlankStarter,
+    file,
+    sheet,
+    history,
+    selectionState,
+    filter,
+    workspace,
+    getLive,
+    applyDocument,
+  ]);
 
   const switchTab = useCallback(
     (id: string) => {
@@ -335,12 +350,13 @@ export default function App() {
       if (dirty && !window.confirm(t("confirmCloseTab"))) {
         return;
       }
+      file.resetSaveTarget?.(id);
       const result = workspace.closeDocument(id, getLive());
       if (result.closed && result.next) {
         applyDocument(result.next);
       }
     },
-    [workspace, sheet.meta.dirty, getLive, applyDocument],
+    [workspace, sheet.meta.dirty, file, getLive, applyDocument],
   );
 
   const visibleRows = useMemo(
@@ -391,9 +407,16 @@ export default function App() {
     selectedColumns,
   ]);
 
+  const filteredRowSet = useMemo(
+    () =>
+      filter.hasFilters
+        ? new Set(filter.getVisibleRows(sheet.rows).map((row) => row.sourceIndex))
+        : null,
+    [filter, sheet.rows],
+  );
   const searchHits = useMemo(
-    () => findSearchHits(sheet.rows, query, searchOptions),
-    [sheet.rows, query, searchOptions],
+    () => findSearchHits(sheet.rows, query, searchOptions, filteredRowSet),
+    [sheet.rows, query, searchOptions, filteredRowSet],
   );
   const searchHitSet = useMemo(
     () => new Set(searchHits.map((hit) => `${hit.row}:${hit.col}`)),
@@ -426,13 +449,20 @@ export default function App() {
     selectedColumns,
     colWidths: sheet.colWidths,
     view: currentView,
+    dirty: sheet.meta.dirty,
   });
   const recordBeforeChange = () => history.record(sheet.rows, selectionState.selection, snapshot());
   const replaceRowsFromHistory = (entry: HistoryEntry) => {
     const dataChanged = JSON.stringify(entry.rows) !== JSON.stringify(sheet.rows);
+    const nextDirty =
+      !sheet.meta.dirty && dataChanged
+        ? true
+        : entry.dirty !== undefined
+          ? entry.dirty
+          : dataChanged || sheet.meta.dirty;
     sheet.restoreState(
       entry.rows,
-      { ...sheet.meta, dirty: dataChanged || sheet.meta.dirty },
+      { ...sheet.meta, dirty: nextDirty },
       entry.colWidths ?? sheet.colWidths,
     );
     if (entry.range) selectionState.selectRange(entry.range);
@@ -446,6 +476,28 @@ export default function App() {
   };
   const commitCell = (row: number, col: number, value: string, reselect: boolean) => {
     if ((sheet.rows[row]?.[col] ?? "") !== value) {
+      if (
+        row < 0 ||
+        col < 0 ||
+        row > sheet.rows.length ||
+        col > sheet.columnCount ||
+        row >= MAX_GRID_ROWS ||
+        col >= MAX_GRID_COLS
+      ) {
+        showToast(t("boundedPaste"));
+        return;
+      }
+      if (filter.hasFilters && row < sheet.rows.length && !rowSourceIndexes.includes(row)) {
+        showToast(t("filteredEdit"));
+        return;
+      }
+      if (
+        (row < sheet.rows.length && view.hiddenRows.includes(row)) ||
+        (col < sheet.columnCount && view.hiddenColumns.includes(col))
+      ) {
+        showToast(t("hiddenPaste"));
+        return;
+      }
       recordBeforeChange();
       sheet.updateCell(row, col, value);
     }
@@ -692,9 +744,9 @@ export default function App() {
     };
     if (axis === "column") {
       // Structural edits with active filters are blocked; empty filter indices cannot drift.
-      nextView.freezeColumns = Math.max(
+      nextView.freezeColumns = order.reduce(
+        (max, old, i) => (old >= 0 && old < view.freezeColumns ? Math.max(max, i + 1) : max),
         0,
-        ...order.map((old, i) => (old >= 0 && old < view.freezeColumns ? i + 1 : 0)),
       );
     }
     setView(nextView);
@@ -723,9 +775,19 @@ export default function App() {
         axis === "column" ? Math.max(1, order.length) : sheet.columnCount,
       ),
     );
-    setSelectedRows(axis === "row" ? selected : remapOther(selectedRows, sheet.rows.length));
+    setSelectedRows(
+      axis === "row"
+        ? selected
+        : selected.length > 0
+          ? []
+          : remapOther(selectedRows, sheet.rows.length),
+    );
     setSelectedColumns(
-      axis === "column" ? selected : remapOther(selectedColumns, sheet.columnCount),
+      axis === "column"
+        ? selected
+        : selected.length > 0
+          ? []
+          : remapOther(selectedColumns, sheet.columnCount),
     );
   };
   const insertAxis = (axis: "row" | "column", offset: 0 | 1) => {
@@ -988,6 +1050,9 @@ export default function App() {
     if (!hit) {
       return;
     }
+    if (!prepareNavigation(hit.row, hit.col)) {
+      return;
+    }
     const matcher = buildMatcher(query, searchOptions);
     if (!matcher) {
       return;
@@ -1006,18 +1071,28 @@ export default function App() {
   };
 
   const replaceAll = () => {
+    if (filter.hasFilters) {
+      showToast(t("filteredEdit"));
+      return;
+    }
     const matcher = buildMatcher(query, searchOptions);
     if (!matcher) {
       return;
     }
+    const hiddenRowSet = new Set(view.hiddenRows);
+    const hiddenColSet = new Set(view.hiddenColumns);
     let count = 0;
-    const next = sheet.rows.map((row) =>
-      row.map((cell) =>
-        cell.replace(matcher, () => {
-          count += 1;
-          return replacement;
-        }),
-      ),
+    const next = sheet.rows.map((row, rowIndex) =>
+      hiddenRowSet.has(rowIndex)
+        ? [...row]
+        : row.map((cell, colIndex) =>
+            hiddenColSet.has(colIndex)
+              ? cell
+              : cell.replace(matcher, () => {
+                  count += 1;
+                  return replacement;
+                }),
+          ),
     );
     if (count === 0) {
       showToast(t("toastSearchDone", { count }));
@@ -1056,7 +1131,9 @@ export default function App() {
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     const target = event.target;
     const editingText =
-      target instanceof HTMLInputElement ||
+      (target instanceof HTMLInputElement &&
+        target.type !== "checkbox" &&
+        target.type !== "radio") ||
       target instanceof HTMLTextAreaElement ||
       target instanceof HTMLSelectElement ||
       (target instanceof HTMLElement && target.isContentEditable);
@@ -1227,8 +1304,12 @@ export default function App() {
         label: filter.filters.has(col) ? t("filterClear") : t("filter"),
         action: () => {
           if (!guardMenu()) return;
-          if (filter.filters.has(col)) filter.setColumnFilter(col, null);
-          else setFilterPopover({ col, x: contextMenu.x, y: contextMenu.y });
+          if (filter.filters.has(col)) {
+            recordBeforeChange();
+            filter.setColumnFilter(col, null);
+          } else {
+            setFilterPopover({ col, x: contextMenu.x, y: contextMenu.y });
+          }
         },
         reason: !indexes.length ? t("virtualTarget") : undefined,
       });
@@ -1236,25 +1317,40 @@ export default function App() {
         {
           label: t("freezeToHere"),
           action: () => {
-            if (guardMenu()) setView({ ...currentView, freezeColumns: col + 1 });
+            if (guardMenu() && view.freezeColumns !== col + 1) {
+              recordBeforeChange();
+              setView({ ...currentView, freezeColumns: col + 1 });
+            }
           },
           reason: !indexes.length ? t("virtualTarget") : undefined,
         },
         {
           label: t("unfreeze"),
           action: () => {
-            if (guardMenu()) setView({ ...currentView, freezeColumns: 0 });
+            if (guardMenu() && view.freezeColumns !== 0) {
+              recordBeforeChange();
+              setView({ ...currentView, freezeColumns: 0 });
+            }
           },
         },
       );
     }
   }
 
+  const tabDocuments = useMemo(
+    () =>
+      workspace.documents.map((doc) =>
+        doc.id === workspace.activeId ? { ...doc, meta: sheet.meta } : doc,
+      ),
+    [workspace.documents, workspace.activeId, sheet.meta],
+  );
+  const formulaResetKey = `${workspace.activeId}:${loadNonce}`;
+
   return (
     <div className="appShell" onKeyDown={handleKeyDown}>
-      <TitleBar meta={sheet.meta} />
+      <TitleBar meta={sheet.meta} anyDirty={workspace.anyDirty || sheet.meta.dirty} />
       <TabBar
-        documents={workspace.documents}
+        documents={tabDocuments}
         activeId={workspace.activeId}
         onSelect={switchTab}
         onClose={closeTab}
@@ -1309,6 +1405,7 @@ export default function App() {
             col={selectionState.selection.col}
             reference={selectedReference}
             value={currentValue}
+            resetKey={formulaResetKey}
             onCommit={(row, col, value, reselect) => commitCell(row, col, value, reselect)}
             onJump={handleJump}
           />
@@ -1373,14 +1470,46 @@ export default function App() {
               if (updates.length === 0) {
                 return;
               }
-              recordBeforeChange();
-              const next = cloneRows(sheet.rows);
-              let maxRow = next.length;
+              if (filter.hasFilters) {
+                showToast(t("filteredEdit"));
+                return;
+              }
+              const hiddenRowSet = new Set(view.hiddenRows);
+              const hiddenColSet = new Set(view.hiddenColumns);
+              if (updates.some((u) => hiddenRowSet.has(u.row) || hiddenColSet.has(u.col))) {
+                showToast(t("hiddenPaste"));
+                return;
+              }
+              let minRow = Infinity;
+              let minCol = Infinity;
+              let maxRow = sheet.rows.length;
               let maxCol = sheet.columnCount;
               for (const update of updates) {
+                if (update.row < minRow) minRow = update.row;
+                if (update.col < minCol) minCol = update.col;
                 maxRow = Math.max(maxRow, update.row + 1);
                 maxCol = Math.max(maxCol, update.col + 1);
               }
+              if (
+                minRow < 0 ||
+                minCol < 0 ||
+                minRow > sheet.rows.length ||
+                minCol > sheet.columnCount ||
+                maxRow > MAX_GRID_ROWS ||
+                maxCol > MAX_GRID_COLS
+              ) {
+                showToast(t("boundedPaste"));
+                return;
+              }
+              const hasChange =
+                maxRow > sheet.rows.length ||
+                maxCol > sheet.columnCount ||
+                updates.some((u) => (sheet.rows[u.row]?.[u.col] ?? "") !== u.value);
+              if (!hasChange) {
+                return;
+              }
+              recordBeforeChange();
+              const next = cloneRows(sheet.rows);
               while (next.length < maxRow) {
                 next.push(Array.from({ length: maxCol }, () => ""));
               }
@@ -1432,7 +1561,11 @@ export default function App() {
         state={filterPopover}
         rows={sheet.rows}
         selected={columnFilterSelected}
-        onApply={(col, allowed) => filter.setColumnFilter(col, allowed)}
+        headerRow={settings.useHeaderRow}
+        onApply={(col, allowed) => {
+          recordBeforeChange();
+          filter.setColumnFilter(col, allowed);
+        }}
         onClose={() => setFilterPopover(null)}
       />
       <ConfirmDialog
@@ -1482,7 +1615,12 @@ function referenceForSelection(selection: Selection, range: Range): string {
 
 const SEARCH_HIT_CAP = 5000;
 
-function findSearchHits(rows: CellValue[][], query: string, options: SearchOptions): SearchHit[] {
+function findSearchHits(
+  rows: CellValue[][],
+  query: string,
+  options: SearchOptions,
+  allowedRows?: Set<number> | null,
+): SearchHit[] {
   const matcher = buildMatcher(query, options);
   if (!matcher) {
     return [];
@@ -1490,6 +1628,9 @@ function findSearchHits(rows: CellValue[][], query: string, options: SearchOptio
 
   const hits: SearchHit[] = [];
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    if (allowedRows && !allowedRows.has(rowIndex)) {
+      continue;
+    }
     for (let colIndex = 0; colIndex < rows[rowIndex].length; colIndex += 1) {
       matcher.lastIndex = 0;
       if (matcher.test(rows[rowIndex][colIndex])) {

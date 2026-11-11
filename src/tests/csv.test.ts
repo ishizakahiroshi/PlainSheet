@@ -202,4 +202,15 @@ describe("stream CSV parse", () => {
       expect(await parseCsvStream(chunks()), `cut at ${cut}`).toEqual(parseCsv(text));
     }
   });
+
+  it("matches parseCsv when an escaped quote pair straddles a chunk boundary", async () => {
+    const text = 'id,name\r\n1,"a ""quoted"" value"\r\n2,"""edge"""\r\n';
+    for (let cut = 1; cut < text.length; cut += 1) {
+      async function* chunks() {
+        yield text.slice(0, cut);
+        yield text.slice(cut);
+      }
+      expect(await parseCsvStream(chunks()), `cut at ${cut}`).toEqual(parseCsv(text));
+    }
+  });
 });

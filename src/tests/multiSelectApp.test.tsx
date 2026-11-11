@@ -924,4 +924,69 @@ describe("consolidated review regressions: source targets and persisted shape", 
     expect(harness.saved).toEqual(fixture);
     expect(screen.getByRole("button", { name: "Reveal hidden rows 2" })).toBeInTheDocument();
   });
+
+  it("supports drag-selecting and Shift/Ctrl-clicking multiple column and row headers", async () => {
+    await start();
+    const canvas = screen.getByTestId("canvas-boundary");
+    const headerEvent = (col: number, buttons = 0, localEventX = 40) =>
+      ({
+        kind: "header",
+        location: [col, -1] as const,
+        bounds: { x: 0, y: 0, width: 120, height: 32 },
+        group: "",
+        shiftKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        isTouch: false,
+        isEdge: false,
+        button: 0,
+        buttons,
+        scrollEdge: [0, 0] as const,
+        localEventX,
+        localEventY: 16,
+      }) as Parameters<NonNullable<DataEditorProps["onMouseMove"]>>[0];
+    const rowMarkerEvent = (row: number, buttons = 0) =>
+      ({
+        kind: "cell",
+        location: [-1, row] as const,
+        bounds: { x: 0, y: 0, width: 48, height: 28 },
+        isFillHandle: false,
+        shiftKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        isTouch: false,
+        isEdge: false,
+        button: 0,
+        buttons,
+        scrollEdge: [0, 0] as const,
+        localEventX: 20,
+        localEventY: 14,
+      }) as Parameters<NonNullable<DataEditorProps["onMouseMove"]>>[0];
+
+    // Drag across column headers B -> C -> D
+    act(() => grid().onMouseMove!(headerEvent(1, 0)));
+    fireEvent.mouseDown(canvas, { button: 0 });
+    selection("column", [1]);
+    act(() => grid().onMouseMove!(headerEvent(2, 1)));
+    act(() => grid().onMouseMove!(headerEvent(3, 1)));
+    fireEvent.mouseUp(window, { button: 0 });
+    expect([...grid().gridSelection!.columns]).toEqual([1, 2, 3]);
+
+    // Shift+Click column header F on the right-side menu zone extends B..F without opening filter menu
+    act(() => grid().onMouseMove!(headerEvent(5, 0, 105)));
+    fireEvent.mouseDown(canvas, { button: 0, shiftKey: true });
+    expect([...grid().gridSelection!.columns]).toEqual([1, 2, 3, 4, 5]);
+    act(() => grid().onHeaderMenuClick!(5, { x: 0, y: 0, width: 120, height: 32 }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.mouseUp(window, { button: 0 });
+
+    // Drag across row headers 2 -> 3 -> 4 (index 1 -> 2 -> 3)
+    act(() => grid().onMouseMove!(rowMarkerEvent(1, 0)));
+    fireEvent.mouseDown(canvas, { button: 0 });
+    selection("row", [1]);
+    act(() => grid().onMouseMove!(rowMarkerEvent(2, 1)));
+    act(() => grid().onMouseMove!(rowMarkerEvent(3, 1)));
+    fireEvent.mouseUp(window, { button: 0 });
+    expect([...grid().gridSelection!.rows]).toEqual([1, 2, 3]);
+  });
 });

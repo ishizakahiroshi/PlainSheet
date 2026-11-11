@@ -75,6 +75,21 @@ describe("table formats", () => {
     expect(JSON.parse(json)).toEqual([{ column_2: "x", column_2_2: "y" }]);
   });
 
+  it("does not steal a later explicit header name when deduplicating earlier columns", () => {
+    const json = serializeTableText([["a", "a", "a_2"], ["1", "2", "3"]], "json", ",", "LF");
+    expect(JSON.parse(json)).toEqual([{ a: "1", a_3: "2", a_2: "3" }]);
+  });
+
+  it("does not resolve Object.prototype properties for missing keys in JSON/YAML objects", () => {
+    expect(
+      parseTableText('[{"toString":"custom","a":"1"},{"a":"2"}]', "json", ","),
+    ).toEqual([
+      ["toString", "a"],
+      ["custom", "1"],
+      ["", "2"],
+    ]);
+  });
+
   it("round-trips an in-cell newline through Markdown", () => {
     const rows = [
       ["a", "b"],

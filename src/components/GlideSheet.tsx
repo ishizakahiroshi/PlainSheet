@@ -8,6 +8,7 @@ import {
   type FillPatternEventArgs,
   type GridCell,
   type GridColumn,
+  type GridMouseEventArgs,
   type GridSelection,
   type Highlight,
   type Item,
@@ -110,13 +111,42 @@ const EMPTY_SELECTION: GridSelection = {
   rows: CompactSelection.empty(),
 };
 
-function compactToIndexes(selection: CompactSelection): number[] {
+function compactToIndexes(selection: CompactSelection, maxIndex?: number): number[] {
   const indexes: number[] = [];
   for (const index of selection) {
+    if (maxIndex !== undefined && index > maxIndex) break;
     indexes.push(index);
   }
   return indexes;
 }
+
+function compactFromIndexes(indexes: readonly number[]): CompactSelection {
+  let selection = CompactSelection.empty();
+  for (const index of indexes) {
+    selection = selection.add(index);
+  }
+  return selection;
+}
+
+function buildAxisRange(anchor: number, target: number, base: readonly number[]): number[] {
+  const start = Math.min(anchor, target);
+  const end = Math.max(anchor, target);
+  const set = new Set<number>(base);
+  for (let i = start; i <= end; i += 1) {
+    set.add(i);
+  }
+  return [...set].sort((a, b) => a - b);
+}
+
+type HeaderDragState = {
+  axis: "row" | "column";
+  anchor: number;
+  base: number[];
+  target: number;
+  isMod: boolean;
+  isShift: boolean;
+  keepSingle: boolean;
+};
 
 export function GlideSheet({
   rows,
@@ -183,12 +213,28 @@ export function GlideSheet({
   >([]);
   const [gridSelection, setGridSelection] = useState<GridSelection>(EMPTY_SELECTION);
   const suppressContextSelection = useRef(false);
+  const suppressHeaderMenuRef = useRef(false);
+  const lastPointerRef = useRef<GridMouseEventArgs | null>(null);
+  const colAnchorRef = useRef<number | null>(null);
+  const rowAnchorRef = useRef<number | null>(null);
+  const headerDragRef = useRef<HeaderDragState | null>(null);
   const activeHitRef = useRef(activeSearchHit);
   activeHitRef.current = activeSearchHit;
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
   const sourceMapRef = useRef(rowSourceIndexes);
   sourceMapRef.current = rowSourceIndexes;
+
+  useEffect(() => {
+    const handleMouseUp = () => {
+      headerDragRef.current = null;
+      queueMicrotask(() => {
+        suppressHeaderMenuRef.current = false;
+      });
+    };
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => window.removeEventListener("mouseup", handleMouseUp);
+  }, []);
 
   const toSourceRow = useCallback(
     (visibleRow: number): number => {
@@ -329,31 +375,19 @@ export function GlideSheet({
     [onEdit, toSourceRow, toSourceCol],
   );
 
-  const handleGridSelectionChange = useCallback(
-    (next: GridSelection) => {
-      if (suppressContextSelection.current) return;
-      const maxRow = Math.max(0, rows.length + BUFFER_ROWS - 1);
-      const maxCol = Math.max(0, visibleColumnCount + BUFFER_COLS - 1);
-
-      const selectedRows = compactToIndexes(next.rows).filter((index) => index <= maxRow);
-      const selectedCols = compactToIndexes(next.columns).filter((index) => index <= maxCol);
-      if (selectedRows.length > 0) {
-        onRowsSelected?.(selectedRows.map(toSourceRow));
-      } else {
-        onRowsSelected?.([]);
-      }
-      if (selectedCols.length > 0) {
-        onColumnsSelected?.(selectedCols.map(toSourceCol));
-      } else {
+  const applyAxisSelection = useCallback(
+    (axis: "row" | "column", indexes: number[]) => {
+      if (axis === "row") {
+        setGridSelection({
+          columns: CompactSelection.empty(),
+          rows: compactFromIndexes(indexes),
+          current: undefined,
+        });
         onColumnsSelected?.([]);
-      }
-
-      const current = next.current;
-      if (!current) {
-        setGridSelection(next);
-        if (selectedRows.length > 0) {
-          const first = selectedRows[0]!;
-          const last = selectedRows[selectedRows.length - 1]!;
+        onRowsSelected?.(indexes.map(toSourceRow));
+        if (indexes.length > 0) {
+          const first = indexes[0]!;
+          const last = indexes[indexes.length - 1]!;
           onSelectionChange(
             { row: toSourceRow(first), col: toSourceCol(0) },
             {
@@ -363,9 +397,273 @@ export function GlideSheet({
               endCol: Math.max(0, columnCount - 1),
             },
           );
-        } else if (selectedCols.length > 0) {
-          const first = selectedCols[0]!;
-          const last = selectedCols[selectedCols.length - 1]!;
+        }
+      } else {
+        setGridSelection({
+          columns: compactFromIndexes(indexes),
+          rows: CompactSelection.empty(),
+          current: undefined,
+        });
+        onRowsSelected?.([]);
+        onColumnsSelected?.(indexes.map(toSourceCol));
+        if (indexes.length > 0) {
+          const first = indexes[0]!;
+          const last = indexes[indexes.length - 1]!;
+          onSelectionChange(
+            { row: toSourceRow(0), col: toSourceCol(first) },
+            {
+              startRow: toSourceRow(0),
+              startCol: toSourceCol(first),
+              endRow: toSourceRow(Math.max(0, rows.length - 1)),
+              endCol: toSourceCol(last),
+            },
+          );
+        }
+      }
+    },
+    [
+      onSelectionChange,
+      onRowsSelected,
+      onColumnsSelected,
+      rows.length,
+      columnCount,
+      toSourceRow,
+      toSourceCol,
+    ],
+  );
+
+  const handleMouseMove = useCallback(
+    (args: GridMouseEventArgs) => {
+      const maxRow = Math.max(0, rows.length + BUFFER_ROWS - 1);
+      const maxCol = Math.max(0, visibleColumnCount + BUFFER_COLS - 1);
+      if ((args.buttons & 1) === 0) {
+        lastPointerRef.current = args;
+        headerDragRef.current = null;
+        return;
+      }
+      if (!headerDragRef.current) {
+        if (args.kind === "header" && args.location[0] >= 0 && !args.isEdge) {
+          const col = Math.min(args.location[0], maxCol);
+          headerDragRef.current = {
+            axis: "column",
+            anchor: colAnchorRef.current ?? col,
+            base: [],
+            target: col,
+            isMod: false,
+            isShift: false,
+            keepSingle: false,
+          };
+        } else if (args.kind === "cell" && args.location[0] === -1 && args.location[1] >= 0) {
+          const row = Math.min(args.location[1], maxRow);
+          headerDragRef.current = {
+            axis: "row",
+            anchor: rowAnchorRef.current ?? row,
+            base: [],
+            target: row,
+            isMod: false,
+            isShift: false,
+            keepSingle: false,
+          };
+        }
+      }
+      const drag = headerDragRef.current;
+      if (!drag) return;
+      if (drag.axis === "column") {
+        const rawCol = args.location[0];
+        if (rawCol >= 0) {
+          const targetCol = Math.min(rawCol, maxCol);
+          if (targetCol !== drag.target) {
+            drag.target = targetCol;
+            suppressHeaderMenuRef.current = true;
+            const nextCols = buildAxisRange(drag.anchor, targetCol, drag.base);
+            applyAxisSelection("column", nextCols);
+          }
+        }
+      } else {
+        const rawRow = args.location[1];
+        if (rawRow >= 0) {
+          const targetRow = Math.min(rawRow, maxRow);
+          if (targetRow !== drag.target) {
+            drag.target = targetRow;
+            const nextRows = buildAxisRange(drag.anchor, targetRow, drag.base);
+            applyAxisSelection("row", nextRows);
+          }
+        }
+      }
+    },
+    [rows.length, visibleColumnCount, applyAxisSelection],
+  );
+
+  const handleMouseDownCapture = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (event.button !== 0) {
+        headerDragRef.current = null;
+        return;
+      }
+      const pointer = lastPointerRef.current;
+      if (!pointer) return;
+      const maxRow = Math.max(0, rows.length + BUFFER_ROWS - 1);
+      const maxCol = Math.max(0, visibleColumnCount + BUFFER_COLS - 1);
+
+      if (pointer.kind === "header") {
+        if (pointer.isEdge || pointer.location[0] < 0) {
+          headerDragRef.current = null;
+          return;
+        }
+        const clickedCol = Math.min(pointer.location[0], maxCol);
+        const isMod = event.ctrlKey || event.metaKey;
+        const isShift = event.shiftKey;
+        const currentVisibleCols = selectedColumns
+          .map(toVisibleCol)
+          .filter((i) => i >= 0 && i <= maxCol);
+        const fallbackAnchor =
+          currentVisibleCols[0] ?? Math.min(Math.max(0, toVisibleCol(selection.col)), maxCol);
+        const anchor = isShift ? (colAnchorRef.current ?? fallbackAnchor) : clickedCol;
+        if (!isShift) {
+          colAnchorRef.current = clickedCol;
+        }
+        const base = isMod ? currentVisibleCols.filter((c) => isShift || c !== clickedCol) : [];
+        headerDragRef.current = {
+          axis: "column",
+          anchor,
+          base,
+          target: clickedCol,
+          isMod,
+          isShift,
+          keepSingle: false,
+        };
+        const isOverMenu =
+          pointer.bounds.width > 35 && pointer.localEventX > pointer.bounds.width - 30;
+        if (isOverMenu && (isShift || isMod)) {
+          suppressHeaderMenuRef.current = true;
+          const nextCols = isShift
+            ? buildAxisRange(anchor, clickedCol, base)
+            : currentVisibleCols.includes(clickedCol)
+              ? base
+              : [...base, clickedCol].sort((a, b) => a - b);
+          applyAxisSelection("column", nextCols);
+        }
+        return;
+      }
+
+      if (pointer.kind === "cell" && pointer.location[0] === -1 && pointer.location[1] >= 0) {
+        const clickedRow = Math.min(pointer.location[1], maxRow);
+        const isMod = event.ctrlKey || event.metaKey;
+        const isShift = event.shiftKey;
+        const currentVisibleRows = selectedRows
+          .map(toVisibleRow)
+          .filter((i) => i >= 0 && i <= maxRow);
+        const fallbackAnchor =
+          currentVisibleRows[0] ?? Math.min(Math.max(0, toVisibleRow(selection.row)), maxRow);
+        const anchor = isShift ? (rowAnchorRef.current ?? fallbackAnchor) : clickedRow;
+        if (!isShift) {
+          rowAnchorRef.current = clickedRow;
+        }
+        const base = isMod ? currentVisibleRows.filter((r) => isShift || r !== clickedRow) : [];
+        const keepSingle =
+          !isMod && !isShift && currentVisibleRows.length === 1 && currentVisibleRows[0] === clickedRow;
+        headerDragRef.current = {
+          axis: "row",
+          anchor,
+          base,
+          target: clickedRow,
+          isMod,
+          isShift,
+          keepSingle,
+        };
+        return;
+      }
+
+      headerDragRef.current = null;
+      if (pointer.kind === "cell" && pointer.location[0] >= 0 && pointer.location[1] >= 0) {
+        colAnchorRef.current = Math.min(pointer.location[0], maxCol);
+        rowAnchorRef.current = Math.min(pointer.location[1], maxRow);
+      }
+    },
+    [
+      rows.length,
+      visibleColumnCount,
+      selectedColumns,
+      selectedRows,
+      selection.col,
+      selection.row,
+      toVisibleCol,
+      toVisibleRow,
+      applyAxisSelection,
+    ],
+  );
+
+  const handleGridSelectionChange = useCallback(
+    (next: GridSelection) => {
+      if (suppressContextSelection.current) return;
+      const maxRow = Math.max(0, rows.length + BUFFER_ROWS - 1);
+      const maxCol = Math.max(0, visibleColumnCount + BUFFER_COLS - 1);
+
+      const drag = headerDragRef.current;
+      if (!next.current && drag) {
+        if (drag.axis === "column" && (drag.isShift || drag.target !== drag.anchor)) {
+          applyAxisSelection("column", buildAxisRange(drag.anchor, drag.target, drag.base));
+          return;
+        }
+        if (
+          drag.axis === "row" &&
+          (drag.isShift ||
+            drag.target !== drag.anchor ||
+            (drag.keepSingle && next.rows.length === 0))
+        ) {
+          applyAxisSelection("row", buildAxisRange(drag.anchor, drag.target, drag.base));
+          return;
+        }
+      }
+
+      if (
+        !next.current &&
+        next.rows.length >= rowCount &&
+        selectedRows.length > maxRow &&
+        lastPointerRef.current?.kind === "header" &&
+        lastPointerRef.current.location[0] === -1
+      ) {
+        applyAxisSelection("row", []);
+        return;
+      }
+
+      const nextSelectedRows = compactToIndexes(next.rows, maxRow);
+      const nextSelectedCols = compactToIndexes(next.columns, maxCol);
+      if (nextSelectedRows.length === 1) {
+        rowAnchorRef.current = nextSelectedRows[0]!;
+      }
+      if (nextSelectedCols.length === 1) {
+        colAnchorRef.current = nextSelectedCols[0]!;
+      }
+      if (nextSelectedRows.length > 0) {
+        onRowsSelected?.(nextSelectedRows.map(toSourceRow));
+      } else {
+        onRowsSelected?.([]);
+      }
+      if (nextSelectedCols.length > 0) {
+        onColumnsSelected?.(nextSelectedCols.map(toSourceCol));
+      } else {
+        onColumnsSelected?.([]);
+      }
+
+      const current = next.current;
+      if (!current) {
+        setGridSelection(next);
+        if (nextSelectedRows.length > 0) {
+          const first = nextSelectedRows[0]!;
+          const last = nextSelectedRows[nextSelectedRows.length - 1]!;
+          onSelectionChange(
+            { row: toSourceRow(first), col: toSourceCol(0) },
+            {
+              startRow: toSourceRow(first),
+              startCol: toSourceCol(0),
+              endRow: toSourceRow(last),
+              endCol: Math.max(0, columnCount - 1),
+            },
+          );
+        } else if (nextSelectedCols.length > 0) {
+          const first = nextSelectedCols[0]!;
+          const last = nextSelectedCols[nextSelectedCols.length - 1]!;
           onSelectionChange(
             { row: toSourceRow(0), col: toSourceCol(first) },
             {
@@ -381,6 +679,8 @@ export function GlideSheet({
 
       const col = Math.min(current.cell[0], maxCol);
       const row = Math.min(current.cell[1], maxRow);
+      colAnchorRef.current = col;
+      rowAnchorRef.current = row;
       if (col !== current.cell[0] || row !== current.cell[1]) {
         setGridSelection({
           columns: CompactSelection.empty(),
@@ -412,10 +712,13 @@ export function GlideSheet({
       onRowsSelected,
       onColumnsSelected,
       rows.length,
+      rowCount,
+      selectedRows.length,
       columnCount,
       visibleColumnCount,
       toSourceRow,
       toSourceCol,
+      applyAxisSelection,
     ],
   );
 
@@ -662,6 +965,7 @@ export function GlideSheet({
       className="glideSheet"
       tabIndex={-1}
       onKeyDownCapture={handleKeyDownCapture}
+      onMouseDownCapture={handleMouseDownCapture}
     >
       <DataEditor
         ref={ref}
@@ -675,6 +979,8 @@ export function GlideSheet({
         getCellContent={getCellContent}
         onCellEdited={onCellEdited}
         onVisibleRegionChanged={onViewportChanged}
+        onMouseMove={handleMouseMove}
+        onItemHovered={handleMouseMove}
         getCellsForSelection={true}
         fillHandle={true}
         onFillPattern={handleFillPattern}
@@ -724,6 +1030,10 @@ export function GlideSheet({
           );
         }}
         onHeaderMenuClick={(colIndex, bounds: Rectangle) => {
+          if (suppressHeaderMenuRef.current) {
+            suppressHeaderMenuRef.current = false;
+            return;
+          }
           onHeaderMenuClick?.(toSourceCol(colIndex), bounds);
         }}
         onDelete={() => {
@@ -731,6 +1041,7 @@ export function GlideSheet({
           return false;
         }}
         rowMarkers="both"
+        rowSelectionMode="multi"
         rowMarkerTheme={rowMarkerTheme}
         highlightRegions={highlightRegions}
         smoothScrollX

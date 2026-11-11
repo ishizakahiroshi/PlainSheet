@@ -9,14 +9,25 @@ export type VisibleRow = {
   values: CellValue[];
 };
 
-export function applyFilters(rows: CellValue[][], filters: FilterMap): VisibleRow[] {
+export type FilterOptions = {
+  headerRow?: boolean;
+};
+
+export function applyFilters(
+  rows: CellValue[][],
+  filters: FilterMap,
+  options?: FilterOptions,
+): VisibleRow[] {
   if (filters.size === 0) {
     return rows.map((values, sourceIndex) => ({ sourceIndex, values }));
   }
 
   return rows
     .map((values, sourceIndex) => ({ sourceIndex, values }))
-    .filter(({ values }) => {
+    .filter(({ sourceIndex, values }) => {
+      if (options?.headerRow && sourceIndex === 0) {
+        return true;
+      }
       for (const [col, allowed] of filters) {
         if (allowed.size === 0) {
           return false;
@@ -30,10 +41,16 @@ export function applyFilters(rows: CellValue[][], filters: FilterMap): VisibleRo
     });
 }
 
-export function uniqueColumnValues(rows: CellValue[][], colIndex: number): string[] {
+export function uniqueColumnValues(
+  rows: CellValue[][],
+  colIndex: number,
+  options?: FilterOptions,
+): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
-  for (const row of rows) {
+  const startIndex = options?.headerRow && rows.length > 1 ? 1 : 0;
+  for (let rowIndex = startIndex; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex]!;
     const value = row[colIndex] ?? "";
     if (seen.has(value)) {
       continue;
@@ -44,8 +61,9 @@ export function uniqueColumnValues(rows: CellValue[][], colIndex: number): strin
   return result;
 }
 
-export function useFilter() {
+export function useFilter(options?: FilterOptions) {
   const [filters, setFilters] = useState<FilterMap>(() => new Map());
+  const headerRow = options?.headerRow ?? false;
 
   const setColumnFilter = useCallback((colIndex: number, allowed: Set<string> | null) => {
     setFilters((current) => {
@@ -72,8 +90,8 @@ export function useFilter() {
   const hasFilters = filters.size > 0;
 
   const getVisibleRows = useCallback(
-    (rows: CellValue[][]) => applyFilters(rows, filters),
-    [filters],
+    (rows: CellValue[][]) => applyFilters(rows, filters, { headerRow }),
+    [filters, headerRow],
   );
 
   return useMemo(

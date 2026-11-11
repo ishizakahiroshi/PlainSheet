@@ -36,7 +36,7 @@ export function resolveTarget(options: {
   columnCount: number;
   visibleRows: number[];
   visibleColumns: number[];
-  filtered: boolean;
+  filtered?: boolean;
   context?: { kind: TargetKind; row: number; col: number };
 }): SelectionTarget {
   const {
@@ -48,7 +48,6 @@ export function resolveTarget(options: {
     columnCount,
     visibleRows,
     visibleColumns,
-    filtered,
     context,
   } = options;
   const rect = normalizeRange(
@@ -100,35 +99,40 @@ export function resolveTarget(options: {
       anchor = { row: context.row, col: context.col };
     }
   }
+  const rowSet = new Set(visibleRows),
+    colSet = new Set(visibleColumns);
   if (kind === "row") {
-    anchor = { row: rowTargets[0] ?? context?.row ?? selection.row, col: 0 };
+    const visibleTargetRows = rowTargets.filter((i) => rowSet.has(i));
+    anchor = {
+      row: visibleTargetRows[0] ?? rowTargets[0] ?? context?.row ?? selection.row,
+      col: visibleColumns[0] ?? columnCount,
+    };
     return {
       kind,
-      rowTargets,
+      rowTargets: visibleTargetRows,
       columnTargets: [],
       selectionIndexes: rowSelection,
-      rows: rowTargets,
-      columns: indexesBetween(0, columnCount - 1, columnCount),
+      rows: visibleTargetRows,
+      columns: visibleColumns,
       anchor,
     };
   }
   if (kind === "column") {
+    const visibleTargetCols = columnTargets.filter((i) => colSet.has(i));
     anchor = {
-      row: filtered ? (visibleRows[0] ?? rowCount) : 0,
-      col: columnTargets[0] ?? context?.col ?? selection.col,
+      row: visibleRows[0] ?? rowCount,
+      col: visibleTargetCols[0] ?? columnTargets[0] ?? context?.col ?? selection.col,
     };
     return {
       kind,
       rowTargets: [],
-      columnTargets,
+      columnTargets: visibleTargetCols,
       selectionIndexes: columnSelection,
-      rows: filtered ? visibleRows : indexesBetween(0, rowCount - 1, rowCount),
-      columns: columnTargets,
+      rows: visibleRows,
+      columns: visibleTargetCols,
       anchor,
     };
   }
-  const rowSet = new Set(visibleRows),
-    colSet = new Set(visibleColumns);
   const rows = indexesBetween(cellRect.startRow, cellRect.endRow, rowCount).filter((i) =>
     rowSet.has(i),
   );

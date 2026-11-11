@@ -42,6 +42,7 @@ export type HistoryEntry = {
   selectedColumns?: number[];
   colWidths?: ColumnWidthMap;
   view?: SheetView;
+  dirty?: boolean;
 };
 
 export type SheetView = {

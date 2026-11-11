@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { calculateColumnWidths } from "../lib/columnWidth";
 import type { CellValue, ColumnWidthMap, Range, SheetMeta } from "../types/sheet";
-import { DEFAULT_META } from "../types/sheet";
+import { DEFAULT_META, MAX_GRID_COLS, MAX_GRID_ROWS } from "../types/sheet";
 import { normalizeRange } from "../lib/clipboard";
 
 export function useSheet() {
@@ -30,6 +30,14 @@ export function useSheet() {
   }
 
   function updateCell(rowIndex: number, colIndex: number, value: CellValue): void {
+    if (
+      rowIndex < 0 ||
+      colIndex < 0 ||
+      rowIndex >= MAX_GRID_ROWS ||
+      colIndex >= MAX_GRID_COLS
+    ) {
+      return;
+    }
     setRowsState((currentRows) => {
       if (rowIndex >= currentRows.length && value === "") {
         return currentRows;
@@ -124,7 +132,10 @@ export function useSheet() {
     setColWidths((current) => {
       const remapped: ColumnWidthMap = {};
       let dest = 0;
-      const maxCol = Math.max(columnCount - 1, ...Object.keys(current).map(Number), 0);
+      const maxCol = Object.keys(current).reduce(
+        (max, key) => Math.max(max, Number(key)),
+        Math.max(columnCount - 1, 0),
+      );
       for (let src = 0; src <= maxCol; src += 1) {
         if (unique.has(src)) {
           continue;

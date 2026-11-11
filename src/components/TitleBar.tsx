@@ -7,9 +7,10 @@ import type { SheetMeta } from "../types/sheet";
 
 type TitleBarProps = {
   meta: SheetMeta;
+  anyDirty?: boolean;
 };
 
-export function TitleBar({ meta }: TitleBarProps) {
+export function TitleBar({ meta, anyDirty = false }: TitleBarProps) {
   const title = `${meta.dirty ? "● " : ""}${meta.fileName ?? t("appName")}`;
   const showWindowControls = isTauriRuntime();
 
@@ -52,7 +53,12 @@ export function TitleBar({ meta }: TitleBarProps) {
             type="button"
             className="titleBar__control titleBar__control--close"
             aria-label={t("windowClose")}
-            onClick={() => void getCurrentWindow().close()}
+            onClick={() => {
+              if ((anyDirty || meta.dirty) && !window.confirm(t("confirmUnsaved"))) {
+                return;
+              }
+              void getCurrentWindow().close();
+            }}
           >
             <X size={14} />
           </button>

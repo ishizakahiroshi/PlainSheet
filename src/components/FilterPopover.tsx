@@ -13,14 +13,22 @@ type FilterPopoverProps = {
   state: FilterPopoverState;
   rows: CellValue[][];
   selected: Set<string> | null;
+  headerRow?: boolean;
   onApply: (col: number, allowed: Set<string> | null) => void;
   onClose: () => void;
 };
 
-export function FilterPopover({ state, rows, selected, onApply, onClose }: FilterPopoverProps) {
+export function FilterPopover({
+  state,
+  rows,
+  selected,
+  headerRow = false,
+  onApply,
+  onClose,
+}: FilterPopoverProps) {
   const values = useMemo(
-    () => (state ? uniqueColumnValues(rows, state.col) : []),
-    [rows, state],
+    () => (state ? uniqueColumnValues(rows, state.col, { headerRow }) : []),
+    [rows, state, headerRow],
   );
   const [checked, setChecked] = useState<Set<string>>(new Set());
 
@@ -31,9 +39,9 @@ export function FilterPopover({ state, rows, selected, onApply, onClose }: Filte
     if (selected) {
       setChecked(new Set(selected));
     } else {
-      setChecked(new Set(uniqueColumnValues(rows, state.col)));
+      setChecked(new Set(uniqueColumnValues(rows, state.col, { headerRow })));
     }
-  }, [state, selected, rows]);
+  }, [state, selected, rows, headerRow]);
 
   useEffect(() => {
     if (!state) {
@@ -55,13 +63,21 @@ export function FilterPopover({ state, rows, selected, onApply, onClose }: Filte
   }
 
   const allSelected = values.length > 0 && values.every((value) => checked.has(value));
+  const left =
+    typeof window !== "undefined"
+      ? Math.max(4, Math.min(state.x, window.innerWidth - 224))
+      : state.x;
+  const top =
+    typeof window !== "undefined"
+      ? Math.max(4, Math.min(state.y, window.innerHeight - 284))
+      : state.y;
 
   return (
     <div
       className="filterPopover"
       role="dialog"
       aria-label={t("filter")}
-      style={{ left: state.x, top: state.y }}
+      style={{ left, top }}
     >
       <div className="filterPopover__actions">
         <button

@@ -25,10 +25,25 @@ describe("applyFilters", () => {
     ]);
     expect(applyFilters(rows, filters).map((r) => r.sourceIndex)).toEqual([3]);
   });
+
+  it("keeps row 0 visible when headerRow is enabled", () => {
+    const filters = new Map([[0, new Set(["b"])]]);
+    expect(applyFilters(rows, filters, { headerRow: true }).map((r) => r.sourceIndex)).toEqual([
+      0,
+      1,
+    ]);
+  });
 });
 
 describe("uniqueColumnValues", () => {
   it("returns first-seen order without duplicates", () => {
     expect(uniqueColumnValues([["x"], ["y"], ["x"], ["z"]], 0)).toEqual(["x", "y", "z"]);
+  });
+
+  it("skips row 0 when headerRow is enabled", () => {
+    expect(uniqueColumnValues([["header"], ["x"], ["y"], ["x"]], 0, { headerRow: true })).toEqual([
+      "x",
+      "y",
+    ]);
   });
 });

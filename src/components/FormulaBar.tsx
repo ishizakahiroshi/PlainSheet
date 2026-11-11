@@ -7,11 +7,20 @@ type FormulaBarProps = {
   col: number;
   reference: string;
   value: string;
+  resetKey?: string;
   onCommit: (row: number, col: number, value: string, reselect: boolean) => void;
   onJump?: (ref: ReturnType<typeof parseCellRef>) => void;
 };
 
-export function FormulaBar({ row, col, reference, value, onCommit, onJump }: FormulaBarProps) {
+export function FormulaBar({
+  row,
+  col,
+  reference,
+  value,
+  resetKey,
+  onCommit,
+  onJump,
+}: FormulaBarProps) {
   const [draft, setDraft] = useState(value);
   const [refDraft, setRefDraft] = useState(reference);
   const [refInvalid, setRefInvalid] = useState(false);
@@ -19,6 +28,19 @@ export function FormulaBar({ row, col, reference, value, onCommit, onJump }: For
   const focused = useRef(false);
   const refFocused = useRef(false);
   const skipBlurCommit = useRef(false);
+  const prevResetKey = useRef(resetKey);
+
+  useEffect(() => {
+    if (prevResetKey.current !== resetKey) {
+      prevResetKey.current = resetKey;
+      focused.current = false;
+      refFocused.current = false;
+      skipBlurCommit.current = true;
+      setDraft(value);
+      setRefDraft(reference);
+      setRefInvalid(false);
+    }
+  }, [resetKey, value, reference]);
 
   useEffect(() => {
     if (!focused.current) {

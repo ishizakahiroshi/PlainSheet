@@ -176,6 +176,10 @@ type StreamParseState = {
   // already emitted and the "\n" must be swallowed then instead of producing
   // a phantom empty row.
   pendingCR: boolean;
+  // A '"' inside a quoted cell that landed on the last character of a chunk:
+  // the next chunk's first character decides whether it is an escaped '""' or
+  // the closing quote of the cell.
+  pendingQuote: boolean;
 };
 
 function createStreamState(): StreamParseState {
@@ -188,6 +192,7 @@ function createStreamState(): StreamParseState {
     justClosedQuote: false,
     endedWithRowBreak: false,
     pendingCR: false,
+    pendingQuote: false,
   };
 }
 
@@ -218,10 +223,21 @@ export function feedCsvChunk(
   }
 
   let startIndex = 0;
-  if (state.pendingCR) {
+  if (state.pendingCR && source.length > 0) {
     state.pendingCR = false;
     if (source.charCodeAt(0) === 0x0a) {
       startIndex = 1;
+    }
+  }
+
+  if (state.pendingQuote && startIndex < source.length) {
+    state.pendingQuote = false;
+    if (source[startIndex] === "\"") {
+      state.cell += "\"";
+      startIndex += 1;
+    } else {
+      state.inQuotes = false;
+      state.justClosedQuote = true;
     }
   }
 
@@ -235,6 +251,8 @@ export function feedCsvChunk(
         if (next === "\"") {
           state.cell += "\"";
           index += 1;
+        } else if (next === undefined) {
+          state.pendingQuote = true;
         } else {
           state.inQuotes = false;
           state.justClosedQuote = true;
@@ -279,6 +297,11 @@ export function feedCsvChunk(
 }
 
 export function finishCsvStream(state: StreamParseState): CellValue[][] {
+  if (state.pendingQuote) {
+    state.pendingQuote = false;
+    state.inQuotes = false;
+    state.justClosedQuote = true;
+  }
   if (!state.endedWithRowBreak || state.row.length > 0 || state.cell.length > 0 || state.quotedCell) {
     pushStreamCell(state);
     state.rows.push(state.row);

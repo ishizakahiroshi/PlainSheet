@@ -18,6 +18,11 @@ export default defineConfig({
     // so whatever else listens there renders inside the app's main window.
     strictPort: true,
   },
+  preview: {
+    host: "127.0.0.1",
+    port: 4173,
+    strictPort: true,
+  },
   envPrefix: ["VITE_", "TAURI_"],
   build: {
     target: "es2022",

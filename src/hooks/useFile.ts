@@ -26,6 +26,8 @@ type UseFileOptions = {
   confirmDiscard: () => boolean;
   /** Called when a filesystem path is opened/saved (Tauri recent-files list). */
   onRecentPath?: (path: string) => void;
+  /** Returns the active document tab ID so browser file handles stay scoped per tab. */
+  getActiveId?: () => string;
 };
 
 type FileDropPayload =
@@ -42,22 +44,28 @@ export function useFile({
   onToast,
   confirmDiscard,
   onRecentPath,
+  getActiveId,
 }: UseFileOptions) {
-  // Browser-only: handle returned by File System Access open/save pickers.
-  const fileHandleRef = useRef<FsFileHandle | null>(null);
+  // Browser-only: handles returned by File System Access open/save pickers,
+  // keyed by document tab ID so tabs with identical filenames never collide.
+  const fileHandlesRef = useRef<Map<string, FsFileHandle>>(new Map());
   const loadGenerationRef = useRef(0);
   const loadPathRef = useRef<(path: string) => Promise<void>>(async () => undefined);
+  const loadDataRef = useRef(loadData);
   const getMetaRef = useRef(getMeta);
   const confirmDiscardRef = useRef(confirmDiscard);
   const onToastRef = useRef(onToast);
   const onRecentPathRef = useRef(onRecentPath);
+  const getActiveIdRef = useRef(getActiveId ?? (() => "default"));
+  loadDataRef.current = loadData;
   getMetaRef.current = getMeta;
   confirmDiscardRef.current = confirmDiscard;
   onToastRef.current = onToast;
   onRecentPathRef.current = onRecentPath;
+  getActiveIdRef.current = getActiveId ?? (() => "default");
 
-  const resetSaveTarget = useCallback(() => {
-    fileHandleRef.current = null;
+  const resetSaveTarget = useCallback((docId?: string) => {
+    fileHandlesRef.current.delete(docId ?? getActiveIdRef.current());
   }, []);
 
   const loadPath = useCallback(
@@ -72,7 +80,7 @@ export function useFile({
           return;
         }
         const format = formatFromPath(path);
-        const delimiter = detectDelimiter(content);
+        const delimiter = format === "tsv" ? "\t" : detectDelimiter(content);
         const newline = detectNewline(content);
         const rows = parseTableText(content, format, delimiter);
         loadData(rows, {
@@ -103,7 +111,12 @@ export function useFile({
       }
       if (!isTauriRuntime()) {
         await openBrowserFile(loadData, onToast, (handle) => {
-          fileHandleRef.current = handle;
+          const activeId = getActiveIdRef.current();
+          if (handle) {
+            fileHandlesRef.current.set(activeId, handle);
+          } else {
+            fileHandlesRef.current.delete(activeId);
+          }
         });
         return;
       }
@@ -143,7 +156,7 @@ export function useFile({
             serializeOptions(currentMeta),
           );
           await writeFileHandle(handle, content);
-          fileHandleRef.current = handle;
+          fileHandlesRef.current.set(getActiveIdRef.current(), handle);
           updateMeta({
             fileName: handle.name,
             delimiter,
@@ -168,6 +181,7 @@ export function useFile({
           serializeOptions(currentMeta),
         );
         downloadText(content, fileName);
+        fileHandlesRef.current.delete(getActiveIdRef.current());
         updateMeta({
           fileName,
           delimiter,
@@ -218,7 +232,7 @@ export function useFile({
           currentMeta.newline,
           serializeOptions(currentMeta),
         );
-        const handle = fileHandleRef.current;
+        const handle = fileHandlesRef.current.get(getActiveIdRef.current());
         if (handle && handle.name === currentMeta.fileName) {
           if (typeof handle.queryPermission === "function") {
             let permission = await handle.queryPermission({ mode: "readwrite" });
@@ -281,7 +295,6 @@ export function useFile({
       }
       const content = await response.text();
       const rows = parseTableText(content, "csv", ",");
-      resetSaveTarget();
       loadData(rows, {
         fileName: "sample.csv",
         delimiter: ",",
@@ -289,6 +302,7 @@ export function useFile({
         encoding: "utf-8",
         format: "csv",
       });
+      resetSaveTarget();
       onToast(t("toastLoaded"));
     } catch {
       onToast(t("toastLoadFailed"));
@@ -308,8 +322,8 @@ export function useFile({
         const file = event.dataTransfer?.files[0];
         if (file) {
           // D&D has no writable handle — next Save will pick a location.
-          void loadBrowserFile(file, loadData, onToastRef.current, () => {
-            fileHandleRef.current = null;
+          void loadBrowserFile(file, loadDataRef.current, onToastRef.current, () => {
+            fileHandlesRef.current.delete(getActiveIdRef.current());
           });
         }
       };
@@ -352,7 +366,7 @@ export function useFile({
         unlisten();
       }
     };
-  }, [loadData, resetSaveTarget]);
+  }, []);
 
   return {
     openFile,
@@ -446,6 +460,21 @@ async function openBrowserFile(
   }
 }
 
+async function assertBrowserFileNotBinary(file: File): Promise<void> {
+  if (typeof file.slice === "function") {
+    const headerSlice = file.slice(0, 2);
+    if (typeof headerSlice.arrayBuffer === "function") {
+      const bytes = new Uint8Array(await headerSlice.arrayBuffer());
+      if (
+        bytes.length >= 2 &&
+        ((bytes[0] === 0xff && bytes[1] === 0xfe) || (bytes[0] === 0xfe && bytes[1] === 0xff))
+      ) {
+        throw new Error("UTF-16 files are not supported");
+      }
+    }
+  }
+}
+
 async function loadBrowserFile(
   file: File,
   loadData: UseFileOptions["loadData"],
@@ -453,12 +482,16 @@ async function loadBrowserFile(
   onAdopt?: () => void,
 ): Promise<void> {
   try {
+    await assertBrowserFileNotBinary(file);
     const format = formatFromPath(file.name);
     let content = "";
     let rows: CellValue[][];
 
     if ((format === "csv" || format === "tsv") && file.size >= STREAM_PARSE_THRESHOLD) {
       const peek = await file.slice(0, 64 * 1024).text();
+      if (peek.includes("\0")) {
+        throw new Error("file contains NUL bytes");
+      }
       const delimiter = format === "tsv" ? "\t" : detectDelimiter(peek);
       const newline = detectNewline(peek);
       rows = await parseCsvStream(streamFileText(file), delimiter, {
@@ -467,7 +500,6 @@ async function loadBrowserFile(
           onToast(t("toastLoading", { percent: Math.round(ratio * 100) }));
         },
       });
-      onAdopt?.();
       loadData(rows, {
         fileName: file.name,
         delimiter,
@@ -475,18 +507,21 @@ async function loadBrowserFile(
         encoding: "utf-8",
         format,
       });
+      onAdopt?.();
       onToast(t("toastLoaded"));
       return;
     }
 
     content = await file.text();
+    if (content.includes("\0")) {
+      throw new Error("file contains NUL bytes");
+    }
     // Mirror the Rust decoder and the CSV parser: drop a leading UTF-8 BOM so
     // BOM'd JSON/YAML load identically in the browser build instead of dying
     // inside JSON.parse.
     content = content.replace(/^\uFEFF/, "");
     const delimiter = format === "tsv" ? "\t" : detectDelimiter(content);
     rows = parseTableText(content, format, delimiter);
-    onAdopt?.();
     loadData(rows, {
       fileName: file.name,
       delimiter,
@@ -494,6 +529,7 @@ async function loadBrowserFile(
       encoding: "utf-8",
       format,
     });
+    onAdopt?.();
     onToast(t("toastLoaded"));
   } catch {
     onToast(t("toastLoadFailed"));

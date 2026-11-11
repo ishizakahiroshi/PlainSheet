@@ -4,6 +4,17 @@ import { cloneRows } from "./useSheet";
 
 export const MAX_HISTORY = 50;
 
+function maxHistoryForRows(rows: HistoryEntry["rows"]): number {
+  const cellCount = rows.length * (rows[0]?.length ?? 1);
+  if (cellCount > 500_000) {
+    return 5;
+  }
+  if (cellCount > 100_000) {
+    return 15;
+  }
+  return MAX_HISTORY;
+}
+
 export function useHistory() {
   const [undoStack, setUndoStack] = useState<HistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<HistoryEntry[]>([]);
@@ -17,8 +28,9 @@ export function useHistory() {
     selection: Selection,
     extra: Partial<HistoryEntry> = {},
   ): void {
+    const cap = maxHistoryForRows(rows);
     const next = [...undoRef.current, cloneHistoryEntry({ ...extra, rows, selection })].slice(
-      Math.max(0, undoRef.current.length + 1 - MAX_HISTORY),
+      Math.max(0, undoRef.current.length + 1 - cap),
     );
     undoRef.current = next;
     redoRef.current = [];

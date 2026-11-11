@@ -83,27 +83,27 @@ export function useDocuments(initial?: DocumentSnapshot) {
 
   const captureActive = useCallback((live: ActiveDocumentLive) => {
     const id = activeIdRef.current;
-    setDocuments((current) =>
-      current.map((doc) =>
-        doc.id === id
-          ? {
-              ...doc,
-              rows: cloneRows(live.rows),
-              meta: { ...live.meta },
-              colWidths: { ...live.colWidths },
-              selection: { ...live.selection },
-              range: live.range ? { ...live.range } : null,
-              view: live.view ? structuredClone(live.view) : emptyView(),
-              selectedRows: [...(live.selectedRows ?? [])],
-              selectedColumns: [...(live.selectedColumns ?? [])],
-              history: {
-                undo: cloneHistory(live.history.undo),
-                redo: cloneHistory(live.history.redo),
-              },
-            }
-          : doc,
-      ),
+    const next = documentsRef.current.map((doc) =>
+      doc.id === id
+        ? {
+            ...doc,
+            rows: cloneRows(live.rows),
+            meta: { ...live.meta },
+            colWidths: { ...live.colWidths },
+            selection: { ...live.selection },
+            range: live.range ? { ...live.range } : null,
+            view: live.view ? structuredClone(live.view) : emptyView(),
+            selectedRows: [...(live.selectedRows ?? [])],
+            selectedColumns: [...(live.selectedColumns ?? [])],
+            history: {
+              undo: cloneHistory(live.history.undo),
+              redo: cloneHistory(live.history.redo),
+            },
+          }
+        : doc,
     );
+    documentsRef.current = next;
+    setDocuments(next);
   }, []);
 
   const openDocument = useCallback(
@@ -120,12 +120,34 @@ export function useDocuments(initial?: DocumentSnapshot) {
           (doc) => doc.meta.filePath && doc.meta.filePath === meta.filePath,
         );
         if (match) {
-          setActiveId(match.id);
-          return match;
+          const cloned = cloneRows(rows);
+          const refreshed: DocumentSnapshot = {
+            ...match,
+            rows: cloned,
+            meta: { ...DEFAULT_META, ...meta, dirty: meta.dirty ?? false },
+            colWidths: calculateColumnWidths(cloned),
+            selection: { ...EMPTY_SELECTION },
+            range: null,
+            view: emptyView(),
+            selectedRows: [],
+            selectedColumns: [],
+            history: { undo: [], redo: [] },
+          };
+          const next = documentsRef.current.map((doc) =>
+            doc.id === match.id ? refreshed : doc,
+          );
+          documentsRef.current = next;
+          setDocuments(next);
+          activeIdRef.current = refreshed.id;
+          setActiveId(refreshed.id);
+          return refreshed;
         }
       }
       const doc = createDocument(rows, meta);
-      setDocuments((current) => [...current, doc]);
+      const next = [...documentsRef.current, doc];
+      documentsRef.current = next;
+      setDocuments(next);
+      activeIdRef.current = doc.id;
       setActiveId(doc.id);
       return doc;
     },
@@ -138,7 +160,10 @@ export function useDocuments(initial?: DocumentSnapshot) {
         captureActive(live);
       }
       const doc = createDocument([[""]], { dirty: false });
-      setDocuments((current) => [...current, doc]);
+      const next = [...documentsRef.current, doc];
+      documentsRef.current = next;
+      setDocuments(next);
+      activeIdRef.current = doc.id;
       setActiveId(doc.id);
       return doc;
     },
@@ -180,6 +205,7 @@ export function useDocuments(initial?: DocumentSnapshot) {
       return null;
     }
     setActiveId(id);
+    activeIdRef.current = id;
     return target;
   }, []);
 
@@ -221,6 +247,7 @@ export function useDocuments(initial?: DocumentSnapshot) {
       }
       setDocuments(remaining);
       documentsRef.current = remaining;
+      activeIdRef.current = nextActiveId;
       setActiveId(nextActiveId);
       return {
         closed: true,
@@ -233,31 +260,34 @@ export function useDocuments(initial?: DocumentSnapshot) {
   const replaceActiveContent = useCallback((rows: CellValue[][], meta: Partial<SheetMeta>) => {
     const id = activeIdRef.current;
     const cloned = cloneRows(rows);
-    setDocuments((current) =>
-      current.map((doc) =>
-        doc.id === id
-          ? {
-              ...doc,
-              rows: cloned,
-              meta: { ...DEFAULT_META, ...meta, dirty: false },
-              colWidths: calculateColumnWidths(cloned),
-              selection: { ...EMPTY_SELECTION },
-              range: null,
-              view: emptyView(),
-              selectedRows: [],
-              selectedColumns: [],
-              history: { undo: [], redo: [] },
-            }
-          : doc,
-      ),
+    const next = documentsRef.current.map((doc) =>
+      doc.id === id
+        ? {
+            ...doc,
+            rows: cloned,
+            meta: { ...DEFAULT_META, ...meta, dirty: false },
+            colWidths: calculateColumnWidths(cloned),
+            selection: { ...EMPTY_SELECTION },
+            range: null,
+            view: emptyView(),
+            selectedRows: [],
+            selectedColumns: [],
+            history: { undo: [], redo: [] },
+          }
+        : doc,
     );
+    documentsRef.current = next;
+    setDocuments(next);
   }, []);
+
+  const getActiveId = useCallback(() => activeIdRef.current, []);
 
   return {
     documents,
     activeId: active.id,
     active,
     anyDirty,
+    getActiveId,
     captureActive,
     openDocument,
     addBlankDocument,

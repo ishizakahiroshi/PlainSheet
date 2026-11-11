@@ -34,6 +34,10 @@ export function StatusBar({ rows, columnCount, selection, range, meta, zoom }: S
   const selectedCols = normalized.endCol - normalized.startCol + 1;
   const stats = calculateSelectionStats(rows, selectedRange);
   const zoomPercent = zoom !== undefined ? Math.round(zoom * 100) : null;
+  const formatBadge =
+    meta.format === "json" || meta.format === "yaml" || meta.format === "markdown"
+      ? meta.format.toUpperCase()
+      : t("csvLabel", { delimiter: meta.delimiter === "\t" ? "TSV" : meta.delimiter });
 
   return (
     <footer className="statusBar">
@@ -41,7 +45,7 @@ export function StatusBar({ rows, columnCount, selection, range, meta, zoom }: S
       <span>{t("selectedRange", { rows: selectedRows, cols: selectedCols })}</span>
       <span>{meta.encoding.toUpperCase()}</span>
       <span>{meta.newline}</span>
-      <span>{t("csvLabel", { delimiter: meta.delimiter === "\t" ? "TSV" : meta.delimiter })}</span>
+      <span>{formatBadge}</span>
       <span>{meta.dirty ? t("unsaved") : t("saved")}</span>
       {zoomPercent !== null ? <span>{t("zoomLabel", { percent: zoomPercent })}</span> : null}
       <span className="statusBar__stats">{formatStats(stats)}</span>
@@ -54,17 +58,36 @@ export function calculateSelectionStats(
   range: Exclude<Range, null>,
 ): SelectionStats | null {
   const normalized = normalizeRange(range);
-  const numbers: number[] = [];
+  const endRow = Math.min(normalized.endRow, rows.length - 1);
   let count = 0;
-  for (let rowIndex = normalized.startRow; rowIndex <= normalized.endRow; rowIndex += 1) {
-    for (let colIndex = normalized.startCol; colIndex <= normalized.endCol; colIndex += 1) {
-      const value = rows[rowIndex]?.[colIndex] ?? "";
-      if (value.trim() !== "") {
-        count += 1;
+  let numericCount = 0;
+  let total = 0;
+  let max = -Infinity;
+  let min = Infinity;
+
+  for (let rowIndex = Math.max(0, normalized.startRow); rowIndex <= endRow; rowIndex += 1) {
+    const row = rows[rowIndex];
+    if (!row) {
+      continue;
+    }
+    const endCol = Math.min(normalized.endCol, row.length - 1);
+    for (let colIndex = Math.max(0, normalized.startCol); colIndex <= endCol; colIndex += 1) {
+      const value = row[colIndex] ?? "";
+      const trimmed = value.trim();
+      if (trimmed === "") {
+        continue;
       }
-      const parsed = Number(value.replace(/,/g, ""));
-      if (value.trim() !== "" && Number.isFinite(parsed)) {
-        numbers.push(parsed);
+      count += 1;
+      const parsed = Number(trimmed.replace(/,/g, ""));
+      if (Number.isFinite(parsed)) {
+        numericCount += 1;
+        total += parsed;
+        if (parsed > max) {
+          max = parsed;
+        }
+        if (parsed < min) {
+          min = parsed;
+        }
       }
     }
   }
@@ -73,7 +96,7 @@ export function calculateSelectionStats(
     return null;
   }
 
-  if (numbers.length === 0) {
+  if (numericCount === 0) {
     return {
       count,
       numericCount: 0,
@@ -84,13 +107,10 @@ export function calculateSelectionStats(
     };
   }
 
-  const total = numbers.reduce((sum, value) => sum + value, 0);
-  const average = total / numbers.length;
-  const max = Math.max(...numbers);
-  const min = Math.min(...numbers);
+  const average = total / numericCount;
   return {
     count,
-    numericCount: numbers.length,
+    numericCount,
     total: formatNumber(total),
     average: formatNumber(average),
     max: formatNumber(max),

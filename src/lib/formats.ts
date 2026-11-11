@@ -79,6 +79,9 @@ function parseObjectList(value: unknown): CellValue[][] {
     headers,
     ...records.map((record) =>
       headers.map((header) => {
+        if (!Object.hasOwn(record, header)) {
+          return "";
+        }
         const value = record[header];
         if (value == null) {
           return "";
@@ -119,12 +122,18 @@ function rowsToObjects(
 // this, same-named columns collapse to one key and silently drop data when a
 // sheet is exported to JSON/YAML.
 function uniqueHeaders(headerRow: readonly CellValue[]): string[] {
+  const reserved = new Set(headerRow.map((header) => header.trim()).filter(Boolean));
   const used = new Set<string>();
   return headerRow.map((header, index) => {
-    const base = header.trim() || `column_${index + 1}`;
+    const trimmed = header.trim();
+    if (trimmed !== "" && !used.has(trimmed)) {
+      used.add(trimmed);
+      return trimmed;
+    }
+    const base = trimmed || `column_${index + 1}`;
     let name = base;
     let suffix = 2;
-    while (used.has(name)) {
+    while (used.has(name) || reserved.has(name)) {
       name = `${base}_${suffix}`;
       suffix += 1;
     }
