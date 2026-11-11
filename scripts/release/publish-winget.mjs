@@ -78,7 +78,18 @@ async function api(token, path, method = "GET", body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!response.ok) {
-    throw new Error(`GitHub ${method} ${path} -> ${response.status}`);
+    // GitHub explains a refusal in the body's `message`; without it a 422 is opaque.
+    const reason = await response
+      .json()
+      .then((data) =>
+        [data.message, ...(data.errors ?? []).map((e) => e.message ?? e.code)]
+          .filter(Boolean)
+          .join("; "),
+      )
+      .catch(() => "");
+    throw new Error(
+      `GitHub ${method} ${path} -> ${response.status}${reason ? ` (${reason})` : ""}`,
+    );
   }
   return response.status === 204 ? null : response.json();
 }
