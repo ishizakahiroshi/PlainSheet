@@ -4,6 +4,23 @@ All notable changes to PlainSheet are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-11-11
+
+### Fixed
+
+- Windows: a console window no longer opens next to the app when it is started
+  from the Start menu, Explorer or a file association.
+
+### Added
+
+- Microsoft Store package (MSIX) built from the released Windows exe, and a
+  privacy policy ([PRIVACY.md](PRIVACY.md)).
+- winget manifests are submitted from the release (`ishizakahiroshi.PlainSheet`).
+
+### Changed
+
+- Release pages now show this changelog's section for the version.
+
 ## [0.1.0] - 2026-11-11
 
 First public release.
@@ -39,4 +56,5 @@ First public release.
   shown with silently damaged content.
 - The development and preview servers listen on the loopback address only.
 
+[0.1.1]: https://github.com/ishizakahiroshi/PlainSheet/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ishizakahiroshi/PlainSheet/releases/tag/v0.1.0

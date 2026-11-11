@@ -1,3 +1,9 @@
+// Release builds are a windowed app on Windows: without this the exe is a
+// console program and a console window opens next to the app whenever it is
+// started from the Start menu, Explorer or a file association. Debug builds
+// keep the console so `tauri dev` still shows log output.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use encoding_rs::{Encoding, EUC_JP, SHIFT_JIS, UTF_8, WINDOWS_1252};
 use std::borrow::Cow;
 use std::ffi::OsString;
