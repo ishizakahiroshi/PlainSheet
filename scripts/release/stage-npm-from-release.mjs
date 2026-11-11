@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // Fill the npm packages under npm/ from the assets of a published GitHub
 // Release. Nothing is built here: every binary is taken from the release and
 // checked against its SHA256SUMS.txt first, so npm ships the same bytes as the

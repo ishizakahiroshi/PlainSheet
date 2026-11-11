@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // Offer a released version to winget: write the three manifests that point at
 // the Windows exe of the published GitHub Release and open a pull request
 // against microsoft/winget-pkgs from the token owner's fork.

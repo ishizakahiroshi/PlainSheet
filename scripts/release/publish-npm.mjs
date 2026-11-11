@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // Publish the staged npm packages: platform packages first, the root package
 // last, so the root never points at a platform version that does not exist.
 //
