@@ -205,6 +205,21 @@ jobs:
           sha256sum $files > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      # Release notes are this version's section of CHANGELOG.md, so the page
+      # says what the release contains instead of listing pull request titles.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            CHANGELOG.md
+            scripts/release/changelog-section.mjs
+            scripts/release/npm-targets.mjs
+          sparse-checkout-cone-mode: false
+          path: source
+
+      - name: Take this version's section from CHANGELOG.md
+        run: node source/scripts/release/changelog-section.mjs source/CHANGELOG.md "$GITHUB_REF_NAME" > "$RUNNER_TEMP/changelog-section.md"
+
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -217,7 +232,10 @@ jobs:
           mapfile -d '' assets < <(find . -maxdepth 1 -type f -print0)
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${assets[@]}" --clobber
+          elif [ -s "$RUNNER_TEMP/changelog-section.md" ]; then
+            gh release create "$tag" "${assets[@]}" --title "$tag" --notes-file "$RUNNER_TEMP/changelog-section.md"
           else
+            echo "::warning::CHANGELOG.md has no section for $tag; using generated notes"
             gh release create "$tag" "${assets[@]}" --title "$tag" --generate-notes
           fi
           # Append (idempotently) a checksum section to the release notes.
