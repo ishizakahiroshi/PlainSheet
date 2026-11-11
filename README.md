@@ -14,11 +14,33 @@ PlainSheet opens CSV and other plain text table files as a clean editable sheet,
 - Copy and paste cell ranges as TSV
 - Save with UTF-8, UTF-8 BOM, Shift_JIS, EUC-JP, or Latin-1 in the Tauri app
 - Drag and drop files in the desktop app and web demo
+- Open a file straight from the command line or the "Open with" menu in the desktop app
 - Local-first: no server upload and no AI API calls
+
+## Install
+
+**npm** (Windows x64, Linux x64, macOS Apple silicon) — installs the desktop app for your platform:
+
+```sh
+npx plainsheet            # try it once
+npm install -g plainsheet # install, then run `plainsheet` or `plainsheet data.csv`
+```
+
+**Download** — get the file for your platform from the [latest release](https://github.com/ishizakahiroshi/PlainSheet/releases/latest):
+
+| Platform              | File                                                          |
+| --------------------- | ------------------------------------------------------------- |
+| Windows x64           | `PlainSheet.exe` (or the `.zip` with README and LICENSE)      |
+| Linux x64             | `PlainSheet-linux-x86_64` (or the `.tar.gz`)                  |
+| macOS (Apple silicon) | `PlainSheet-macos-aarch64.tar.gz` (contains `PlainSheet.app`) |
+
+Each release lists SHA-256 checksums in `SHA256SUMS.txt`; the npm packages carry the same files.
+
+The builds are not code-signed. A file downloaded in a browser can trigger a Windows SmartScreen or macOS Gatekeeper warning on first start; installing through npm avoids the browser download. Linux needs WebKitGTK 4.1 (for example `libwebkit2gtk-4.1-0`), and Windows needs the WebView2 Runtime that Windows 11 and current Windows 10 already include.
 
 ## Status
 
-PlainSheet is at `v0.1.0`. It is optimized for small to medium plain text tables. Large file support, virtual scrolling, richer export options, and Git diff helpers are planned after the first release.
+PlainSheet is at `v0.1.0`. It is optimized for small to medium plain text tables; files larger than 50 MB are not opened by the desktop app. Richer export options and Git diff helpers are planned after the first release. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Development
 
