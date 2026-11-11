@@ -1,0 +1,25 @@
+{
+  "name": "plainsheet-windows-x64",
+  "version": "0.0.0",
+  "description": "Windows x64 build of the PlainSheet desktop app. Installed automatically as an optional dependency of plainsheet.",
+  "homepage": "https://github.com/ishizakahiroshi/PlainSheet",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ishizakahiroshi/PlainSheet.git"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Hiroshi Ishizaka",
+    "url": "https://github.com/ishizakahiroshi"
+  },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/PlainSheet.exe",
+    "LICENSE"
+  ]
+}

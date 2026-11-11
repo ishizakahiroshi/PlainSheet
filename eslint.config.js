@@ -23,7 +23,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["scripts/**/*.{js,mjs,cjs}"],
+    files: ["scripts/**/*.{js,mjs,cjs}", "npm/**/*.{js,mjs,cjs}"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",

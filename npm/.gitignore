@@ -1,0 +1,12 @@
+# App builds are copied in from the GitHub Release at publish time
+# (scripts/release/stage-npm-from-release.mjs) and are never committed.
+*/bin/PlainSheet
+*/bin/PlainSheet.exe
+*/bin/PlainSheet.app/
+*/.stage-*/
+
+# LICENSE is copied from the repository root at publish time.
+*/LICENSE
+
+# Local pack output
+*/*.tgz

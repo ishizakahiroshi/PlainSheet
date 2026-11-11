@@ -1,0 +1,25 @@
+{
+  "name": "plainsheet-macos-apple-silicon",
+  "version": "0.0.0",
+  "description": "macOS (Apple silicon) build of the PlainSheet desktop app. Installed automatically as an optional dependency of plainsheet.",
+  "homepage": "https://github.com/ishizakahiroshi/PlainSheet",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ishizakahiroshi/PlainSheet.git"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Hiroshi Ishizaka",
+    "url": "https://github.com/ishizakahiroshi"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/PlainSheet.app/",
+    "LICENSE"
+  ]
+}

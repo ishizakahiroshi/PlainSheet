@@ -2,6 +2,18 @@ name: Tauri Build
 
 on:
   workflow_dispatch:
+    inputs:
+      channel:
+        description: "build = development artifacts. npm = publish the npm packages again from an existing release."
+        type: choice
+        default: build
+        options:
+          - build
+          - npm
+      tag:
+        description: "Existing release tag, required for channel=npm (e.g. v0.1.0)"
+        required: false
+        type: string
   pull_request:
   push:
     branches:
@@ -20,6 +32,8 @@ permissions:
 jobs:
   build:
     name: Build ${{ matrix.platform }}
+    # A single-channel run republishes from the existing release; it never builds.
+    if: github.event_name != 'workflow_dispatch' || inputs.channel == 'build'
     runs-on: ${{ matrix.platform }}
     strategy:
       fail-fast: false
@@ -217,3 +231,69 @@ jobs:
           } > "$notes"
           gh release edit "$tag" --notes-file "$notes"
           rm -f "$notes"
+
+  # npm repackages the app: every binary is downloaded from the published
+  # GitHub Release and checked against its SHA256SUMS.txt, so npm ships the
+  # same bytes. Authentication is npm Trusted Publishing (OIDC); no npm token
+  # is stored anywhere, and none must be added to this job.
+  npm:
+    name: Publish npm packages
+    needs: release
+    if: >-
+      always() && (
+        (github.event_name == 'push' && needs.release.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && inputs.channel == 'npm')
+      )
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: npm-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      cancel-in-progress: false
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Check the release tag
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$RELEASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::tag must look like v0.1.0 (got '$RELEASE_TAG')"
+            exit 1
+          fi
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # Trusted Publishing needs npm 11.5.1 or later; Node 24 carries it. The
+      # registry-url input stays unset so setup-node writes no .npmrc with a
+      # token placeholder that npm would send instead of the OIDC credential.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+
+      - name: Require an npm that supports Trusted Publishing
+        run: |
+          set -euo pipefail
+          version="$(npm --version)"
+          echo "npm $version"
+          node -e 'const [a,b,c]=process.argv[1].split(".").map(Number); process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)' "$version" \
+            || { echo "::error::npm $version is too old for Trusted Publishing (11.5.1 or later required)"; exit 1; }
+
+      - name: Download the release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir .release-assets \
+            --pattern SHA256SUMS.txt \
+            --pattern PlainSheet.exe \
+            --pattern PlainSheet-linux-x86_64 \
+            --pattern PlainSheet-macos-aarch64.tar.gz
+
+      - name: Stage the npm packages from the verified assets
+        run: node scripts/release/stage-npm-from-release.mjs .release-assets "$RELEASE_TAG"
+
+      - name: Publish platform packages, then the root package
+        run: node scripts/release/publish-npm.mjs "$RELEASE_TAG"

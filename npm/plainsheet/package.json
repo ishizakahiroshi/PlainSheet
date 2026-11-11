@@ -1,0 +1,44 @@
+{
+  "name": "plainsheet",
+  "version": "0.0.0",
+  "description": "Local-first plain text spreadsheet editor for CSV, TSV, Markdown tables, JSON and YAML. Installs the desktop app for your platform through an optional dependency.",
+  "keywords": [
+    "csv",
+    "tsv",
+    "spreadsheet",
+    "editor",
+    "markdown-table",
+    "desktop",
+    "local-first"
+  ],
+  "homepage": "https://github.com/ishizakahiroshi/PlainSheet",
+  "bugs": {
+    "url": "https://github.com/ishizakahiroshi/PlainSheet/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ishizakahiroshi/PlainSheet.git"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Hiroshi Ishizaka",
+    "url": "https://github.com/ishizakahiroshi"
+  },
+  "type": "module",
+  "bin": {
+    "plainsheet": "./bin/plainsheet.mjs"
+  },
+  "files": [
+    "bin/plainsheet.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "optionalDependencies": {
+    "plainsheet-windows-x64": "0.0.0",
+    "plainsheet-linux-x64": "0.0.0",
+    "plainsheet-macos-apple-silicon": "0.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
