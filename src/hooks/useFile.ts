@@ -30,6 +30,9 @@ type UseFileOptions = {
   getActiveId?: () => string;
 };
 
+// Sent by the native side when macOS delivers a document to a running app.
+const OPEN_FILE_EVENT = "plainsheet://open-file";
+
 type FileDropPayload =
   | {
       paths?: string[];
@@ -360,10 +363,42 @@ export function useFile({
         }
       });
 
+    // A file the OS asked the app to open: named on the command line
+    // (`plainsheet data.csv`, "Open with") or, on macOS, delivered as an
+    // open-document event. The native side hands each one out once, so the
+    // result is used even if this effect was torn down meanwhile (StrictMode).
+    const openPendingFile = async () => {
+      const path = await invoke<string | null>("take_startup_file");
+      if (!path) {
+        return;
+      }
+      if (getMetaRef.current().dirty && !confirmDiscardRef.current()) {
+        return;
+      }
+      await loadPathRef.current(path);
+    };
+    const openPendingFileSafely = () => {
+      openPendingFile().catch(() => onToastRef.current(t("toastLoadFailed")));
+    };
+    let unlistenOpen: (() => void) | undefined;
+    listen(OPEN_FILE_EVENT, openPendingFileSafely)
+      .then((handler) => {
+        if (cancelled) {
+          handler();
+          return;
+        }
+        unlistenOpen = handler;
+      })
+      .catch(() => undefined);
+    openPendingFileSafely();
+
     return () => {
       cancelled = true;
       if (unlisten) {
         unlisten();
+      }
+      if (unlistenOpen) {
+        unlistenOpen();
       }
     };
   }, []);

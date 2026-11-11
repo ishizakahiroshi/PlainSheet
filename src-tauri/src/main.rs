@@ -1,7 +1,45 @@
 use encoding_rs::{Encoding, EUC_JP, SHIFT_JIS, UTF_8, WINDOWS_1252};
 use std::borrow::Cow;
+use std::ffi::OsString;
 use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use tauri_plugin_dialog::DialogExt;
+
+// A file the operating system asked PlainSheet to open: named on the command
+// line (`plainsheet data.csv`, "Open with" on Windows and Linux) or delivered
+// by macOS as an open-document event. The window takes it once it is ready.
+struct PendingOpen(Mutex<Option<String>>);
+
+// Tells an already running window that PendingOpen was filled (macOS).
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+const OPEN_FILE_EVENT: &str = "plainsheet://open-file";
+
+// First argument that names an existing regular file, as an absolute path.
+// Arguments starting with '-' are skipped (flags, macOS `-psn_…`). A relative
+// name is resolved against the directory the app was started from.
+fn startup_file_from_args<I>(args: I, cwd: &Path) -> Option<String>
+where
+    I: IntoIterator<Item = OsString>,
+{
+    args.into_iter()
+        .filter(|arg| !arg.to_string_lossy().starts_with('-'))
+        .map(PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                cwd.join(path)
+            }
+        })
+        .filter(|path| path.is_absolute() && path.is_file())
+        .find_map(|path| path.to_str().map(str::to_owned))
+}
+
+#[tauri::command]
+fn take_startup_file(pending: tauri::State<'_, PendingOpen>) -> Option<String> {
+    pending.0.lock().ok()?.take()
+}
 
 #[tauri::command]
 async fn open_file_dialog(app: tauri::AppHandle) -> Option<String> {
@@ -20,7 +58,8 @@ async fn open_file_dialog(app: tauri::AppHandle) -> Option<String> {
 const MAX_FILE_BYTES: u64 = 50 * 1024 * 1024;
 
 // Defense in depth: these commands only ever receive absolute paths returned by
-// the native file dialog or drop events, so reject anything else.
+// the native file dialog, drop events, or take_startup_file, so reject
+// anything else.
 fn require_absolute(path: &str) -> Result<(), String> {
     if std::path::Path::new(path).is_absolute() {
         Ok(())
@@ -191,8 +230,13 @@ fn encode_with(encoding: &'static Encoding, content: &str, label: &str) -> Resul
 }
 
 fn main() {
+    let startup_file = startup_file_from_args(
+        std::env::args_os().skip(1),
+        &std::env::current_dir().unwrap_or_default(),
+    );
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(PendingOpen(Mutex::new(startup_file)))
         // tauri_plugin_fs is intentionally NOT registered. PlainSheet ships
         // narrow read_file/write_file commands instead of exposing the fs
         // plugin's broad API so the webview cannot reach into arbitrary paths
@@ -201,18 +245,68 @@ fn main() {
             open_file_dialog,
             read_file,
             write_file,
-            save_file_dialog
+            save_file_dialog,
+            take_startup_file
         ])
-        .run(tauri::generate_context!());
+        .build(tauri::generate_context!());
 
-    if let Err(error) = app {
-        eprintln!("failed to run PlainSheet: {error}");
+    match app {
+        Ok(app) => app.run(|_app, _event| {
+            // macOS hands over documents (Finder "Open With", a double-clicked
+            // associated file) as an event instead of a command-line argument,
+            // both at launch and while the app is already running.
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            if let tauri::RunEvent::Opened { urls } = &_event {
+                use tauri::{Emitter, Manager};
+                let opened = urls
+                    .iter()
+                    .filter_map(|url| url.to_file_path().ok())
+                    .filter(|path| path.is_file())
+                    .find_map(|path| path.to_str().map(str::to_owned));
+                if let Some(path) = opened {
+                    if let Ok(mut pending) = _app.state::<PendingOpen>().0.lock() {
+                        *pending = Some(path);
+                    }
+                    let _ = _app.emit(OPEN_FILE_EVENT, ());
+                }
+            }
+        }),
+        Err(error) => eprintln!("failed to run PlainSheet: {error}"),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_file_is_the_first_existing_file_argument() {
+        let dir = std::env::temp_dir().join(format!("plainsheet-args-{}", std::process::id()));
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        let file = dir.join("data.csv");
+        fs::write(&file, "a,b\n").unwrap();
+        let args = |list: &[&str]| list.iter().map(OsString::from).collect::<Vec<_>>();
+        let expected = Some(file.to_str().unwrap().to_owned());
+
+        // absolute path
+        assert_eq!(
+            startup_file_from_args(vec![file.clone().into_os_string()], Path::new("")),
+            expected
+        );
+        // relative name, resolved against the start directory
+        assert_eq!(startup_file_from_args(args(&["data.csv"]), &dir), expected);
+        // flags and names that are not files are passed over
+        assert_eq!(
+            startup_file_from_args(args(&["--flag", "-psn_0_1", "missing.csv", "sub", "data.csv"]), &dir),
+            expected
+        );
+        // nothing usable: no arguments, a directory, a missing file, no start directory
+        assert_eq!(startup_file_from_args(args(&[]), &dir), None);
+        assert_eq!(startup_file_from_args(args(&["sub", "missing.csv"]), &dir), None);
+        assert_eq!(startup_file_from_args(args(&["data.csv"]), Path::new("")), None);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn rejects_nul_bytes_in_utf8_and_non_utf8() {
