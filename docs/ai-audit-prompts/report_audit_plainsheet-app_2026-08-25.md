@@ -3,7 +3,7 @@ type: audit-report
 status: stable
 tags: [audit, app, plainsheet, security]
 owner: ishizakahiroshi
-related: ["D:/dev/github/public/PlainSheet/docs/local/plan_audit-app-2026-08-25.md"]
+related: ["docs/local/plan_audit-app-2026-08-25.md"]
 last_reviewed: 2026-08-25
 docsweep_policy: never_archive
 ---
@@ -27,7 +27,7 @@ docsweep_policy: never_archive
 
 ## 解決済み引数
 
-DB区分=なし（user明示）、強度=ハイ（user「最高」）、スコープ=フルループ（user選択）、検証モード=安全なローカル検証、観点=全部、対象=repository全体、除外=node_modules/dist/archive/bun.lock 内容全文/gen schemas（生成物）、保存先=docs/ai-audit-prompts（track・user承認済み）、plan=docs/local、確認=あり（承認日 2026-08-25）。
+DB区分=なし（user明示）、強度=high（user「最高」）、スコープ=フルループ（user選択）、検証モード=安全なローカル検証、観点=全部、対象=repository全体、除外=node_modules/dist/archive/bun.lock 内容全文/gen schemas（生成物）、保存先=docs/ai-audit-prompts（track・user承認済み）、plan=docs/local、確認=あり（承認日 2026-08-25）。
 
 ## capability と実行方式
 
