@@ -8,7 +8,9 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   prettier,
   {
-    ignores: ["dist", "src-tauri/target", "node_modules"],
+    // scripts/secrets-scan.* are shared scanner files kept identical to their
+    // upstream copy; they are checked by their own tests, not by this config.
+    ignores: ["dist", "src-tauri/target", "node_modules", "scripts/secrets-scan.*.mjs"],
   },
   {
     files: ["**/*.{ts,tsx}"],
