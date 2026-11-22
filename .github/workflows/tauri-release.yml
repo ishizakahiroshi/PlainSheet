@@ -330,6 +330,9 @@ jobs:
         (github.event_name == 'workflow_dispatch' && inputs.channel == 'winget')
       )
     runs-on: ubuntu-22.04
+    # The token lives in the `winget-publish` environment, which accepts only
+    # v* tags and main and waits for the owner's approval before this job starts.
+    environment: winget-publish
     permissions:
       contents: read
     env:
@@ -340,7 +343,7 @@ jobs:
     steps:
       - name: Report a missing credential
         if: env.WINGET_AVAILABLE != 'true'
-        run: echo "::warning::winget skipped - the PUBLISH_GITHUB_TOKEN secret is not set. Set it, then run this workflow with channel=winget and tag=$RELEASE_TAG."
+        run: echo "::warning::winget skipped - the PUBLISH_GITHUB_TOKEN secret is not set in the winget-publish environment. Set it there, then run this workflow on main with channel=winget and tag=$RELEASE_TAG."
 
       - name: Check the release tag
         if: env.WINGET_AVAILABLE == 'true'
