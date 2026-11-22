@@ -25,10 +25,16 @@ export function useSelection() {
     setSelectionState(next);
   }
 
-  function selectRange(nextRange: Exclude<Range, null>): void {
+  /**
+   * `active` is the cell the range grows from (Glide's `current.cell` during a
+   * drag). It must be echoed back unchanged: Glide rebuilds the dragged range
+   * from that cell on every pointer move, so replacing it with the range end
+   * makes the selection a two-cell window that follows the pointer.
+   */
+  function selectRange(nextRange: Exclude<Range, null>, active?: Selection): void {
     const normalized = normalizeRange(nextRange);
     setAnchor({ row: normalized.startRow, col: normalized.startCol });
-    setSelectionState({ row: normalized.endRow, col: normalized.endCol });
+    setSelectionState(active ?? { row: normalized.endRow, col: normalized.endCol });
     setRange(normalized);
   }
 

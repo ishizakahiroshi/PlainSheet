@@ -1456,7 +1456,7 @@ export default function App() {
             onColumnResizeEnd={endColumnResize}
             onSelectionChange={(sel, range) => {
               if (range) {
-                selectionState.selectRange(range);
+                selectionState.selectRange(range, sel);
               } else {
                 selectionState.selectCell(sel.row, sel.col, false);
               }

@@ -704,6 +704,45 @@ describe("consolidated review regressions: source targets and persisted shape", 
     expect(harness.saved[1]).toEqual(["drop", "B"]);
     expect(harness.saved[0][0]).toBe("visible");
   });
+  it.each([
+    ["right", [0, 0], [3, 0], { x: 0, y: 0, width: 4, height: 1 }],
+    ["down", [0, 0], [0, 4], { x: 0, y: 0, width: 1, height: 5 }],
+    ["diagonally up-left", [3, 4], [1, 1], { x: 1, y: 1, width: 3, height: 4 }],
+  ] as const)(
+    "keeps the drag anchor so a %s drag grows past two cells",
+    async (_dir, anchor, pointer, expected) => {
+      await start();
+      // Emulate Glide's drag: each pointer move rebuilds the range from the
+      // gridSelection.current.cell it was last handed back.
+      const [ax, ay] = anchor;
+      rectangle(ax, ay);
+      const [tx, ty] = pointer;
+      const steps = Math.max(Math.abs(tx - ax), Math.abs(ty - ay));
+      for (let i = 1; i <= steps; i++) {
+        const px = ax + Math.round(((tx - ax) * i) / steps);
+        const py = ay + Math.round(((ty - ay) * i) / steps);
+        const [cx, cy] = grid().gridSelection!.current!.cell;
+        act(() =>
+          grid().onGridSelectionChange!({
+            rows: CompactSelection.empty(),
+            columns: CompactSelection.empty(),
+            current: {
+              cell: [cx, cy],
+              range: {
+                x: Math.min(cx, px),
+                y: Math.min(cy, py),
+                width: Math.abs(px - cx) + 1,
+                height: Math.abs(py - cy) + 1,
+              },
+              rangeStack: [],
+            },
+          }),
+        );
+      }
+      expect(grid().gridSelection?.current?.cell).toEqual([ax, ay]);
+      expect(grid().gridSelection?.current?.range).toEqual(expected);
+    },
+  );
   it("normalizes reversed Name box ranges before revealing hidden rows and columns", async () => {
     await start();
     selection("row", [1]);
