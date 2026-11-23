@@ -56,8 +56,9 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (command: string, args: Record<string, unknown> = {}) => {
     if (command === "take_pending_files") return [];
     if (command === "open_file_dialog") {
+      // "a|b" stands for several files picked at once.
       const path = harness.openQueue.shift();
-      return path ? [path] : null;
+      return path ? path.split("|") : null;
     }
     if (command === "read_file") {
       const content = harness.files.get(args.path as string);
@@ -188,6 +189,14 @@ describe("desktop unsaved-change prompts (F-01, F-02)", () => {
     const confirmed = { preventDefault: vi.fn() };
     await act(async () => harness.closeHandler!(confirmed));
     expect(confirmed.preventDefault).not.toHaveBeenCalled();
+  });
+});
+
+describe("opening several files at once (F-24)", () => {
+  it("opens each file in its own tab", async () => {
+    render(<App />);
+    await openPath(`${A}|${B}`);
+    expect(tabNames()).toEqual(["a.csv", "b.csv"]);
   });
 });
 

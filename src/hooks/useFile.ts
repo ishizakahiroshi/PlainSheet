@@ -129,7 +129,9 @@ export function useFile({
       }
       const format = formatFromPath(realPath);
       const parsed = readTableText(result.content, format);
-      const loaded = loadData(parsed.rows, {
+      // The latest loadData: when several files load in a row, the one this
+      // callback closed over predates the tabs the earlier files opened.
+      const loaded = loadDataRef.current(parsed.rows, {
         ...parsed.meta,
         filePath: realPath,
         fileName: fileNameFromPath(realPath),
@@ -143,7 +145,7 @@ export function useFile({
       onRecentPath?.(realPath);
       return readWarningMessage(result.warning) ?? parsed.notice ?? t("toastLoaded");
     },
-    [confirmDiscard, getMeta, loadData, onRecentPath],
+    [confirmDiscard, getMeta, onRecentPath],
   );
 
   const loadPaths = useCallback(
@@ -191,14 +193,18 @@ export function useFile({
   const openFile = useCallback(async () => {
     try {
       if (!isTauriRuntime()) {
-        await openBrowserFiles(loadData, onToast, (handle) => {
-          const activeId = getActiveIdRef.current();
-          if (handle) {
-            fileHandlesRef.current.set(activeId, handle);
-          } else {
-            fileHandlesRef.current.delete(activeId);
-          }
-        });
+        await openBrowserFiles(
+          (rows, meta) => loadDataRef.current(rows, meta),
+          onToast,
+          (handle) => {
+            const activeId = getActiveIdRef.current();
+            if (handle) {
+              fileHandlesRef.current.set(activeId, handle);
+            } else {
+              fileHandlesRef.current.delete(activeId);
+            }
+          },
+        );
         return;
       }
       const paths = await invoke<string[] | string | null>("open_file_dialog");
@@ -209,7 +215,7 @@ export function useFile({
     } catch (error) {
       onToast(loadErrorMessage(error));
     }
-  }, [loadData, loadPaths, onToast]);
+  }, [loadPaths, onToast]);
 
   // Writes to disk. If the file changed since it was read, asks before
   // overwriting it. Returns the file's new stamp, or null when the user
@@ -315,7 +321,8 @@ export function useFile({
         return;
       }
       const format = formatFromPath(path);
-      const delimiter = format === currentMeta.format ? currentMeta.delimiter : delimiterFromFormat(format);
+      const delimiter =
+        format === currentMeta.format ? currentMeta.delimiter : delimiterFromFormat(format);
       const encoding = encodingForFormat(format, currentMeta.encoding);
       const content = serializeTableText(
         rows,
@@ -326,7 +333,9 @@ export function useFile({
       );
       // The same file chosen again: still guard against outside changes.
       const expected =
-        currentMeta.filePath && samePath(currentMeta.filePath, path) ? currentMeta.fileStamp : undefined;
+        currentMeta.filePath && samePath(currentMeta.filePath, path)
+          ? currentMeta.fileStamp
+          : undefined;
       const written = await writeToDisk(path, content, encoding, expected);
       if (!written) {
         return;
@@ -401,7 +410,12 @@ export function useFile({
         currentMeta.newline,
         serializeOptions(currentMeta, format),
       );
-      const written = await writeToDisk(currentMeta.filePath, content, encoding, currentMeta.fileStamp);
+      const written = await writeToDisk(
+        currentMeta.filePath,
+        content,
+        encoding,
+        currentMeta.fileStamp,
+      );
       if (!written) {
         return;
       }
@@ -603,7 +617,11 @@ export function loadErrorMessage(error: unknown): string {
     return t("toastLoadNotUtf8");
   }
   const code =
-    typeof error === "string" ? error : error instanceof LoadError ? error.code : notTableCode(error);
+    typeof error === "string"
+      ? error
+      : error instanceof LoadError
+        ? error.code
+        : notTableCode(error);
   const key = code ? LOAD_ERROR_MESSAGES[code] : undefined;
   return key ? t(key) : t("toastLoadFailed");
 }
@@ -613,7 +631,10 @@ function notTableCode(error: unknown): string | null {
   if (error instanceof SyntaxError) {
     return "not-table";
   }
-  if (error instanceof Error && (error.name.startsWith("YAML") || /array of objects/.test(error.message))) {
+  if (
+    error instanceof Error &&
+    (error.name.startsWith("YAML") || /array of objects/.test(error.message))
+  ) {
     return "not-table";
   }
   return null;

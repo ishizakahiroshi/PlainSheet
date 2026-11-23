@@ -298,14 +298,20 @@ export default function App() {
       (sheet.rows.length === 1 &&
         (sheet.rows[0]?.length ?? 0) <= 1 &&
         (sheet.rows[0]?.[0] ?? "") === "");
+    // The rendered sheet can lag behind when several files load in a row:
+    // the first file already replaced the blank tab in the documents list.
+    const documents = workspace.getDocuments();
+    const active = documents[0];
     return (
-      workspace.documents.length === 1 &&
+      documents.length === 1 &&
+      !active?.meta.filePath &&
+      !active?.meta.fileName &&
       !sheet.meta.dirty &&
       !sheet.meta.filePath &&
       !sheet.meta.fileName &&
       emptyRows
     );
-  }, [workspace.documents.length, sheet.meta, sheet.rows]);
+  }, [workspace, sheet.meta, sheet.rows]);
 
   const loadIntoWorkspace = useCallback(
     (rows: CellValue[][], meta: Partial<SheetMeta>): boolean => {

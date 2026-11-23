@@ -218,20 +218,14 @@ fn write_replacing(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let (Some(dir), Some(name)) = (target.parent(), target.file_name()) else {
         return fs::write(target, bytes);
     };
-    let temp = dir.join(format!(
-        ".{}.plainsheet-{}.tmp",
-        name.to_string_lossy(),
-        std::process::id()
-    ));
+    let Ok((temp, mut file)) = create_temp_file(dir, &name.to_string_lossy(), existing.as_ref()) else {
+        // A folder that does not allow creating files: write in place.
+        return fs::write(target, bytes);
+    };
     let written = (|| -> std::io::Result<()> {
-        let mut file = fs::File::create(&temp)?;
         file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
-        #[cfg(unix)]
-        if let Some(metadata) = &existing {
-            fs::set_permissions(&temp, metadata.permissions())?;
-        }
         fs::rename(&temp, target)
     })();
     if written.is_err() {
@@ -239,6 +233,44 @@ fn write_replacing(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
         return fs::write(target, bytes);
     }
     Ok(())
+}
+
+// Creates a new, uniquely named file next to the target. create_new fails
+// instead of opening a file or symlink that someone placed under the name, so
+// the content cannot be redirected elsewhere. On Unix the file gets the
+// original's permissions from the start.
+fn create_temp_file(
+    dir: &Path,
+    name: &str,
+    existing: Option<&fs::Metadata>,
+) -> std::io::Result<(PathBuf, fs::File)> {
+    let seed = std::time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let mut last_error = None;
+    for attempt in 0..16u32 {
+        let temp = dir.join(format!(
+            ".{name}.plainsheet-{}-{:x}.tmp",
+            std::process::id(),
+            seed.wrapping_add(u128::from(attempt) * 0x9e37_79b9)
+        ));
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            options.mode(existing.map_or(0o600, |metadata| metadata.permissions().mode() & 0o7777));
+        }
+        #[cfg(not(unix))]
+        let _ = existing;
+        match options.open(&temp) {
+            Ok(file) => return Ok((temp, file)),
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => last_error = Some(error),
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| ErrorKind::AlreadyExists.into()))
 }
 
 #[tauri::command]

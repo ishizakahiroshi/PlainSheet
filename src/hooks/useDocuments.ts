@@ -304,6 +304,9 @@ export function useDocuments(initial?: DocumentSnapshot) {
   );
 
   const getActiveId = useCallback(() => activeIdRef.current, []);
+  // The tabs as of now, including changes not yet rendered (several files
+  // opened in one go).
+  const getDocuments = useCallback(() => documentsRef.current, []);
 
   return {
     documents,
@@ -311,6 +314,7 @@ export function useDocuments(initial?: DocumentSnapshot) {
     active,
     anyDirty,
     getActiveId,
+    getDocuments,
     captureActive,
     openDocument,
     addBlankDocument,
