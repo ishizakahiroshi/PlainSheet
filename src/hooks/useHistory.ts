@@ -5,7 +5,12 @@ import { cloneRows } from "./useSheet";
 export const MAX_HISTORY = 50;
 
 function maxHistoryForRows(rows: HistoryEntry["rows"]): number {
-  const cellCount = rows.length * (rows[0]?.length ?? 1);
+  // Count every row: rows can differ in length, and estimating from the first
+  // row kept 50 copies of a large sheet whose first row was short.
+  let cellCount = 0;
+  for (const row of rows) {
+    cellCount += Math.max(1, row.length);
+  }
   if (cellCount > 500_000) {
     return 5;
   }

@@ -44,6 +44,36 @@ function registryIntegrity(pkg, version, cwd) {
   return integrity;
 }
 
+// The version the registry installs by default, or null before the first release.
+function registryLatest(pkg, cwd) {
+  const result = npm(["view", pkg, "dist-tags.latest", "--json"], cwd);
+  if (!ok(result)) {
+    if (/\bE404\b/.test(text(result))) return null;
+    throw new Error(`cannot read the dist-tags of ${pkg}`);
+  }
+  const body = result.stdout.trim();
+  return body ? JSON.parse(body) : null;
+}
+
+function compareVersions(a, b) {
+  const parts = (value) => value.split("-")[0].split(".").map(Number);
+  const [x, y] = [parts(a), parts(b)];
+  for (let index = 0; index < 3; index += 1) {
+    const diff = (x[index] ?? 0) - (y[index] ?? 0);
+    if (diff !== 0) return Math.sign(diff);
+  }
+  return 0;
+}
+
+// Pre-releases go to "next". Publishing an older version again (a re-run of
+// channel=npm for an old tag) must not move "latest" back, so it goes to
+// "previous" when the registry already has a newer latest.
+export function chooseDistTag(version, latest) {
+  if (version.includes("-")) return "next";
+  if (latest && compareVersions(version, latest) < 0) return "previous";
+  return "latest";
+}
+
 // What each tarball must contain, and nothing else.
 export function requiredFiles(pkg) {
   if (pkg === ROOT_PACKAGE) return ["LICENSE", "README.md", "bin/plainsheet.mjs", "package.json"];
@@ -111,7 +141,7 @@ export async function publish(tag, { dryRun = false, root = repoRoot } = {}) {
       }
     }
 
-    const distTag = version.includes("-") ? "next" : "latest";
+    const distTag = chooseDistTag(version, registryLatest(ROOT_PACKAGE, root));
     for (const item of packed) {
       if (item.existing) {
         console.log(`SKIP ${item.pkg}@${version}: already published with identical content`);

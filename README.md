@@ -66,7 +66,7 @@ Desktop build checks are produced by GitHub Actions. In a private repository, br
 
 PlainSheet treats every cell as plain text, so some conversions are inherently lossy:
 
-- **JSON / YAML**: cells are written back as strings, so numbers and booleans become quoted strings, and a key that was missing on one record is written as an empty string on every record. Enable **Omit empty cells (JSON/YAML)** in Settings to drop empty values instead of emitting empty keys.
+- **JSON / YAML**: a cell you did not edit is written back exactly as the file had it (numbers such as `1.50` or large integers, `true`, `null`, nested objects, and in YAML the comments and quoting). An edited cell keeps its column's type when the text fits it (a number column stays numeric), and is written as a string otherwise. A key that a record did not have stays absent while its cell is empty. Files that started as another format are written with string values; enable **Omit empty cells (JSON/YAML)** in Settings to drop empty values instead of emitting empty keys.
 - **Markdown**: the table format cannot preserve leading or trailing spaces inside a cell. Use CSV, TSV, or JSON when surrounding whitespace matters.
 - **CSV / TSV**: cells beginning with `=`, `+`, `-`, or `@` are written verbatim. If you plan to open the file in another spreadsheet app, enable **Formula-injection guard (CSV/TSV)** in Settings to prefix those cells with `'` so they are not evaluated as formulas.
 

@@ -20,6 +20,8 @@ type SettingsModalProps = {
   onOmitEmptyCellsChange: (enabled: boolean) => void;
   onThemeChange: (theme: "light" | "dark" | "system") => void;
   onUseHeaderRowChange?: (enabled: boolean) => void;
+  // Desktop, for a file opened from disk: read it again in the chosen encoding.
+  onReopenWithEncoding?: () => void;
   onClose: () => void;
 };
 
@@ -41,6 +43,7 @@ export function SettingsModal({
   onOmitEmptyCellsChange,
   onThemeChange,
   onUseHeaderRowChange,
+  onReopenWithEncoding,
   onClose,
 }: SettingsModalProps) {
   useEffect(() => {
@@ -85,6 +88,11 @@ export function SettingsModal({
               <option value="euc-jp">EUC-JP</option>
               <option value="latin-1">Latin-1</option>
             </select>
+            {onReopenWithEncoding ? (
+              <button type="button" onClick={onReopenWithEncoding}>
+                {t("reopenWithEncoding")}
+              </button>
+            ) : null}
           </label>
           <label>
             <span>{t("newline")}</span>

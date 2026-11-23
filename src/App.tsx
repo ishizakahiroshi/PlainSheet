@@ -12,6 +12,8 @@ import { FilterPopover, type FilterPopoverState } from "./components/FilterPopov
 import { FormulaBar } from "./components/FormulaBar";
 import { HelpModal } from "./components/HelpModal";
 import { SearchPanel, type SearchOptions } from "./components/SearchPanel";
+import { useSearchHits } from "./hooks/useSearchHits";
+import { buildMatcher } from "./lib/search";
 import { GlideSheet } from "./components/GlideSheet";
 import { columnName } from "./lib/columns";
 import { SettingsModal } from "./components/SettingsModal";
@@ -60,10 +62,9 @@ type PendingConfirm = {
   message: string;
 } | null;
 
-type SearchHit = {
-  row: number;
-  col: number;
-};
+// How far past the data a typed value may land (rows / columns of gap).
+const TYPE_GAP_ROWS = 10_000;
+const TYPE_GAP_COLS = 1_000;
 
 export default function App() {
   const sheet = useSheet();
@@ -344,16 +345,22 @@ export default function App() {
   );
 
   const completeSave = useCallback(
-    (docId: string, savedRows: CellValue[][], meta: Partial<SheetMeta>) => {
+    (
+      docId: string,
+      savedRows: CellValue[][],
+      meta: Partial<SheetMeta>,
+      options?: { keepDirty?: boolean },
+    ) => {
       if (workspace.getActiveId() === docId) {
         // Edits made while the write was pending are not on disk yet.
-        sheet.setMeta({ ...meta, dirty: !sameRows(rowsRef.current, savedRows) });
+        sheet.setMeta(
+          options?.keepDirty ? meta : { ...meta, dirty: !sameRows(rowsRef.current, savedRows) },
+        );
         return;
       }
-      workspace.updateDocumentMeta(docId, (doc) => ({
-        ...meta,
-        dirty: !sameRows(doc.rows, savedRows),
-      }));
+      workspace.updateDocumentMeta(docId, (doc) =>
+        options?.keepDirty ? meta : { ...meta, dirty: !sameRows(doc.rows, savedRows) },
+      );
     },
     [sheet, workspace],
   );
@@ -366,6 +373,7 @@ export default function App() {
     getActiveId: workspace.getActiveId,
     onToast: showToast,
     confirmDiscard: () => confirmDiscard(t("confirmUnsaved")),
+    confirmOverwrite: () => confirmDiscard(t("confirmOverwriteChanged")),
     onRecentPath: (path) => {
       updateSettings((current) => ({
         recentFiles: pushRecentFile(current.recentFiles, path),
@@ -436,6 +444,15 @@ export default function App() {
   );
   const displayRows = useMemo(() => visibleRows.map((row) => row.values), [visibleRows]);
   const rowSourceIndexes = useMemo(() => visibleRows.map((row) => row.sourceIndex), [visibleRows]);
+  // Rows past the data are empty and always shown.
+  const isRowVisible = useMemo(() => {
+    const shown = new Set(rowSourceIndexes);
+    return (row: number) => row >= sheet.rows.length || shown.has(row);
+  }, [rowSourceIndexes, sheet.rows.length]);
+  const isColumnVisible = useMemo(() => {
+    const hidden = new Set(view.hiddenColumns);
+    return (col: number) => !hidden.has(col);
+  }, [view.hiddenColumns]);
   const columnSourceIndexes = useMemo(
     () =>
       indexesBetween(0, sheet.columnCount - 1, sheet.columnCount).filter(
@@ -484,10 +501,13 @@ export default function App() {
         : null,
     [filter, sheet.rows],
   );
-  const searchHits = useMemo(
-    () => findSearchHits(sheet.rows, query, searchOptions, filteredRowSet),
-    [sheet.rows, query, searchOptions, filteredRowSet],
-  );
+  const search = useSearchHits(sheet.rows, query, searchOptions, filteredRowSet);
+  const searchHits = search.hits;
+  useEffect(() => {
+    if (search.timedOut) {
+      showToast(t("toastSearchTooSlow"));
+    }
+  }, [search.timedOut, showToast]);
   const searchHitSet = useMemo(
     () => new Set(searchHits.map((hit) => `${hit.row}:${hit.col}`)),
     [searchHits],
@@ -546,15 +566,18 @@ export default function App() {
   };
   const commitCell = (row: number, col: number, value: string, reselect: boolean) => {
     if ((sheet.rows[row]?.[col] ?? "") !== value) {
+      // Typing below or right of the data fills the gap with empty rows and
+      // columns, up to a limit that keeps the sheet (and its undo copies)
+      // small. It used to drop the text with a message about pasting.
       if (
         row < 0 ||
         col < 0 ||
-        row > sheet.rows.length ||
-        col > sheet.columnCount ||
+        row > sheet.rows.length + TYPE_GAP_ROWS ||
+        col > sheet.columnCount + TYPE_GAP_COLS ||
         row >= MAX_GRID_ROWS ||
         col >= MAX_GRID_COLS
       ) {
-        showToast(t("boundedPaste"));
+        showToast(t("toastTypeTooFar", { rows: TYPE_GAP_ROWS, cols: TYPE_GAP_COLS }));
         return;
       }
       if (filter.hasFilters && row < sheet.rows.length && !rowSourceIndexes.includes(row)) {
@@ -1123,7 +1146,7 @@ export default function App() {
     if (!prepareNavigation(hit.row, hit.col)) {
       return;
     }
-    const matcher = buildMatcher(query, searchOptions);
+    const matcher = search.timedOut ? null : buildMatcher(query, searchOptions);
     if (!matcher) {
       return;
     }
@@ -1145,8 +1168,12 @@ export default function App() {
       showToast(t("filteredEdit"));
       return;
     }
-    const matcher = buildMatcher(query, searchOptions);
+    // A pattern that was too slow to search would freeze the window here.
+    const matcher = search.timedOut ? null : buildMatcher(query, searchOptions);
     if (!matcher) {
+      if (search.timedOut) {
+        showToast(t("toastSearchTooSlow"));
+      }
       return;
     }
     const hiddenRowSet = new Set(view.hiddenRows);
@@ -1429,6 +1456,8 @@ export default function App() {
       <Toolbar
         canUndo={history.canUndo}
         canRedo={history.canRedo}
+        canDeleteRow={axisIndexes("row", liveTarget()).length > 0}
+        canDeleteColumn={axisIndexes("column", liveTarget()).length > 0}
         onNew={newFile}
         onOpen={() => void file.openFile()}
         onSave={() => void file.saveFile()}
@@ -1619,6 +1648,8 @@ export default function App() {
         range={selectionState.range}
         meta={sheet.meta}
         zoom={settings.zoom}
+        isRowVisible={isRowVisible}
+        isColumnVisible={isColumnVisible}
       />
       <ContextMenu
         state={contextMenu}
@@ -1666,6 +1697,14 @@ export default function App() {
         onOmitEmptyCellsChange={(value) => sheet.setMeta({ omitEmptyCells: value, dirty: true })}
         onThemeChange={(theme) => updateSettings({ theme })}
         onUseHeaderRowChange={(useHeaderRow) => updateSettings({ useHeaderRow })}
+        onReopenWithEncoding={
+          isTauriRuntime() && sheet.meta.filePath
+            ? () => {
+                setSettingsOpen(false);
+                void file.reopenWithEncoding(sheet.meta.encoding, history.canUndo);
+              }
+            : undefined
+        }
         onClose={() => setSettingsOpen(false)}
       />
       <Toast message={toast} />
@@ -1681,56 +1720,6 @@ function referenceForSelection(selection: Selection, range: Range): string {
   return `${columnName(normalized.startCol)}${normalized.startRow + 1}:${columnName(normalized.endCol)}${
     normalized.endRow + 1
   }`;
-}
-
-const SEARCH_HIT_CAP = 5000;
-
-function findSearchHits(
-  rows: CellValue[][],
-  query: string,
-  options: SearchOptions,
-  allowedRows?: Set<number> | null,
-): SearchHit[] {
-  const matcher = buildMatcher(query, options);
-  if (!matcher) {
-    return [];
-  }
-
-  const hits: SearchHit[] = [];
-  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-    if (allowedRows && !allowedRows.has(rowIndex)) {
-      continue;
-    }
-    for (let colIndex = 0; colIndex < rows[rowIndex].length; colIndex += 1) {
-      matcher.lastIndex = 0;
-      if (matcher.test(rows[rowIndex][colIndex])) {
-        hits.push({ row: rowIndex, col: colIndex });
-        if (hits.length >= SEARCH_HIT_CAP) {
-          return hits;
-        }
-      }
-    }
-  }
-  return hits;
-}
-
-const MAX_QUERY_LENGTH = 2000;
-
-function buildMatcher(query: string, options: SearchOptions): RegExp | null {
-  if (query === "" || query.length > MAX_QUERY_LENGTH) {
-    return null;
-  }
-
-  const flags = `${options.caseSensitive ? "" : "i"}g`;
-  try {
-    return options.regex ? new RegExp(query, flags) : new RegExp(escapeRegExp(query), flags);
-  } catch {
-    return null;
-  }
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function remapOther(indexes: number[], size: number): number[] {

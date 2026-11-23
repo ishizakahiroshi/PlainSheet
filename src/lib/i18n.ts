@@ -111,6 +111,36 @@ const dictionaries = {
     toastLoading: "読み込み中… {percent}%",
     confirmUnsaved: "未保存の変更があります。破棄して続行しますか？",
     confirmCloseTab: "未保存の変更があります。このタブを閉じますか？",
+    confirmOverwriteChanged:
+      "このファイルは開いた後に別のアプリで変更されています。上書きしますか？",
+    toastDownloadKeepsUnsaved:
+      "ダウンロードを開始しました。ブラウザ版は保存先を確かめられないため、「未保存」の表示は残します",
+    toastLoadTooLarge: "50MB を超えるファイルは開けません",
+    toastLoadUtf16: "UTF-16 のファイルは開けません。UTF-8 で保存し直してから開いてください",
+    toastLoadBinary: "表のファイルではないため開けません（NUL バイトを含んでいます）",
+    toastLoadNotFound: "ファイルが見つかりません",
+    toastLoadPermission: "ファイルを読む権限がありません",
+    toastLoadNotTable:
+      "表として読めませんでした。JSON / YAML の形式が正しくないか、オブジェクトの配列ではありません",
+    toastLoadedInvalidUtf8:
+      "読み込みました。UTF-8 として読めないバイトが {count} か所あり、� で表示しています。保存するとその部分は � になります",
+    toastLoadedGuessedLatin1:
+      "読み込みました。文字コードを Latin-1 と判定しました。文字化けしているときは、設定で文字コードを選んで「この文字コードで開き直す」を押してください",
+    toastLoadedRoundtrip:
+      "読み込みました。この文字コードで保存すると、一部の文字（NEC・IBM 拡張文字など）のバイトが変わります",
+    toastLoadedUnterminatedQuote:
+      "読み込みました。閉じていない引用符 \" があったため、その引用符を文字として読みました",
+    toastSavePermission: "保存する権限がありません",
+    reopenWithEncoding: "この文字コードで開き直す",
+    filterSearch: "値を検索",
+    keysNavigate: "矢印キー / Tab / Enter",
+    keysEditCell: "文字を打つ / F2 / ダブルクリック",
+    keysJump: "名前ボックスに入力して Enter",
+    toastTypeTooFar:
+      "データから離れすぎた場所には入力できません。データの下 {rows} 行・右 {cols} 列までのマスに入力してください",
+    filterMore: "ほか {count} 件。検索で絞り込んでください",
+    toastSearchTooSlow:
+      "検索に時間がかかりすぎるため止めました。正規表現を見直してください（例: (a+)+ のような入れ子の繰り返し）",
     totalAverage: "合計 {total} / 平均 {average}",
     statsFull: "合計 {total} / 平均 {average} / 個数 {count} / 最大 {max} / 最小 {min}",
     statsCountOnly: "個数 {count}",
@@ -266,6 +296,36 @@ const dictionaries = {
     toastLoading: "Loading… {percent}%",
     confirmUnsaved: "You have unsaved changes. Discard them and continue?",
     confirmCloseTab: "This tab has unsaved changes. Close it anyway?",
+    confirmOverwriteChanged:
+      "Another app changed this file after it was opened. Overwrite it?",
+    toastDownloadKeepsUnsaved:
+      "Download started. The browser build cannot confirm where it was saved, so the sheet stays marked unsaved.",
+    toastLoadTooLarge: "Files over 50 MB can't be opened",
+    toastLoadUtf16: "UTF-16 files can't be opened. Save the file as UTF-8 and open it again.",
+    toastLoadBinary: "This is not a table file (it contains NUL bytes)",
+    toastLoadNotFound: "File not found",
+    toastLoadPermission: "No permission to read this file",
+    toastLoadNotTable:
+      "Couldn't read this as a table. The JSON / YAML is invalid or is not a list of objects.",
+    toastLoadedInvalidUtf8:
+      "Loaded. {count} byte sequences are not valid UTF-8 and show as �. Saving writes � there.",
+    toastLoadedGuessedLatin1:
+      "Loaded as Latin-1. If the text looks garbled, pick an encoding in Settings and press “Reopen with this encoding”.",
+    toastLoadedRoundtrip:
+      "Loaded. Saving in this encoding changes the bytes of some characters (NEC / IBM extensions).",
+    toastLoadedUnterminatedQuote:
+      "Loaded. A quote \" was never closed, so it was read as a character.",
+    toastSavePermission: "No permission to save this file",
+    reopenWithEncoding: "Reopen with this encoding",
+    filterSearch: "Search values",
+    keysNavigate: "Arrows / Tab / Enter",
+    keysEditCell: "Type / F2 / Double-click",
+    keysJump: "Name box + Enter",
+    toastTypeTooFar:
+      "This cell is too far from the data. Type within {rows} rows below or {cols} columns right of it.",
+    filterMore: "{count} more. Search to narrow the list.",
+    toastSearchTooSlow:
+      "The search took too long and was stopped. Check the regular expression (e.g. nested repeats like (a+)+).",
     totalAverage: "Total {total} / Average {average}",
     statsFull: "Total {total} / Avg {average} / Count {count} / Max {max} / Min {min}",
     statsCountOnly: "Count {count}",

@@ -42,7 +42,7 @@ export function useSheet() {
       if (rowIndex >= currentRows.length && value === "") {
         return currentRows;
       }
-      const next = ensureSize(currentRows, rowIndex + 1, colIndex + 1);
+      const next = ensureSize(currentRows, rowIndex + 1, colIndex + 1, rowIndex);
       next[rowIndex][colIndex] = value;
       return next;
     });
@@ -206,7 +206,7 @@ export function useSheet() {
     // reduce instead of Math.max(...spread): a huge pasted grid would exceed
     // the engine's call-argument limit and throw mid-paste.
     const colCount = grid.reduce((max, row) => Math.max(max, row.length), 1);
-    const next = ensureSize(rows, startRow + rowCount, startCol + colCount);
+    const next = ensureSize(rows, startRow + rowCount, startCol + colCount, startRow);
     for (let rowOffset = 0; rowOffset < grid.length; rowOffset += 1) {
       for (let colOffset = 0; colOffset < grid[rowOffset].length; colOffset += 1) {
         next[startRow + rowOffset][startCol + colOffset] = grid[rowOffset][colOffset];
@@ -359,16 +359,21 @@ export function getColumnCount(rows: readonly (readonly CellValue[])[]): number 
   return rows.reduce((max, row) => Math.max(max, row.length), 0);
 }
 
+// Grows the sheet to at least minRows rows, and widens the rows from fromRow
+// on to minCols cells. Rows above fromRow keep their length: padding every row
+// added a delimiter to short rows of a ragged CSV that were never edited.
 export function ensureSize(
   rows: readonly (readonly CellValue[])[],
   minRows: number,
   minCols: number,
+  fromRow = 0,
 ): CellValue[][] {
   const next = cloneRows(rows);
   while (next.length < minRows) {
     next.push([]);
   }
-  for (const row of next) {
+  for (let rowIndex = fromRow; rowIndex < minRows; rowIndex += 1) {
+    const row = next[rowIndex]!;
     while (row.length < minCols) {
       row.push("");
     }

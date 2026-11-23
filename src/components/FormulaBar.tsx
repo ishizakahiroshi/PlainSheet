@@ -94,9 +94,13 @@ export function FormulaBar({
           }
         }}
       />
-      <input
+      {/* A textarea, not an input: an input strips line breaks, so editing a
+          multi-line cell here used to join its lines. Enter commits;
+          Shift+Enter or Alt+Enter adds a line break. */}
+      <textarea
         className="formulaBar__input"
         aria-label={t("formulaInput")}
+        rows={Math.min(4, draft.split("\n").length)}
         value={draft}
         onFocus={() => {
           focused.current = true;
@@ -115,6 +119,19 @@ export function FormulaBar({
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing || event.keyCode === 229) return;
           if (event.key === "Enter") {
+            if (event.shiftKey || event.altKey) {
+              if (event.altKey) {
+                // Alt+Enter does not insert a line break by itself.
+                event.preventDefault();
+                const area = event.currentTarget;
+                const start = area.selectionStart;
+                const next = `${draft.slice(0, start)}\n${draft.slice(area.selectionEnd)}`;
+                setDraft(next);
+                requestAnimationFrame(() => area.setSelectionRange(start + 1, start + 1));
+              }
+              return;
+            }
+            event.preventDefault();
             skipBlurCommit.current = true;
             onCommit(target.current.row, target.current.col, draft, true);
             event.currentTarget.blur();

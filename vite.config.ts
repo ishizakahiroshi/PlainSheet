@@ -17,6 +17,11 @@ export default defineConfig({
     // moves to another port while Tauri still loads http://localhost:1420,
     // so whatever else listens there renders inside the app's main window.
     strictPort: true,
+    // The Rust build writes into src-tauri/target while `tauri dev` runs; on
+    // Windows watching those files fails with EBUSY on the locked exe.
+    watch: {
+      ignored: ["**/src-tauri/**"],
+    },
   },
   preview: {
     host: "127.0.0.1",

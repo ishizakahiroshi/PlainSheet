@@ -4,6 +4,52 @@ All notable changes to PlainSheet are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Desktop: closing a tab or the window (title bar, Alt+F4, taskbar) with
+  unsaved edits now asks first; before, the prompt never blocked.
+- Reopening a file that has unsaved edits in another tab shows that tab instead
+  of reloading it from disk. A save marks only the tab it started from as saved.
+- Markdown: saving keeps the text around the table and the column alignments.
+- Web: files that are not UTF-8 are refused instead of being saved back as
+  replacement characters. A browser download keeps the sheet marked unsaved.
+- Fill handle: the source cells are no longer overwritten; dates, `item-1`,
+  `001` and decimals continue as expected.
+- JSON / YAML: untouched values keep their type and exact text (large integers,
+  `1.50`, `null`, nested objects, YAML comments); edited cells keep their
+  column's type.
+- CSV: text after a closing quote (`"Hello" she said`) and unterminated quotes
+  no longer lose characters or swallow the rest of the file; the final line
+  break and the dominant line ending are kept; editing a cell no longer pads
+  other short rows.
+- The formula bar keeps line breaks in a cell (Shift+Enter adds one).
+- Status bar totals count only visible rows and columns.
+- A slow regular-expression search is stopped instead of freezing the window.
+- Desktop: a UTF-8 file with a few broken bytes opens as UTF-8; a guessed
+  Latin-1 file or Shift_JIS characters that change on save are reported, and
+  Settings can reopen a file in another encoding.
+- Desktop: saving writes a temporary file and replaces the original, and asks
+  before overwriting a file another app changed.
+- Load errors say why (too large, UTF-16, binary, not a table).
+- Sorting treats `0x10` and similar codes as text.
+
+### Added
+
+- Open several files at once (dialog, drag and drop, command line). A second
+  launch hands its files to the running app.
+- The filter list has a search box and draws at most 500 values.
+- Typing a little below or right of the data extends the sheet.
+- Toolbar tooltips with shortcuts.
+
+### Changed
+
+- CI actions run on Node 24 and are pinned by commit; Bun and Rust versions are
+  fixed. The Docker image checks the hashes of its downloads.
+- vite 6 and vitest 4 for development; Rust crates with security fixes.
+- npm: publishing an older version again no longer moves the `latest` tag back.
+
 ## [0.1.1] - 2026-11-11
 
 ### Fixed

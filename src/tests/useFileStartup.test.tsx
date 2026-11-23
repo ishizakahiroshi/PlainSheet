@@ -19,11 +19,16 @@ import { useFile } from "../hooks/useFile";
 
 const STARTUP_PATH = "C:\\work\\data.csv";
 
-function setup({ dirty = false, confirm = true, pending = [STARTUP_PATH] as (string | null)[] }) {
+function setup({
+  dirty = false,
+  confirm = true,
+  pending = [[STARTUP_PATH]] as string[][],
+  shownPath = undefined as string | undefined,
+}) {
   const queue = [...pending];
   invoke.mockImplementation((command: string) => {
-    if (command === "take_startup_file") {
-      return Promise.resolve(queue.shift() ?? null);
+    if (command === "take_pending_files") {
+      return Promise.resolve(queue.shift() ?? []);
     }
     if (command === "read_file") {
       return Promise.resolve({ content: "a,b\n1,2\n", encoding: "utf-8" });
@@ -38,7 +43,7 @@ function setup({ dirty = false, confirm = true, pending = [STARTUP_PATH] as (str
       loadData,
       completeSave: vi.fn(),
       getRows: () => [],
-      getMeta: () => ({ dirty }) as SheetMeta,
+      getMeta: () => ({ dirty, filePath: shownPath }) as SheetMeta,
       onToast,
       confirmDiscard,
     }),
@@ -71,22 +76,38 @@ describe("opening the file the app was started with", () => {
 
   it("stays empty when the app was started without a file", async () => {
     const { loadData, onToast } = setup({ pending: [] });
-    await waitFor(() => expect(commands()).toContain("take_startup_file"));
+    await waitFor(() => expect(commands()).toContain("take_pending_files"));
     await Promise.resolve();
     expect(commands()).not.toContain("read_file");
     expect(loadData).not.toHaveBeenCalled();
     expect(onToast).not.toHaveBeenCalled();
   });
 
-  it("keeps unsaved work when the user declines to discard it", async () => {
-    const { loadData, confirmDiscard } = setup({ dirty: true, confirm: false });
+  it("keeps unsaved work when the file shown is reloaded and the user declines", async () => {
+    const { loadData, confirmDiscard } = setup({
+      dirty: true,
+      confirm: false,
+      shownPath: STARTUP_PATH,
+    });
     await waitFor(() => expect(confirmDiscard).toHaveBeenCalledTimes(1));
-    expect(commands()).not.toContain("read_file");
     expect(loadData).not.toHaveBeenCalled();
   });
 
+  it("opens a different file in a new tab without asking", async () => {
+    const { loadData, confirmDiscard } = setup({ dirty: true, shownPath: "C:\\work\\other.csv" });
+    await waitFor(() => expect(loadData).toHaveBeenCalledTimes(1));
+    expect(confirmDiscard).not.toHaveBeenCalled();
+  });
+
+  it("opens every file it was started with", async () => {
+    const second = "C:\\work\\more.csv";
+    const { loadData } = setup({ pending: [[STARTUP_PATH, second]] });
+    await waitFor(() => expect(loadData).toHaveBeenCalledTimes(2));
+    expect(loadData.mock.calls.map(([, meta]) => meta.filePath)).toEqual([STARTUP_PATH, second]);
+  });
+
   it("loads a file delivered while the app is already running", async () => {
-    const { loadData } = setup({ pending: [null, STARTUP_PATH] });
+    const { loadData } = setup({ pending: [[], [STARTUP_PATH]] });
     await waitFor(() => expect(listeners.has("plainsheet://open-file")).toBe(true));
     expect(loadData).not.toHaveBeenCalled();
     listeners.get("plainsheet://open-file")?.();

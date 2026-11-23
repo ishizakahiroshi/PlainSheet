@@ -3,6 +3,10 @@ import { t } from "../lib/i18n";
 import { uniqueColumnValues } from "../hooks/useFilter";
 import type { CellValue } from "../types/sheet";
 
+// Checkboxes drawn at once. A column of unique IDs can hold a million values;
+// drawing them all froze the window. The search box narrows the list.
+export const FILTER_LIST_LIMIT = 500;
+
 export type FilterPopoverState = {
   col: number;
   x: number;
@@ -31,11 +35,18 @@ export function FilterPopover({
     [rows, state, headerRow],
   );
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [term, setTerm] = useState("");
+  const matching = useMemo(() => {
+    const needle = term.trim().toLowerCase();
+    return needle === "" ? values : values.filter((value) => value.toLowerCase().includes(needle));
+  }, [values, term]);
+  const shown = matching.slice(0, FILTER_LIST_LIMIT);
 
   useEffect(() => {
     if (!state) {
       return;
     }
+    setTerm("");
     if (selected) {
       setChecked(new Set(selected));
     } else {
@@ -62,7 +73,8 @@ export function FilterPopover({
     return null;
   }
 
-  const allSelected = values.length > 0 && values.every((value) => checked.has(value));
+  // "Select all" works on the values the search shows.
+  const allSelected = matching.length > 0 && matching.every((value) => checked.has(value));
   const left =
     typeof window !== "undefined"
       ? Math.max(4, Math.min(state.x, window.innerWidth - 224))
@@ -82,7 +94,19 @@ export function FilterPopover({
       <div className="filterPopover__actions">
         <button
           type="button"
-          onClick={() => setChecked(allSelected ? new Set() : new Set(values))}
+          onClick={() =>
+            setChecked((current) => {
+              const next = new Set(current);
+              for (const value of matching) {
+                if (allSelected) {
+                  next.delete(value);
+                } else {
+                  next.add(value);
+                }
+              }
+              return next;
+            })
+          }
         >
           {allSelected ? t("filterNone") : t("selectAllValues")}
         </button>
@@ -96,11 +120,21 @@ export function FilterPopover({
           {t("filterClear")}
         </button>
       </div>
+      <input
+        className="filterPopover__search"
+        type="search"
+        aria-label={t("filterSearch")}
+        placeholder={t("filterSearch")}
+        value={term}
+        onChange={(event) => setTerm(event.target.value)}
+      />
       <div className="filterPopover__list">
-        {values.map((value) => {
+        {shown.map((value, index) => {
           const label = value === "" ? t("filterBlank") : value;
           return (
-            <label key={value === "" ? "__blank__" : value} className="filterPopover__item">
+            // Keyed by position: the values are unique, but a cell may hold
+            // any text, including the label used for blanks.
+            <label key={index} className="filterPopover__item">
               <input
                 type="checkbox"
                 checked={checked.has(value)}
@@ -120,6 +154,11 @@ export function FilterPopover({
             </label>
           );
         })}
+        {matching.length > shown.length ? (
+          <p className="filterPopover__more">
+            {t("filterMore", { count: matching.length - shown.length })}
+          </p>
+        ) : null}
       </div>
       <div className="filterPopover__footer">
         <button type="button" onClick={onClose}>

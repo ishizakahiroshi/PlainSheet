@@ -13,7 +13,7 @@ import {
   screen,
   within,
 } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { GridCellKind, type DataEditorProps } from "@glideapps/glide-data-grid";
 import App from "../App";
 import { fillAlongAxis } from "../lib/autofill";
@@ -33,7 +33,7 @@ const harness = vi.hoisted(() => ({
   writes: [] as { path: string; content: string }[],
   writeGate: null as Promise<void> | null,
   closeHandler: null as ((event: CloseEvent) => Promise<void> | void) | null,
-  ask: null as unknown as ReturnType<typeof vi.fn>,
+  ask: null as unknown as Mock<(...args: unknown[]) => Promise<boolean>>,
 }));
 
 vi.mock("@glideapps/glide-data-grid", async (original) => {
@@ -54,8 +54,11 @@ vi.mock("@glideapps/glide-data-grid", async (original) => {
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async (command: string, args: Record<string, unknown> = {}) => {
-    if (command === "take_startup_file") return null;
-    if (command === "open_file_dialog") return harness.openQueue.shift() ?? null;
+    if (command === "take_pending_files") return [];
+    if (command === "open_file_dialog") {
+      const path = harness.openQueue.shift();
+      return path ? [path] : null;
+    }
     if (command === "read_file") {
       const content = harness.files.get(args.path as string);
       if (content === undefined) throw new Error("missing file");
@@ -153,8 +156,9 @@ describe("desktop unsaved-change prompts (F-01, F-02)", () => {
     render(<App />);
     await openPath(A);
     await edit(1, 1, "EDITED");
-    harness.ask.mockResolvedValueOnce(true); // discard prompt when opening b.csv
+    // Opening another file adds a tab, so it does not ask.
     await openPath(B);
+    expect(harness.ask).not.toHaveBeenCalled();
     expect(tabNames()).toEqual(["● a.csv", "b.csv"]);
 
     const tabA = screen.getByRole("tab", { name: /a\.csv/ });
@@ -192,7 +196,6 @@ describe("reopening a file that has unsaved edits in another tab (F-03)", () => 
     render(<App />);
     await openPath(A);
     await edit(1, 1, "EDITED");
-    harness.ask.mockResolvedValueOnce(true);
     await openPath(B);
     expect(cell(1, 1)).toBe("orig-b");
 
@@ -209,7 +212,6 @@ describe("tab switches while a save is pending (F-06)", () => {
     render(<App />);
     await openPath(A);
     await edit(1, 1, "EDITED-A");
-    harness.ask.mockResolvedValueOnce(true);
     await openPath(B);
     await edit(1, 1, "EDITED-B");
     await act(async () => fireEvent.click(screen.getByRole("tab", { name: /a\.csv/ })));
@@ -226,7 +228,7 @@ describe("tab switches while a save is pending (F-06)", () => {
       await harness.writeGate;
     });
 
-    expect(harness.writes).toEqual([{ path: A, content: "id,name\n1,EDITED-A" }]);
+    expect(harness.writes).toEqual([{ path: A, content: "id,name\n1,EDITED-A\n" }]);
     expect(tabNames()).toEqual(["a.csv", "● b.csv"]);
   });
 
@@ -244,7 +246,7 @@ describe("tab switches while a save is pending (F-06)", () => {
       release();
       await harness.writeGate;
     });
-    expect(harness.writes[0]!.content).toBe("id,name\n1,FIRST");
+    expect(harness.writes[0]!.content).toBe("id,name\n1,FIRST\n");
     expect(tabNames()).toEqual(["● a.csv"]);
   });
 });

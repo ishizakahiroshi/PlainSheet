@@ -1,89 +1,24 @@
 import type { CellValue, Delimiter, Newline } from "../types/sheet";
 
-export function parseCsv(text: string, delimiter: Delimiter = ","): CellValue[][] {
+export type CsvParseInfo = {
+  // Set when a quoted field never closed. The quote was then read as an
+  // ordinary character so the rest of the file keeps its rows and columns.
+  unterminatedQuote?: boolean;
+};
+
+export function parseCsv(
+  text: string,
+  delimiter: Delimiter = ",",
+  info?: CsvParseInfo,
+): CellValue[][] {
   if (text.length === 0) {
     return [];
   }
-
   // Strip a leading UTF-8 BOM so browser File.text() loads match the Rust
   // decoder (which already drops EF BB BF before decoding).
-  const source = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
-
-  const rows: CellValue[][] = [];
-  let row: CellValue[] = [];
-  let cell = "";
-  let inQuotes = false;
-  let quotedCell = false;
-  let justClosedQuote = false;
-  let endedWithRowBreak = false;
-
-  const pushCell = () => {
-    row.push(cell);
-    cell = "";
-    quotedCell = false;
-    justClosedQuote = false;
-  };
-
-  const pushRow = () => {
-    pushCell();
-    rows.push(row);
-    row = [];
-    endedWithRowBreak = true;
-  };
-
-  for (let index = 0; index < source.length; index += 1) {
-    const char = source[index];
-    const next = source[index + 1];
-    endedWithRowBreak = false;
-
-    if (inQuotes) {
-      if (char === "\"") {
-        if (next === "\"") {
-          cell += "\"";
-          index += 1;
-        } else {
-          inQuotes = false;
-          justClosedQuote = true;
-        }
-      } else {
-        cell += char;
-      }
-      continue;
-    }
-
-    if (char === "\"" && cell.length === 0 && !quotedCell) {
-      inQuotes = true;
-      quotedCell = true;
-      continue;
-    }
-
-    if (char === delimiter) {
-      pushCell();
-      continue;
-    }
-
-    if (char === "\r" || char === "\n") {
-      if (char === "\r" && next === "\n") {
-        index += 1;
-      }
-      pushRow();
-      continue;
-    }
-
-    if (justClosedQuote && (char === " " || char === "\t")) {
-      continue;
-    }
-
-    cell += char;
-    justClosedQuote = false;
-  }
-
-  if (!endedWithRowBreak || row.length > 0 || cell.length > 0 || quotedCell) {
-    pushCell();
-    rows.push(row);
-  }
-
-  return rows;
+  const state = createStreamState(delimiter);
+  feedCsvChunk(state, text, delimiter, true);
+  return finishCsvStream(state, info);
 }
 
 export function serializeCsv(
@@ -91,18 +26,21 @@ export function serializeCsv(
   delimiter: Delimiter = ",",
   newline: Newline = "LF",
   sanitizeFormulas = false,
+  trailingNewline = false,
 ): string {
   const lineBreak = newline === "CRLF" ? "\r\n" : "\n";
-  return rows
+  const body = rows
     .map((row, index) => {
       const line = row
         .map((cell) => serializeCell(cell, delimiter, sanitizeFormulas))
         .join(delimiter);
-      // An unquoted final blank record is indistinguishable from a trailing
-      // line ending (or an empty file). Keep its real row position explicit.
-      return index === rows.length - 1 && line === "" ? '""' : line;
+      // Without a final line break, an unquoted final blank record is
+      // indistinguishable from a trailing line ending (or an empty file). Keep
+      // its real row position explicit.
+      return !trailingNewline && index === rows.length - 1 && line === "" ? '""' : line;
     })
     .join(lineBreak);
+  return trailingNewline && rows.length > 0 ? body + lineBreak : body;
 }
 
 // Cells starting with these are treated as formulas by spreadsheet apps; the
@@ -131,8 +69,23 @@ function serializeCell(cell: CellValue, delimiter: Delimiter, sanitizeFormulas =
   return `"${value.replaceAll("\"", "\"\"")}"`;
 }
 
+/** The line break most lines use, so one stray CRLF does not convert a whole LF file. */
 export function detectNewline(text: string): Newline {
-  return text.includes("\r\n") ? "CRLF" : "LF";
+  let crlf = 0;
+  let lf = 0;
+  for (let index = text.indexOf("\n"); index !== -1; index = text.indexOf("\n", index + 1)) {
+    if (index > 0 && text.charCodeAt(index - 1) === 0x0d) {
+      crlf += 1;
+    } else {
+      lf += 1;
+    }
+  }
+  return crlf > lf ? "CRLF" : "LF";
+}
+
+/** Whether the text ends with a line break, so a save can keep it. */
+export function hasTrailingNewline(text: string): boolean {
+  return text.endsWith("\n") || text.endsWith("\r");
 }
 
 export function detectDelimiter(text: string): Delimiter {
@@ -164,12 +117,21 @@ export function detectDelimiter(text: string): Delimiter {
 export const STREAM_PARSE_THRESHOLD = 5 * 1024 * 1024;
 
 type StreamParseState = {
+  delimiter: Delimiter;
   rows: CellValue[][];
   row: CellValue[];
   cell: string;
   inQuotes: boolean;
+  // The current cell opened with a quote. Once the quote closes, only a
+  // delimiter or a line break may follow (spaces before them are dropped).
   quotedCell: boolean;
-  justClosedQuote: boolean;
+  // Source text of the current quoted cell from its opening quote. If text
+  // follows the closing quote (`"Hello" she said`), or the quote never
+  // closes, the cell falls back to this text instead of losing characters.
+  raw: string;
+  // Read the next opening quote as an ordinary character (replaying an
+  // unterminated quoted field).
+  literalQuote: boolean;
   endedWithRowBreak: boolean;
   // A "\r" that landed on the last character of a chunk: the matching "\n"
   // may arrive as the first character of the next chunk, so the row break is
@@ -182,14 +144,16 @@ type StreamParseState = {
   pendingQuote: boolean;
 };
 
-function createStreamState(): StreamParseState {
+function createStreamState(delimiter: Delimiter = ","): StreamParseState {
   return {
+    delimiter,
     rows: [],
     row: [],
     cell: "",
     inQuotes: false,
     quotedCell: false,
-    justClosedQuote: false,
+    raw: "",
+    literalQuote: false,
     endedWithRowBreak: false,
     pendingCR: false,
     pendingQuote: false,
@@ -200,7 +164,7 @@ function pushStreamCell(state: StreamParseState): void {
   state.row.push(state.cell);
   state.cell = "";
   state.quotedCell = false;
-  state.justClosedQuote = false;
+  state.raw = "";
 }
 
 function pushStreamRow(state: StreamParseState): void {
@@ -217,6 +181,7 @@ export function feedCsvChunk(
   delimiter: Delimiter,
   isFirstChunk: boolean,
 ): void {
+  state.delimiter = delimiter;
   let source = chunk;
   if (isFirstChunk && source.length > 0 && source.charCodeAt(0) === 0xfeff) {
     source = source.slice(1);
@@ -234,10 +199,10 @@ export function feedCsvChunk(
     state.pendingQuote = false;
     if (source[startIndex] === "\"") {
       state.cell += "\"";
+      state.raw += "\"";
       startIndex += 1;
     } else {
       state.inQuotes = false;
-      state.justClosedQuote = true;
     }
   }
 
@@ -250,22 +215,31 @@ export function feedCsvChunk(
       if (char === "\"") {
         if (next === "\"") {
           state.cell += "\"";
+          state.raw += "\"\"";
           index += 1;
         } else if (next === undefined) {
+          state.raw += "\"";
           state.pendingQuote = true;
         } else {
+          state.raw += "\"";
           state.inQuotes = false;
-          state.justClosedQuote = true;
         }
       } else {
         state.cell += char;
+        state.raw += char;
       }
       continue;
     }
 
     if (char === "\"" && state.cell.length === 0 && !state.quotedCell) {
+      if (state.literalQuote) {
+        state.literalQuote = false;
+        state.cell += char;
+        continue;
+      }
       state.inQuotes = true;
       state.quotedCell = true;
+      state.raw = char;
       continue;
     }
 
@@ -287,20 +261,46 @@ export function feedCsvChunk(
       continue;
     }
 
-    if (state.justClosedQuote && (char === " " || char === "\t")) {
+    if (state.quotedCell) {
+      // After the closing quote. Spaces before a delimiter are dropped; any
+      // other text means this was not a quoted field after all, so keep the
+      // field exactly as written, quotes included.
+      state.raw += char;
+      if (char !== " " && char !== "\t") {
+        state.cell = state.raw;
+        state.quotedCell = false;
+        state.raw = "";
+      }
       continue;
     }
 
     state.cell += char;
-    state.justClosedQuote = false;
   }
 }
 
-export function finishCsvStream(state: StreamParseState): CellValue[][] {
-  if (state.pendingQuote) {
-    state.pendingQuote = false;
+export function finishCsvStream(state: StreamParseState, info?: CsvParseInfo): CellValue[][] {
+  for (;;) {
+    if (state.pendingQuote) {
+      state.pendingQuote = false;
+      state.inQuotes = false;
+    }
+    if (!state.inQuotes) {
+      break;
+    }
+    // The quote never closed. Reading everything after it as one cell would
+    // swallow the rest of the file, so read the quote as a character instead.
+    if (info) {
+      info.unterminatedQuote = true;
+    }
+    const replay = state.raw;
+    state.cell = "";
+    state.quotedCell = false;
     state.inQuotes = false;
-    state.justClosedQuote = true;
+    state.raw = "";
+    state.literalQuote = true;
+    state.pendingCR = false;
+    state.endedWithRowBreak = false;
+    feedCsvChunk(state, replay, state.delimiter, false);
   }
   if (!state.endedWithRowBreak || state.row.length > 0 || state.cell.length > 0 || state.quotedCell) {
     pushStreamCell(state);
@@ -316,9 +316,13 @@ export function finishCsvStream(state: StreamParseState): CellValue[][] {
 export async function parseCsvStream(
   chunks: AsyncIterable<string>,
   delimiter: Delimiter = ",",
-  options?: { totalBytes?: number; onProgress?: (ratio: number) => void },
+  options?: {
+    totalBytes?: number;
+    onProgress?: (ratio: number) => void;
+    info?: CsvParseInfo;
+  },
 ): Promise<CellValue[][]> {
-  const state = createStreamState();
+  const state = createStreamState(delimiter);
   let first = true;
   let seen = 0;
   for await (const chunk of chunks) {
@@ -329,7 +333,7 @@ export async function parseCsvStream(
       options.onProgress(Math.min(1, seen / options.totalBytes));
     }
   }
-  return finishCsvStream(state);
+  return finishCsvStream(state, options?.info);
 }
 
 /** Thrown when a file that must be UTF-8 holds bytes that are not valid UTF-8. */

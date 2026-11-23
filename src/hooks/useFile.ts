@@ -4,19 +4,25 @@ import { listen } from "@tauri-apps/api/event";
 import {
   detectDelimiter,
   detectNewline,
+  hasTrailingNewline,
   parseCsvStream,
   STREAM_PARSE_THRESHOLD,
   streamFileText,
   TextEncodingError,
+  type CsvParseInfo,
 } from "../lib/csv";
-import {
-  parseMarkdownLayout,
-  parseTableText,
-  serializeTableText,
-  type SerializeOptions,
-} from "../lib/formats";
+import { parseTableDocument, serializeTableText, type SerializeOptions } from "../lib/formats";
 import { t } from "../lib/i18n";
-import type { CellValue, Delimiter, FileFormat, MarkdownLayout, SheetMeta } from "../types/sheet";
+import type {
+  CellValue,
+  Delimiter,
+  Encoding,
+  FileFormat,
+  FileStamp,
+  MarkdownLayout,
+  SheetMeta,
+  StructuredSource,
+} from "../types/sheet";
 
 type UseFileOptions = {
   // Used only when a brand-new sheet is loaded (open / drop / sample / new).
@@ -29,19 +35,28 @@ type UseFileOptions = {
   // Applies save-completed metadata to the tab the save started from. A save
   // awaits the disk or a dialog, and the user may switch tabs or keep typing
   // meanwhile, so the owner marks the tab clean only if its rows still equal
-  // the rows that were written.
-  completeSave: (docId: string, savedRows: CellValue[][], meta: Partial<SheetMeta>) => void;
+  // the rows that were written. With keepDirty the tab stays as it is (a
+  // browser download, whose result the app cannot see).
+  completeSave: (
+    docId: string,
+    savedRows: CellValue[][],
+    meta: Partial<SheetMeta>,
+    options?: { keepDirty?: boolean },
+  ) => void;
   getRows: () => CellValue[][];
   getMeta: () => SheetMeta;
   onToast: (message: string) => void;
   confirmDiscard: () => boolean | Promise<boolean>;
+  // Asked when the file changed on disk after it was opened.
+  confirmOverwrite?: () => boolean | Promise<boolean>;
   /** Called when a filesystem path is opened/saved (Tauri recent-files list). */
   onRecentPath?: (path: string) => void;
   /** Returns the active document tab ID so browser file handles stay scoped per tab. */
   getActiveId?: () => string;
 };
 
-// Sent by the native side when macOS delivers a document to a running app.
+// Sent by the native side when files arrive for a running app (a second
+// launch, or macOS open-document events).
 const OPEN_FILE_EVENT = "plainsheet://open-file";
 
 type FileDropPayload =
@@ -50,6 +65,21 @@ type FileDropPayload =
     }
   | string[];
 
+type ReadResult = {
+  content: string;
+  encoding: string;
+  warning?: string | null;
+  path?: string;
+  stamp?: FileStamp;
+};
+
+type LoadPathOptions = {
+  // Decode with this encoding instead of detecting it.
+  encoding?: Encoding;
+  // The caller already asked before replacing unsaved edits.
+  confirmed?: boolean;
+};
+
 export function useFile({
   loadData,
   completeSave,
@@ -57,6 +87,7 @@ export function useFile({
   getMeta,
   onToast,
   confirmDiscard,
+  confirmOverwrite,
   onRecentPath,
   getActiveId,
 }: UseFileOptions) {
@@ -64,71 +95,103 @@ export function useFile({
   // keyed by document tab ID so tabs with identical filenames never collide.
   const fileHandlesRef = useRef<Map<string, FsFileHandle>>(new Map());
   const loadGenerationRef = useRef(0);
-  const loadPathRef = useRef<(path: string) => Promise<void>>(async () => undefined);
+  const loadPathsRef = useRef<(paths: string[]) => Promise<void>>(async () => undefined);
   const loadDataRef = useRef(loadData);
-  const getMetaRef = useRef(getMeta);
-  const confirmDiscardRef = useRef(confirmDiscard);
   const onToastRef = useRef(onToast);
-  const onRecentPathRef = useRef(onRecentPath);
   const getActiveIdRef = useRef(getActiveId ?? (() => "default"));
   loadDataRef.current = loadData;
-  getMetaRef.current = getMeta;
-  confirmDiscardRef.current = confirmDiscard;
   onToastRef.current = onToast;
-  onRecentPathRef.current = onRecentPath;
   getActiveIdRef.current = getActiveId ?? (() => "default");
 
   const resetSaveTarget = useCallback((docId?: string) => {
     fileHandlesRef.current.delete(docId ?? getActiveIdRef.current());
   }, []);
 
-  const loadPath = useCallback(
-    async (path: string) => {
+  // Loads one file. Returns whether it was loaded, and the message to show.
+  const readPath = useCallback(
+    async (path: string, options: LoadPathOptions = {}): Promise<string | null> => {
+      const result = await invoke<ReadResult>(
+        "read_file",
+        options.encoding ? { path, encoding: options.encoding } : { path },
+      );
+      const realPath = result.path ?? path;
+      // Opening a different file adds a tab, so nothing is lost. Only reloading
+      // the file shown now, over its unsaved edits, needs a yes.
+      const current = getMeta();
+      if (
+        !options.confirmed &&
+        current.dirty &&
+        current.filePath &&
+        samePath(current.filePath, realPath) &&
+        !(await confirmDiscard())
+      ) {
+        return null;
+      }
+      const format = formatFromPath(realPath);
+      const parsed = readTableText(result.content, format);
+      const loaded = loadData(parsed.rows, {
+        ...parsed.meta,
+        filePath: realPath,
+        fileName: fileNameFromPath(realPath),
+        encoding: normalizeEncoding(result.encoding),
+        format,
+        fileStamp: result.stamp,
+      });
+      if (loaded === false) {
+        return null;
+      }
+      onRecentPath?.(realPath);
+      return readWarningMessage(result.warning) ?? parsed.notice ?? t("toastLoaded");
+    },
+    [confirmDiscard, getMeta, loadData, onRecentPath],
+  );
+
+  const loadPaths = useCallback(
+    async (paths: string[], options: LoadPathOptions = {}) => {
       const generation = ++loadGenerationRef.current;
-      try {
-        const { content, encoding } = await invoke<{ content: string; encoding: string }>(
-          "read_file",
-          { path },
-        );
+      let message: string | null = null;
+      for (const path of paths) {
+        try {
+          const loaded = await readPath(path, options);
+          message = loaded ?? message;
+        } catch (error) {
+          message = loadErrorMessage(error);
+        }
         if (generation !== loadGenerationRef.current) {
           return;
         }
-        const format = formatFromPath(path);
-        const delimiter = format === "tsv" ? "\t" : detectDelimiter(content);
-        const newline = detectNewline(content);
-        const rows = parseTableText(content, format, delimiter);
-        const loaded = loadData(rows, {
-          filePath: path,
-          fileName: fileNameFromPath(path),
-          encoding: normalizeEncoding(encoding),
-          newline,
-          delimiter,
-          format,
-          markdown: format === "markdown" ? parseMarkdownLayout(content) : undefined,
-        });
-        if (loaded === false) {
-          return;
-        }
-        onRecentPath?.(path);
-        onToast(t("toastLoaded"));
-      } catch {
-        if (generation !== loadGenerationRef.current) {
-          return;
-        }
-        onToast(t("toastLoadFailed"));
+      }
+      if (message) {
+        onToast(message);
       }
     },
-    [loadData, onToast, onRecentPath],
+    [onToast, readPath],
   );
-  loadPathRef.current = loadPath;
+  loadPathsRef.current = loadPaths;
+
+  const loadPath = useCallback((path: string) => loadPaths([path]), [loadPaths]);
+
+  // Reads the shown file again in the given encoding (Settings). `hasEdits`
+  // says whether reloading would lose cell edits: picking the encoding in
+  // Settings alone already marks the sheet unsaved.
+  const reopenWithEncoding = useCallback(
+    async (encoding: Encoding, hasEdits = getMeta().dirty) => {
+      const path = getMeta().filePath;
+      if (!path || !isTauriRuntime()) {
+        return;
+      }
+      if (hasEdits && !(await confirmDiscard())) {
+        return;
+      }
+      await loadPaths([path], { encoding, confirmed: true });
+    },
+    [confirmDiscard, getMeta, loadPaths],
+  );
 
   const openFile = useCallback(async () => {
     try {
-      if (getMeta().dirty && !(await confirmDiscard())) {
-        return;
-      }
       if (!isTauriRuntime()) {
-        await openBrowserFile(loadData, onToast, (handle) => {
+        await openBrowserFiles(loadData, onToast, (handle) => {
           const activeId = getActiveIdRef.current();
           if (handle) {
             fileHandlesRef.current.set(activeId, handle);
@@ -138,14 +201,47 @@ export function useFile({
         });
         return;
       }
-      const path = await invoke<string | null>("open_file_dialog");
-      if (path) {
-        await loadPath(path);
+      const paths = await invoke<string[] | string | null>("open_file_dialog");
+      const list = Array.isArray(paths) ? paths : paths ? [paths] : [];
+      if (list.length > 0) {
+        await loadPaths(list);
       }
-    } catch {
-      onToast(t("toastLoadFailed"));
+    } catch (error) {
+      onToast(loadErrorMessage(error));
     }
-  }, [confirmDiscard, getMeta, loadData, loadPath, onToast]);
+  }, [loadData, loadPaths, onToast]);
+
+  // Writes to disk. If the file changed since it was read, asks before
+  // overwriting it. Returns the file's new stamp, or null when the user
+  // declined to overwrite.
+  const writeToDisk = useCallback(
+    async (
+      path: string,
+      content: string,
+      encoding: Encoding,
+      expected: FileStamp | undefined,
+    ): Promise<{ stamp: FileStamp | undefined } | null> => {
+      try {
+        const stamp = await invoke<FileStamp | null>("write_file", {
+          path,
+          content,
+          encoding,
+          ...(expected ? { expected } : {}),
+        });
+        return { stamp: stamp ?? undefined };
+      } catch (error) {
+        if (error !== "modified-externally") {
+          throw error;
+        }
+        if (!(await (confirmOverwrite ?? confirmDiscard)())) {
+          return null;
+        }
+        const stamp = await invoke<FileStamp | null>("write_file", { path, content, encoding });
+        return { stamp: stamp ?? undefined };
+      }
+    },
+    [confirmDiscard, confirmOverwrite],
+  );
 
   const saveAs = useCallback(async () => {
     try {
@@ -184,7 +280,7 @@ export function useFile({
             delimiter,
             dirty: false,
             format,
-            markdown: keptMarkdownLayout(currentMeta, format),
+            ...savedShape(currentMeta, format, content),
           });
           onToast(t("toastSaved"));
           return;
@@ -205,14 +301,13 @@ export function useFile({
         );
         downloadText(content, fileName);
         fileHandlesRef.current.delete(docId);
-        completeSave(docId, rows, {
-          fileName,
-          delimiter,
-          dirty: false,
-          format,
-          markdown: keptMarkdownLayout(currentMeta, format),
-        });
-        onToast(t("toastDownloadStarted"));
+        completeSave(
+          docId,
+          rows,
+          { fileName, delimiter, format, ...savedShape(currentMeta, format, content) },
+          { keepDirty: true },
+        );
+        onToast(t("toastDownloadKeepsUnsaved"));
         return;
       }
       const path = await invoke<string | null>("save_file_dialog", { defaultName });
@@ -229,7 +324,13 @@ export function useFile({
         currentMeta.newline,
         serializeOptions(currentMeta, format),
       );
-      await invoke("write_file", { path, content, encoding });
+      // The same file chosen again: still guard against outside changes.
+      const expected =
+        currentMeta.filePath && samePath(currentMeta.filePath, path) ? currentMeta.fileStamp : undefined;
+      const written = await writeToDisk(path, content, encoding, expected);
+      if (!written) {
+        return;
+      }
       completeSave(docId, rows, {
         filePath: path,
         fileName: fileNameFromPath(path),
@@ -237,14 +338,15 @@ export function useFile({
         encoding,
         dirty: false,
         format,
-        markdown: keptMarkdownLayout(currentMeta, format),
+        fileStamp: written.stamp,
+        ...savedShape(currentMeta, format, content),
       });
       onRecentPath?.(path);
       onToast(t("toastSaved"));
     } catch (error) {
       onToast(saveErrorMessage(error));
     }
-  }, [getMeta, getRows, completeSave, onToast, onRecentPath]);
+  }, [getMeta, getRows, completeSave, onToast, onRecentPath, writeToDisk]);
 
   const saveFile = useCallback(async () => {
     try {
@@ -273,7 +375,7 @@ export function useFile({
             }
           }
           await writeFileHandle(handle, content);
-          completeSave(docId, rows, { dirty: false });
+          completeSave(docId, rows, { dirty: false, ...savedShape(currentMeta, format, content) });
           onToast(t("toastSaved"));
           return;
         }
@@ -282,8 +384,8 @@ export function useFile({
           return;
         }
         downloadText(content, currentMeta.fileName ?? "untitled.csv");
-        completeSave(docId, rows, { dirty: false });
-        onToast(t("toastDownloadStarted"));
+        completeSave(docId, rows, savedShape(currentMeta, format, content), { keepDirty: true });
+        onToast(t("toastDownloadKeepsUnsaved"));
         return;
       }
       if (!currentMeta.filePath) {
@@ -299,34 +401,34 @@ export function useFile({
         currentMeta.newline,
         serializeOptions(currentMeta, format),
       );
-      await invoke("write_file", {
-        path: currentMeta.filePath,
-        content,
+      const written = await writeToDisk(currentMeta.filePath, content, encoding, currentMeta.fileStamp);
+      if (!written) {
+        return;
+      }
+      completeSave(docId, rows, {
         encoding,
+        dirty: false,
+        fileStamp: written.stamp,
+        ...savedShape(currentMeta, format, content),
       });
-      completeSave(docId, rows, { encoding, dirty: false });
       onRecentPath?.(currentMeta.filePath);
       onToast(t("toastSaved"));
     } catch (error) {
       onToast(saveErrorMessage(error));
     }
-  }, [getMeta, getRows, completeSave, onToast, saveAs, onRecentPath]);
+  }, [getMeta, getRows, completeSave, onToast, saveAs, onRecentPath, writeToDisk]);
 
   const loadSample = useCallback(async () => {
     try {
-      if (getMeta().dirty && !(await confirmDiscard())) {
-        return;
-      }
       const response = await fetch(`${import.meta.env.BASE_URL}sample.csv`);
       if (!response.ok) {
         throw new Error("sample file is unavailable");
       }
       const content = await response.text();
-      const rows = parseTableText(content, "csv", ",");
-      const loaded = loadData(rows, {
+      const parsed = readTableText(content, "csv");
+      const loaded = loadData(parsed.rows, {
+        ...parsed.meta,
         fileName: "sample.csv",
-        delimiter: ",",
-        newline: detectNewline(content),
         encoding: "utf-8",
         format: "csv",
       });
@@ -338,7 +440,7 @@ export function useFile({
     } catch {
       onToast(t("toastLoadFailed"));
     }
-  }, [confirmDiscard, getMeta, loadData, onToast, resetSaveTarget]);
+  }, [loadData, onToast, resetSaveTarget]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -347,20 +449,17 @@ export function useFile({
       };
       const handleDrop = (event: DragEvent) => {
         event.preventDefault();
-        // Read the file before awaiting: dataTransfer is emptied once the
+        // Read the files before awaiting: dataTransfer is emptied once the
         // drop event handler returns.
-        const file = event.dataTransfer?.files[0];
-        if (!file) {
-          return;
-        }
+        const files = Array.from(event.dataTransfer?.files ?? []);
         void (async () => {
-          if (getMetaRef.current().dirty && !(await confirmDiscardRef.current())) {
-            return;
+          for (const file of files) {
+            // Each file opens in its own tab. D&D has no writable handle, so
+            // the next Save picks a location.
+            await loadBrowserFile(file, loadDataRef.current, onToastRef.current, () => {
+              fileHandlesRef.current.delete(getActiveIdRef.current());
+            });
           }
-          // D&D has no writable handle — next Save will pick a location.
-          await loadBrowserFile(file, loadDataRef.current, onToastRef.current, () => {
-            fileHandlesRef.current.delete(getActiveIdRef.current());
-          });
         })();
       };
       window.addEventListener("dragover", handleDragOver);
@@ -374,14 +473,10 @@ export function useFile({
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     listen<FileDropPayload>("tauri://drag-drop", async (event) => {
-      const path = extractDropPath(event.payload);
-      if (!path) {
-        return;
+      const paths = extractDropPaths(event.payload);
+      if (paths.length > 0) {
+        await loadPathsRef.current(paths);
       }
-      if (getMetaRef.current().dirty && !(await confirmDiscardRef.current())) {
-        return;
-      }
-      await loadPathRef.current(path);
     })
       .then((handler) => {
         if (cancelled) {
@@ -396,25 +491,22 @@ export function useFile({
         }
       });
 
-    // A file the OS asked the app to open: named on the command line
-    // (`plainsheet data.csv`, "Open with") or, on macOS, delivered as an
-    // open-document event. The native side hands each one out once, so the
-    // result is used even if this effect was torn down meanwhile (StrictMode).
-    const openPendingFile = async () => {
-      const path = await invoke<string | null>("take_startup_file");
-      if (!path) {
-        return;
+    // Files the OS asked the app to open: named on the command line
+    // (`plainsheet data.csv`, "Open with"), handed over by a second launch, or
+    // on macOS delivered as open-document events. The native side hands each
+    // one out once, so the result is used even if this effect was torn down
+    // meanwhile (StrictMode).
+    const openPendingFiles = async () => {
+      const paths = await invoke<string[] | null>("take_pending_files");
+      if (paths && paths.length > 0) {
+        await loadPathsRef.current(paths);
       }
-      if (getMetaRef.current().dirty && !(await confirmDiscardRef.current())) {
-        return;
-      }
-      await loadPathRef.current(path);
     };
-    const openPendingFileSafely = () => {
-      openPendingFile().catch(() => onToastRef.current(t("toastLoadFailed")));
+    const openPendingFilesSafely = () => {
+      openPendingFiles().catch(() => onToastRef.current(t("toastLoadFailed")));
     };
     let unlistenOpen: (() => void) | undefined;
-    listen(OPEN_FILE_EVENT, openPendingFileSafely)
+    listen(OPEN_FILE_EVENT, openPendingFilesSafely)
       .then((handler) => {
         if (cancelled) {
           handler();
@@ -423,7 +515,7 @@ export function useFile({
         unlistenOpen = handler;
       })
       .catch(() => undefined);
-    openPendingFileSafely();
+    openPendingFilesSafely();
 
     return () => {
       cancelled = true;
@@ -442,8 +534,96 @@ export function useFile({
     saveAs,
     loadPath,
     loadSample,
+    reopenWithEncoding,
     resetSaveTarget,
   };
+}
+
+type ReadTable = {
+  rows: CellValue[][];
+  meta: Partial<SheetMeta>;
+  // A message to show instead of "Loaded".
+  notice: string | null;
+};
+
+/** Parses file text and records what a save needs to write it back faithfully. */
+export function readTableText(content: string, format: FileFormat): ReadTable {
+  const delimiter = format === "tsv" ? "\t" : detectDelimiter(content);
+  const parsed = parseTableDocument(content, format, delimiter);
+  return {
+    rows: parsed.rows,
+    meta: { ...parsed.meta, delimiter },
+    notice: parsed.unterminatedQuote ? t("toastLoadedUnterminatedQuote") : null,
+  };
+}
+
+// File paths name the same file. Windows and macOS file systems ignore letter
+// case by default; read_file already returns the real spelling, this covers
+// paths that never went through it.
+export function samePath(a: string, b: string): boolean {
+  if (a === b) {
+    return true;
+  }
+  const windowsLike = /^[a-zA-Z]:[\\/]|^\\\\/.test(a);
+  if (!windowsLike) {
+    return false;
+  }
+  const normalize = (path: string) => path.replace(/\//g, "\\").toLowerCase();
+  return normalize(a) === normalize(b);
+}
+
+function readWarningMessage(warning: string | null | undefined): string | null {
+  if (!warning) {
+    return null;
+  }
+  const invalid = /^invalid-(?:utf8|bytes):(\d+)$/.exec(warning);
+  if (invalid) {
+    return t("toastLoadedInvalidUtf8", { count: Number(invalid[1]) });
+  }
+  if (warning === "guessed-latin1") {
+    return t("toastLoadedGuessedLatin1");
+  }
+  if (warning === "roundtrip") {
+    return t("toastLoadedRoundtrip");
+  }
+  return null;
+}
+
+const LOAD_ERROR_MESSAGES: Record<string, Parameters<typeof t>[0]> = {
+  "too-large": "toastLoadTooLarge",
+  utf16: "toastLoadUtf16",
+  nul: "toastLoadBinary",
+  "not-found": "toastLoadNotFound",
+  "permission-denied": "toastLoadPermission",
+  "not-table": "toastLoadNotTable",
+};
+
+export function loadErrorMessage(error: unknown): string {
+  if (error instanceof TextEncodingError) {
+    return t("toastLoadNotUtf8");
+  }
+  const code =
+    typeof error === "string" ? error : error instanceof LoadError ? error.code : notTableCode(error);
+  const key = code ? LOAD_ERROR_MESSAGES[code] : undefined;
+  return key ? t(key) : t("toastLoadFailed");
+}
+
+// JSON / YAML that does not parse, or is not a list of objects.
+function notTableCode(error: unknown): string | null {
+  if (error instanceof SyntaxError) {
+    return "not-table";
+  }
+  if (error instanceof Error && (error.name.startsWith("YAML") || /array of objects/.test(error.message))) {
+    return "not-table";
+  }
+  return null;
+}
+
+class LoadError extends Error {
+  constructor(readonly code: string) {
+    super(code);
+    this.name = "LoadError";
+  }
 }
 
 export function isTauriRuntime(): boolean {
@@ -475,21 +655,18 @@ export function delimiterFromFormat(format: FileFormat): Delimiter {
   return format === "tsv" ? "\t" : ",";
 }
 
-function normalizeEncoding(value: string): SheetMeta["encoding"] {
+function normalizeEncoding(value: string): Encoding {
   if (value === "utf-8-bom" || value === "cp932" || value === "euc-jp" || value === "latin-1") {
     return value;
   }
   return "utf-8";
 }
 
-function extractDropPath(payload: FileDropPayload): string | null {
-  if (Array.isArray(payload)) {
-    return payload[0] ?? null;
-  }
-  return payload.paths?.[0] ?? null;
+function extractDropPaths(payload: FileDropPayload): string[] {
+  return Array.isArray(payload) ? payload : (payload.paths ?? []);
 }
 
-async function openBrowserFile(
+async function openBrowserFiles(
   loadData: UseFileOptions["loadData"],
   onToast: UseFileOptions["onToast"],
   onHandle: (handle: FsFileHandle | null) => void,
@@ -497,15 +674,18 @@ async function openBrowserFile(
   const fsWindow = fsAccessWindow();
   if (fsWindow?.showOpenFilePicker) {
     try {
-      const [handle] = await fsWindow.showOpenFilePicker({
-        multiple: false,
+      const handles = await fsWindow.showOpenFilePicker({
+        multiple: true,
         types: openFilePickerTypes(),
       });
-      if (!handle?.getFile) {
-        return;
+      // Each file opens in its own tab and keeps its handle for Save.
+      for (const handle of handles) {
+        if (!handle?.getFile) {
+          continue;
+        }
+        const file = await handle.getFile();
+        await loadBrowserFile(file, loadData, onToast, () => onHandle(handle));
       }
-      const file = await handle.getFile();
-      await loadBrowserFile(file, loadData, onToast, () => onHandle(handle));
       return;
     } catch (error) {
       // User cancel → AbortError; fall through only for unexpected errors.
@@ -518,12 +698,13 @@ async function openBrowserFile(
 
   const input = document.createElement("input");
   input.type = "file";
+  input.multiple = true;
   input.accept = ".csv,.tsv,.txt,.md,.markdown,.json,.yaml,.yml,text/csv,text/tab-separated-values";
-  const file = await new Promise<File | null>((resolve) => {
-    input.onchange = () => resolve(input.files?.[0] ?? null);
+  const files = await new Promise<File[]>((resolve) => {
+    input.onchange = () => resolve(Array.from(input.files ?? []));
     input.click();
   });
-  if (file) {
+  for (const file of files) {
     await loadBrowserFile(file, loadData, onToast, () => onHandle(null));
   }
 }
@@ -537,7 +718,7 @@ async function assertBrowserFileNotBinary(file: File): Promise<void> {
         bytes.length >= 2 &&
         ((bytes[0] === 0xff && bytes[1] === 0xfe) || (bytes[0] === 0xfe && bytes[1] === 0xff))
       ) {
-        throw new Error("UTF-16 files are not supported");
+        throw new LoadError("utf16");
       }
     }
   }
@@ -552,26 +733,28 @@ async function loadBrowserFile(
   try {
     await assertBrowserFileNotBinary(file);
     const format = formatFromPath(file.name);
-    let content = "";
-    let rows: CellValue[][];
 
     if ((format === "csv" || format === "tsv") && file.size >= STREAM_PARSE_THRESHOLD) {
       const peek = await file.slice(0, 64 * 1024).text();
       if (peek.includes("\0")) {
-        throw new Error("file contains NUL bytes");
+        throw new LoadError("nul");
       }
       const delimiter = format === "tsv" ? "\t" : detectDelimiter(peek);
       const newline = detectNewline(peek);
-      rows = await parseCsvStream(streamFileText(file), delimiter, {
+      const tail = await file.slice(Math.max(0, file.size - 2)).text();
+      const info: CsvParseInfo = {};
+      const rows = await parseCsvStream(streamFileText(file), delimiter, {
         totalBytes: file.size,
         onProgress: (ratio) => {
           onToast(t("toastLoading", { percent: Math.round(ratio * 100) }));
         },
+        info,
       });
       const loaded = loadData(rows, {
         fileName: file.name,
         delimiter,
         newline,
+        trailingNewline: hasTrailingNewline(tail),
         encoding: "utf-8",
         format,
       });
@@ -579,38 +762,35 @@ async function loadBrowserFile(
         return;
       }
       onAdopt?.();
-      onToast(t("toastLoaded"));
+      onToast(info.unterminatedQuote ? t("toastLoadedUnterminatedQuote") : t("toastLoaded"));
       return;
     }
 
     // The browser build only reads and writes UTF-8. Decode strictly: a
     // Shift_JIS / EUC-JP / Latin-1 file decoded leniently turns its text into
     // U+FFFD, and saving would then overwrite the original with that.
-    content = decodeUtf8Strict(await readFileBytes(file));
+    let content = decodeUtf8Strict(await readFileBytes(file));
     if (content.includes("\0")) {
-      throw new Error("file contains NUL bytes");
+      throw new LoadError("nul");
     }
     // Mirror the Rust decoder and the CSV parser: drop a leading UTF-8 BOM so
     // BOM'd JSON/YAML load identically in the browser build instead of dying
     // inside JSON.parse.
     content = content.replace(/^\uFEFF/, "");
-    const delimiter = format === "tsv" ? "\t" : detectDelimiter(content);
-    rows = parseTableText(content, format, delimiter);
-    const loaded = loadData(rows, {
+    const parsed = readTableText(content, format);
+    const loaded = loadData(parsed.rows, {
+      ...parsed.meta,
       fileName: file.name,
-      delimiter,
-      newline: detectNewline(content),
       encoding: "utf-8",
       format,
-      markdown: format === "markdown" ? parseMarkdownLayout(content) : undefined,
     });
     if (loaded === false) {
       return;
     }
     onAdopt?.();
-    onToast(t("toastLoaded"));
+    onToast(parsed.notice ?? t("toastLoaded"));
   } catch (error) {
-    onToast(error instanceof TextEncodingError ? t("toastLoadNotUtf8") : t("toastLoadFailed"));
+    onToast(loadErrorMessage(error));
   }
 }
 
@@ -649,6 +829,30 @@ function serializeOptions(meta: SheetMeta, format: FileFormat): SerializeOptions
     sanitizeFormulas: meta.csvFormulaGuard,
     omitEmptyCells: meta.omitEmptyCells,
     markdown: keptMarkdownLayout(meta, format),
+    trailingNewline: sameFormat(meta, format) ? meta.trailingNewline : undefined,
+    structured: sameFormat(meta, format) ? meta.structured : undefined,
+  };
+}
+
+function sameFormat(meta: SheetMeta, format: FileFormat): boolean {
+  return (meta.format ?? "csv") === format;
+}
+
+// What the file looks like after a save, apart from its cells: the next save
+// compares against the file as written, not as first opened.
+function savedShape(meta: SheetMeta, format: FileFormat, content: string): Partial<SheetMeta> {
+  let structured: StructuredSource | undefined;
+  if (format === "json" || format === "yaml") {
+    try {
+      structured = parseTableDocument(content, format, ",").meta.structured;
+    } catch {
+      structured = undefined;
+    }
+  }
+  return {
+    markdown: keptMarkdownLayout(meta, format),
+    trailingNewline: format === "csv" || format === "tsv" ? hasTrailingNewline(content) : undefined,
+    structured,
   };
 }
 
@@ -659,8 +863,11 @@ function keptMarkdownLayout(meta: SheetMeta, format: FileFormat): MarkdownLayout
 }
 
 function saveErrorMessage(error: unknown): string {
-  if (typeof error === "string" && error.includes("cannot represent")) {
+  if (error === "cannot-represent") {
     return t("toastSaveFailedEncoding");
+  }
+  if (error === "permission-denied") {
+    return t("toastSavePermission");
   }
   return t("toastSaveFailed");
 }

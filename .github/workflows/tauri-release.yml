@@ -48,14 +48,19 @@ jobs:
             os: macos
 
     steps:
-      # Pinned by commit SHA (tags are mutable). SHAs retrieved 2026-08-25.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # Pinned by commit SHA (tags are mutable). SHAs retrieved 2026-11-23
+      # (Node 24 releases: the Node 20 runtime is deprecated on GitHub).
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          # A fixed version, so a build does not change with each Bun release.
+          bun-version: 1.4.5
 
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
-          toolchain: stable
+          # A fixed version, so a build does not change with each Rust release.
+          toolchain: 1.100.0
 
       - name: Install Linux dependencies
         if: matrix.os == 'linux'
@@ -148,7 +153,7 @@ jobs:
 
       - name: Upload build artifacts
         if: github.event.repository.private || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: plainsheet-${{ matrix.platform }}
           path: out/**
@@ -168,7 +173,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Download all build artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           path: dist/assets
           merge-multiple: true
@@ -207,7 +212,7 @@ jobs:
 
       # Release notes are this version's section of CHANGELOG.md, so the page
       # says what the release contains instead of listing pull request titles.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           sparse-checkout: |
@@ -281,16 +286,17 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
       # Trusted Publishing needs npm 11.5.1 or later; Node 24 carries it. The
       # registry-url input stays unset so setup-node writes no .npmrc with a
       # token placeholder that npm would send instead of the OIDC credential.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "24"
+          package-manager-cache: false
 
       - name: Require an npm that supports Trusted Publishing
         run: |
@@ -354,15 +360,16 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         if: env.WINGET_AVAILABLE == 'true'
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         if: env.WINGET_AVAILABLE == 'true'
         with:
           node-version: "24"
+          package-manager-cache: false
 
       - name: Download the Windows exe and the checksum list
         if: env.WINGET_AVAILABLE == 'true'

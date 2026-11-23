@@ -18,6 +18,10 @@ import { t } from "../lib/i18n";
 type ToolbarProps = {
   canUndo: boolean;
   canRedo: boolean;
+  // Whether the selection holds data rows / columns to delete. When it does
+  // not, the buttons are disabled instead of answering a click with an error.
+  canDeleteRow?: boolean;
+  canDeleteColumn?: boolean;
   onNew: () => void;
   onOpen: () => void;
   onSave: () => void;
@@ -35,9 +39,14 @@ type ToolbarProps = {
   onHelp: () => void;
 };
 
+// The button's name, with its shortcut, as a tooltip.
+const tip = (label: string, keys?: string) => (keys ? `${label} (${keys})` : label);
+
 export function Toolbar({
   canUndo,
   canRedo,
+  canDeleteRow = true,
+  canDeleteColumn = true,
   onNew,
   onOpen,
   onSave,
@@ -56,24 +65,54 @@ export function Toolbar({
 }: ToolbarProps) {
   return (
     <nav className="toolbar" aria-label={t("toolbarLabel")}>
-      <button className="toolbar__button" type="button" aria-label={t("newSheet")} onClick={onNew}>
+      <button
+        className="toolbar__button"
+        type="button"
+        aria-label={t("newSheet")}
+        title={t("newSheet")}
+        onClick={onNew}
+      >
         <FilePlus2 size={16} aria-hidden="true" />
         <span>{t("newFile")}</span>
       </button>
-      <button className="toolbar__button" type="button" aria-label={t("open")} onClick={onOpen}>
+      <button
+        className="toolbar__button"
+        type="button"
+        aria-label={t("open")}
+        title={tip(t("open"), "Ctrl+O")}
+        onClick={onOpen}
+      >
         <FolderOpen size={16} aria-hidden="true" />
         <span>{t("open")}</span>
       </button>
-      <button className="toolbar__button" type="button" aria-label={t("save")} onClick={onSave}>
+      <button
+        className="toolbar__button"
+        type="button"
+        aria-label={t("save")}
+        title={tip(t("save"), "Ctrl+S")}
+        onClick={onSave}
+      >
         <Save size={16} aria-hidden="true" />
         <span>{t("save")}</span>
       </button>
-      <button className="toolbar__button" type="button" aria-label={t("saveAs")} onClick={onSaveAs}>
+      <button
+        className="toolbar__button"
+        type="button"
+        aria-label={t("saveAs")}
+        title={t("saveAs")}
+        onClick={onSaveAs}
+      >
         <SaveAll size={16} aria-hidden="true" />
         <span>{t("saveAs")}</span>
       </button>
       <div className="toolbar__separator" />
-      <button className="toolbar__button" type="button" aria-label={t("search")} onClick={onSearch}>
+      <button
+        className="toolbar__button"
+        type="button"
+        aria-label={t("search")}
+        title={tip(t("search"), "Ctrl+F")}
+        onClick={onSearch}
+      >
         <Search size={16} aria-hidden="true" />
         <span>{t("search")}</span>
       </button>
@@ -81,6 +120,7 @@ export function Toolbar({
         className="toolbar__iconButton"
         type="button"
         aria-label={t("undo")}
+        title={tip(t("undo"), "Ctrl+Z")}
         disabled={!canUndo}
         onClick={onUndo}
       >
@@ -90,42 +130,93 @@ export function Toolbar({
         className="toolbar__iconButton"
         type="button"
         aria-label={t("redo")}
+        title={tip(t("redo"), "Ctrl+Y")}
         disabled={!canRedo}
         onClick={onRedo}
       >
         <Redo2 size={16} aria-hidden="true" />
       </button>
       <div className="toolbar__separator" />
-      <button className="toolbar__button" type="button" aria-label={t("insertRow")} onClick={onInsertRow}>
+      <button
+        className="toolbar__button"
+        type="button"
+        aria-label={t("insertRow")}
+        title={t("insertRow")}
+        onClick={onInsertRow}
+      >
         <Rows3 size={16} aria-hidden="true" />
         <span>{t("insertRow")}</span>
       </button>
-      <button className="toolbar__button" type="button" aria-label={t("insertColumn")} onClick={onInsertColumn}>
+      <button
+        className="toolbar__button"
+        type="button"
+        aria-label={t("insertColumn")}
+        title={t("insertColumn")}
+        onClick={onInsertColumn}
+      >
         <Columns3 size={16} aria-hidden="true" />
         <span>{t("insertColumn")}</span>
       </button>
-      <button className="toolbar__button toolbar__button--danger" type="button" aria-label={t("deleteRow")} onClick={onDeleteRow}>
+      <button
+        className="toolbar__button toolbar__button--danger"
+        type="button"
+        aria-label={t("deleteRow")}
+        title={t("deleteRow")}
+        disabled={!canDeleteRow}
+        onClick={onDeleteRow}
+      >
         <Trash2 size={16} aria-hidden="true" />
         <span>{t("deleteRow")}</span>
       </button>
-      <button className="toolbar__button toolbar__button--danger" type="button" aria-label={t("deleteCol")} onClick={onDeleteColumn}>
+      <button
+        className="toolbar__button toolbar__button--danger"
+        type="button"
+        aria-label={t("deleteCol")}
+        title={t("deleteCol")}
+        disabled={!canDeleteColumn}
+        onClick={onDeleteColumn}
+      >
         <Trash2 size={16} aria-hidden="true" />
         <span>{t("deleteCol")}</span>
       </button>
       <div className="toolbar__separator" />
-      <button className="toolbar__button" type="button" aria-label={t("autoFit")} onClick={onAutoFit}>
+      <button
+        className="toolbar__button"
+        type="button"
+        aria-label={t("autoFit")}
+        title={t("autoFit")}
+        onClick={onAutoFit}
+      >
         <Columns3 size={16} aria-hidden="true" />
         <span>{t("autoFit")}</span>
       </button>
-      <button className="toolbar__button" type="button" aria-label={t("aiCopy")} onClick={onAiCopy}>
+      <button
+        className="toolbar__button"
+        type="button"
+        aria-label={t("aiCopy")}
+        title={t("aiCopy")}
+        onClick={onAiCopy}
+      >
         <Bot size={16} aria-hidden="true" />
         <span>{t("aiCopy")}</span>
       </button>
       <div className="toolbar__spacer" />
-      <button className="toolbar__iconButton" type="button" aria-label={t("settings")} onClick={onSettings}>
+      <button
+        className="toolbar__iconButton"
+        type="button"
+        aria-label={t("settings")}
+        title={t("settings")}
+        onClick={onSettings}
+      >
         <Settings size={16} aria-hidden="true" />
       </button>
-      <button className="toolbar__iconButton" type="button" aria-label={t("help")} onClick={onHelp}>
+      <button
+        className="toolbar__iconButton"
+        type="button"
+        aria-label={t("help")}
+        title={t("help")}
+        onClick={onHelp}
+      >
         <CircleHelp size={16} aria-hidden="true" />
       </button>
     </nav>

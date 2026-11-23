@@ -6,6 +6,8 @@ type HelpModalProps = {
   onClose: () => void;
 };
 
+type TranslatedKeys = "keysNavigate" | "keysEditCell" | "keysJump";
+
 const shortcuts = [
   ["Ctrl+O", "shortcutOpen"],
   ["Ctrl+S", "shortcutSave"],
@@ -13,11 +15,11 @@ const shortcuts = [
   ["Ctrl+H", "shortcutReplace"],
   ["Ctrl+A", "shortcutSelectAll"],
   ["Ctrl+C / Ctrl+X / Ctrl+V", "shortcutCopyPaste"],
-  ["Arrows / Tab / Enter", "shortcutNavigate"],
-  ["Type / F2 / Double-click", "shortcutEditCell"],
+  ["keysNavigate", "shortcutNavigate"],
+  ["keysEditCell", "shortcutEditCell"],
   ["Delete", "shortcutClearCell"],
   ["Ctrl+Z / Ctrl+Y", "shortcutUndoRedo"],
-  ["Name box + Enter", "shortcutJump"],
+  ["keysJump", "shortcutJump"],
   ["Ctrl+= / Ctrl+- / Ctrl+0", "shortcutZoom"],
 ] as const;
 
@@ -54,7 +56,8 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
           <tbody>
             {shortcuts.map(([key, label]) => (
               <tr key={key}>
-                <th>{key}</th>
+                {/* Key names with words in them are translated. */}
+                <th>{key.startsWith("keys") ? t(key as TranslatedKeys) : key}</th>
                 <td>{t(label)}</td>
               </tr>
             ))}

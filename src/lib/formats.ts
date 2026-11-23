@@ -1,4 +1,4 @@
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { stringify as stringifyYaml } from "yaml";
 import type {
   CellValue,
   Delimiter,
@@ -7,19 +7,47 @@ import type {
   MarkdownLayout,
   Newline,
 } from "../types/sheet";
-import { parseCsv, serializeCsv } from "./csv";
+import { type CsvParseInfo, detectNewline, hasTrailingNewline, parseCsv, serializeCsv } from "./csv";
+import {
+  parseJsonTable,
+  parseYamlTable,
+  serializeJsonTable,
+  serializeYamlTable,
+} from "./structured";
+import type { SheetMeta, StructuredSource } from "../types/sheet";
 
 export function parseTableText(text: string, format: FileFormat, delimiter: Delimiter): CellValue[][] {
-  if (format === "json") {
-    return parseObjectList(JSON.parse(text));
-  }
-  if (format === "yaml") {
-    return parseObjectList(parseYaml(text));
+  return parseTableDocument(text, format, delimiter).rows;
+}
+
+export type ParsedTableDocument = {
+  rows: CellValue[][];
+  // What the file looked like apart from its cells, to keep on save.
+  meta: Partial<SheetMeta>;
+  // A quoted CSV field never closed; its quote was read as a character.
+  unterminatedQuote: boolean;
+};
+
+/** Parses a table file and records what a save needs to write it back faithfully. */
+export function parseTableDocument(
+  text: string,
+  format: FileFormat,
+  delimiter: Delimiter,
+): ParsedTableDocument {
+  const meta: Partial<SheetMeta> = { newline: detectNewline(text) };
+  if (format === "json" || format === "yaml") {
+    const parsed = format === "json" ? parseJsonTable(text) : parseYamlTable(text);
+    meta.structured = parsed.source;
+    return { rows: parsed.rows, meta, unterminatedQuote: false };
   }
   if (format === "markdown") {
-    return parseMarkdownTable(text);
+    meta.markdown = parseMarkdownLayout(text);
+    return { rows: parseMarkdownTable(text), meta, unterminatedQuote: false };
   }
-  return parseCsv(text, delimiter);
+  const info: CsvParseInfo = {};
+  const rows = parseCsv(text, delimiter, info);
+  meta.trailingNewline = hasTrailingNewline(text);
+  return { rows, meta, unterminatedQuote: info.unterminatedQuote === true };
 }
 
 export type SerializeOptions = {
@@ -28,6 +56,10 @@ export type SerializeOptions = {
   // Markdown only: the document the table came from. Without it the file is
   // written as the table alone.
   markdown?: MarkdownLayout;
+  // CSV / TSV: end the file with a line break.
+  trailingNewline?: boolean;
+  // JSON / YAML: the values the file held when it was read.
+  structured?: StructuredSource;
 };
 
 export function serializeTableText(
@@ -37,71 +69,40 @@ export function serializeTableText(
   newline: Newline,
   options: SerializeOptions = {},
 ): string {
-  const { sanitizeFormulas = false, omitEmptyCells = false, markdown } = options;
+  const {
+    sanitizeFormulas = false,
+    omitEmptyCells = false,
+    markdown,
+    trailingNewline = false,
+    structured,
+  } = options;
+  const source = structured?.format === format ? structured : undefined;
   if (format === "json") {
-    const json = JSON.stringify(rowsToObjects(rows, omitEmptyCells), null, 2);
+    const json = source
+      ? serializeJsonTable(rows, objectKeys(rows), source, omitEmptyCells)
+      : JSON.stringify(rowsToObjects(rows, omitEmptyCells), null, 2);
     // JSON.stringify always emits LF; rewrite every break when the sheet asks for CRLF
     // (YAML path already does a full replace).
     return newline === "CRLF" ? `${json.replace(/\n/g, "\r\n")}\r\n` : `${json}\n`;
   }
   if (format === "yaml") {
-    const yaml = stringifyYaml(rowsToObjects(rows, omitEmptyCells));
-    return newline === "CRLF" ? yaml.replace(/\n/g, "\r\n") : yaml;
+    const yaml =
+      (source && serializeYamlTable(rows, objectKeys(rows), source, omitEmptyCells)) ??
+      stringifyYaml(rowsToObjects(rows, omitEmptyCells));
+    return newline === "CRLF" ? yaml.replace(/\r?\n/g, "\r\n") : yaml.replace(/\r\n/g, "\n");
   }
   if (format === "markdown") {
     return markdown
       ? serializeMarkdownDocument(rows, newline, markdown)
       : serializeMarkdownTable(rows, newline);
   }
-  return serializeCsv(rows, delimiter, newline, sanitizeFormulas);
+  return serializeCsv(rows, delimiter, newline, sanitizeFormulas, trailingNewline);
 }
 
-function parseObjectList(value: unknown): CellValue[][] {
-  // An empty YAML document (or comment-only file) parses to null. Treat that as
-  // an empty sheet, matching how CSV/JSON empty inputs already behave, instead
-  // of raising "Expected an array of objects" and failing the load.
-  if (value == null) {
-    return [];
-  }
-  if (!Array.isArray(value)) {
-    throw new Error("Expected an array of objects");
-  }
-
-  const records = value.filter((item): item is Record<string, unknown> => isPlainObject(item));
-  if (records.length === 0) {
-    // A non-empty array that holds no objects (an array of arrays, or of
-    // scalars) is not a table this importer understands. Throwing lets the
-    // caller report a load failure instead of silently showing an empty sheet.
-    if (value.length > 0) {
-      throw new Error("Expected an array of objects");
-    }
-    return [];
-  }
-  // Partial object lists (e.g. [{a:1}, 42, {a:2}]) used to drop non-objects
-  // silently and lose rows. Require every element to be a plain object.
-  if (records.length !== value.length) {
-    throw new Error("Expected an array of objects");
-  }
-  const headers = Array.from(new Set(records.flatMap((record) => Object.keys(record))));
-  if (headers.length === 0) {
-    return [];
-  }
-
-  return [
-    headers,
-    ...records.map((record) =>
-      headers.map((header) => {
-        if (!Object.hasOwn(record, header)) {
-          return "";
-        }
-        const value = record[header];
-        if (value == null) {
-          return "";
-        }
-        return typeof value === "object" ? JSON.stringify(value) : String(value);
-      }),
-    ),
-  ];
+// The object keys a sheet writes: its header row, widened to the widest row.
+function objectKeys(rows: readonly (readonly CellValue[])[]): string[] {
+  const maxCols = rows.reduce((max, row) => Math.max(max, row.length), 0);
+  return uniqueHeaders(Array.from({ length: maxCols }, (_, index) => rows[0]?.[index] ?? ""));
 }
 
 function rowsToObjects(
@@ -110,9 +111,7 @@ function rowsToObjects(
 ): Record<string, string>[] {
   // Widen the header row to the widest data row so extra cells past the last
   // named column are not dropped on JSON/YAML export (Markdown already keeps them).
-  const maxCols = rows.reduce((max, row) => Math.max(max, row.length), 0);
-  const headerSource = Array.from({ length: maxCols }, (_, index) => rows[0]?.[index] ?? "");
-  const headers = uniqueHeaders(headerSource);
+  const headers = objectKeys(rows);
   const dataRows = rows.slice(1);
   // Header-only sheets must not serialize to [] — reopen would wipe column names.
   if (dataRows.length === 0 && headers.length > 0) {
@@ -367,6 +366,3 @@ function isSeparatorRow(line: string): boolean {
   return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}

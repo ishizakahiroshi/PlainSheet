@@ -9,6 +9,15 @@ type StatusBarProps = {
   range: Range;
   meta: SheetMeta;
   zoom?: number;
+  // Rows and columns shown on screen. A selection spans hidden and filtered-out
+  // rows between its ends; the totals count only what the user can see.
+  isRowVisible?: (row: number) => boolean;
+  isColumnVisible?: (col: number) => boolean;
+};
+
+export type VisibilityFilter = {
+  isRowVisible?: (row: number) => boolean;
+  isColumnVisible?: (col: number) => boolean;
 };
 
 export type SelectionStats = {
@@ -20,7 +29,16 @@ export type SelectionStats = {
   min: string | null;
 };
 
-export function StatusBar({ rows, columnCount, selection, range, meta, zoom }: StatusBarProps) {
+export function StatusBar({
+  rows,
+  columnCount,
+  selection,
+  range,
+  meta,
+  zoom,
+  isRowVisible,
+  isColumnVisible,
+}: StatusBarProps) {
   const selectedRange =
     range ??
     ({
@@ -30,9 +48,14 @@ export function StatusBar({ rows, columnCount, selection, range, meta, zoom }: S
       endCol: selection.col,
     } as const);
   const normalized = normalizeRange(selectedRange);
-  const selectedRows = normalized.endRow - normalized.startRow + 1;
-  const selectedCols = normalized.endCol - normalized.startCol + 1;
-  const stats = calculateSelectionStats(rows, selectedRange);
+  const visibility = { isRowVisible, isColumnVisible };
+  // Rows past the data are always shown; count them without visiting each.
+  const lastDataRow = Math.min(normalized.endRow, rows.length - 1);
+  const selectedRows =
+    countVisible(normalized.startRow, lastDataRow, isRowVisible) +
+    Math.max(0, normalized.endRow - Math.max(normalized.startRow, rows.length) + 1);
+  const selectedCols = countVisible(normalized.startCol, normalized.endCol, isColumnVisible);
+  const stats = calculateSelectionStats(rows, selectedRange, visibility);
   const zoomPercent = zoom !== undefined ? Math.round(zoom * 100) : null;
   const formatBadge =
     meta.format === "json" || meta.format === "yaml" || meta.format === "markdown"
@@ -53,9 +76,23 @@ export function StatusBar({ rows, columnCount, selection, range, meta, zoom }: S
   );
 }
 
+function countVisible(start: number, end: number, isVisible?: (index: number) => boolean): number {
+  if (!isVisible) {
+    return Math.max(0, end - start + 1);
+  }
+  let count = 0;
+  for (let index = start; index <= end; index += 1) {
+    if (isVisible(index)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 export function calculateSelectionStats(
   rows: CellValue[][],
   range: Exclude<Range, null>,
+  { isRowVisible, isColumnVisible }: VisibilityFilter = {},
 ): SelectionStats | null {
   const normalized = normalizeRange(range);
   const endRow = Math.min(normalized.endRow, rows.length - 1);
@@ -67,11 +104,14 @@ export function calculateSelectionStats(
 
   for (let rowIndex = Math.max(0, normalized.startRow); rowIndex <= endRow; rowIndex += 1) {
     const row = rows[rowIndex];
-    if (!row) {
+    if (!row || (isRowVisible && !isRowVisible(rowIndex))) {
       continue;
     }
     const endCol = Math.min(normalized.endCol, row.length - 1);
     for (let colIndex = Math.max(0, normalized.startCol); colIndex <= endCol; colIndex += 1) {
+      if (isColumnVisible && !isColumnVisible(colIndex)) {
+        continue;
+      }
       const value = row[colIndex] ?? "";
       const trimmed = value.trim();
       if (trimmed === "") {

@@ -29,7 +29,7 @@ export function sortRows(
 
   const numeric = body.every((row) => {
     const value = (row[colIndex] ?? "").trim();
-    return value === "" || Number.isFinite(Number(value.replace(/,/g, "")));
+    return value === "" || decimalValue(value) !== null;
   });
 
   const collator = new Intl.Collator("ja", { numeric: true, sensitivity: "base" });
@@ -53,7 +53,7 @@ export function sortRows(
       }
       let cmp: number;
       if (numeric) {
-        cmp = Number(aRaw.replace(/,/g, "")) - Number(bRaw.replace(/,/g, ""));
+        cmp = decimalValue(aRaw)! - decimalValue(bRaw)!;
       } else {
         cmp = collator.compare(aRaw, bRaw);
       }
@@ -65,4 +65,17 @@ export function sortRows(
     .map((entry) => entry.row);
 
   return header ? [header, ...sorted] : sorted;
+}
+
+// A number written in decimal: 1, -2.5, 1,000, .5, 1e3. Number() also reads
+// 0x10, 0b1 and 0o7, which a sheet of codes should sort as text.
+const DECIMAL = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
+
+function decimalValue(value: string): number | null {
+  const plain = value.replace(/,/g, "");
+  if (!DECIMAL.test(plain)) {
+    return null;
+  }
+  const parsed = Number(plain);
+  return Number.isFinite(parsed) ? parsed : null;
 }
