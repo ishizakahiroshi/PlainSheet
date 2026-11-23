@@ -339,6 +339,22 @@ export function cloneRows(rows: readonly (readonly CellValue[])[]): CellValue[][
   return rows.map((row) => [...row]);
 }
 
+export function sameRows(
+  a: readonly (readonly CellValue[])[],
+  b: readonly (readonly CellValue[])[],
+): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((row, rowIndex) => {
+    const other = b[rowIndex]!;
+    return row.length === other.length && row.every((cell, colIndex) => cell === other[colIndex]);
+  });
+}
+
 export function getColumnCount(rows: readonly (readonly CellValue[])[]): number {
   return rows.reduce((max, row) => Math.max(max, row.length), 0);
 }

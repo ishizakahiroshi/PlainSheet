@@ -97,6 +97,10 @@ const dictionaries = {
     toastAutoFit: "列幅を再計算しました",
     toastLoaded: "読み込みました",
     toastLoadFailed: "読み込みに失敗しました",
+    toastLoadNotUtf8:
+      "UTF-8 ではないため開けません。ブラウザ版は UTF-8 のファイルだけを扱えます（デスクトップ版は Shift_JIS なども開けます）",
+    toastAlreadyOpenUnsaved:
+      "このファイルは未保存の変更があるタブで開いています。そのタブに切り替えました",
     toastSearchDone: "{count} 件置換しました",
     toastClipboardUnavailable: "クリップボードを利用できません",
     toastSaveFailed: "保存に失敗しました",
@@ -250,6 +254,10 @@ const dictionaries = {
     toastAutoFit: "Column widths recalculated",
     toastLoaded: "Loaded",
     toastLoadFailed: "Failed to load",
+    toastLoadNotUtf8:
+      "This file is not UTF-8. The browser version opens UTF-8 files only (the desktop app also opens Shift_JIS and others).",
+    toastAlreadyOpenUnsaved:
+      "This file is already open in a tab with unsaved changes. Switched to that tab.",
     toastSearchDone: "Replaced {count} matches",
     toastClipboardUnavailable: "Clipboard is unavailable",
     toastSaveFailed: "Failed to save",

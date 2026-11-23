@@ -7,10 +7,9 @@ import type { SheetMeta } from "../types/sheet";
 
 type TitleBarProps = {
   meta: SheetMeta;
-  anyDirty?: boolean;
 };
 
-export function TitleBar({ meta, anyDirty = false }: TitleBarProps) {
+export function TitleBar({ meta }: TitleBarProps) {
   const title = `${meta.dirty ? "● " : ""}${meta.fileName ?? t("appName")}`;
   const showWindowControls = isTauriRuntime();
 
@@ -54,9 +53,8 @@ export function TitleBar({ meta, anyDirty = false }: TitleBarProps) {
             className="titleBar__control titleBar__control--close"
             aria-label={t("windowClose")}
             onClick={() => {
-              if ((anyDirty || meta.dirty) && !window.confirm(t("confirmUnsaved"))) {
-                return;
-              }
+              // close() raises the window's close-requested event; App asks
+              // about unsaved changes there, the same as for Alt+F4.
               void getCurrentWindow().close();
             }}
           >

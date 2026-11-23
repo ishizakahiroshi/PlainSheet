@@ -332,16 +332,48 @@ export async function parseCsvStream(
   return finishCsvStream(state);
 }
 
-/** Yields decoded text chunks from a Blob/File stream. */
+/** Thrown when a file that must be UTF-8 holds bytes that are not valid UTF-8. */
+export class TextEncodingError extends Error {
+  constructor() {
+    super("file is not valid UTF-8");
+    this.name = "TextEncodingError";
+  }
+}
+
+/**
+ * Yields decoded text chunks from a Blob/File stream. Decoding is strict: a
+ * file in another encoding would otherwise be read as U+FFFD replacement
+ * characters and, once saved, overwrite the original with them.
+ */
 export async function* streamFileText(file: Blob): AsyncGenerator<string> {
   if (typeof file.stream !== "function") {
-    yield await file.text();
+    let text: string;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+        await file.arrayBuffer(),
+      );
+    } catch {
+      throw new TextEncodingError();
+    }
+    yield text;
     return;
   }
-  const reader = file.stream().pipeThrough(new TextDecoderStream()).getReader();
+  const reader = file
+    .stream()
+    .pipeThrough(new TextDecoderStream("utf-8", { fatal: true, ignoreBOM: true }))
+    .getReader();
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      let chunk: ReadableStreamReadResult<string>;
+      try {
+        chunk = await reader.read();
+      } catch (error) {
+        if (error instanceof TypeError) {
+          throw new TextEncodingError();
+        }
+        throw error;
+      }
+      const { done, value } = chunk;
       if (done) {
         break;
       }

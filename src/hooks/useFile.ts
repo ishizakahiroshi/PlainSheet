@@ -7,23 +7,34 @@ import {
   parseCsvStream,
   STREAM_PARSE_THRESHOLD,
   streamFileText,
+  TextEncodingError,
 } from "../lib/csv";
-import { parseTableText, serializeTableText, type SerializeOptions } from "../lib/formats";
+import {
+  parseMarkdownLayout,
+  parseTableText,
+  serializeTableText,
+  type SerializeOptions,
+} from "../lib/formats";
 import { t } from "../lib/i18n";
-import type { CellValue, Delimiter, FileFormat, SheetMeta } from "../types/sheet";
+import type { CellValue, Delimiter, FileFormat, MarkdownLayout, SheetMeta } from "../types/sheet";
 
 type UseFileOptions = {
   // Used only when a brand-new sheet is loaded (open / drop / sample / new).
   // The callback owner is expected to reset history and selection alongside
   // replacing rows. Do not invoke this for save-completed metadata patches —
-  // use updateMeta for that instead, otherwise every Ctrl+S wipes undo,
-  // resets selection, and refits column widths.
-  loadData: (rows: CellValue[][], meta: Partial<SheetMeta>) => void;
-  updateMeta: (meta: Partial<SheetMeta>) => void;
+  // use completeSave for that instead, otherwise every Ctrl+S wipes undo,
+  // resets selection, and refits column widths. Returning false means the
+  // owner did not load the rows (it already told the user why).
+  loadData: (rows: CellValue[][], meta: Partial<SheetMeta>) => boolean | void;
+  // Applies save-completed metadata to the tab the save started from. A save
+  // awaits the disk or a dialog, and the user may switch tabs or keep typing
+  // meanwhile, so the owner marks the tab clean only if its rows still equal
+  // the rows that were written.
+  completeSave: (docId: string, savedRows: CellValue[][], meta: Partial<SheetMeta>) => void;
   getRows: () => CellValue[][];
   getMeta: () => SheetMeta;
   onToast: (message: string) => void;
-  confirmDiscard: () => boolean;
+  confirmDiscard: () => boolean | Promise<boolean>;
   /** Called when a filesystem path is opened/saved (Tauri recent-files list). */
   onRecentPath?: (path: string) => void;
   /** Returns the active document tab ID so browser file handles stay scoped per tab. */
@@ -41,7 +52,7 @@ type FileDropPayload =
 
 export function useFile({
   loadData,
-  updateMeta,
+  completeSave,
   getRows,
   getMeta,
   onToast,
@@ -86,14 +97,18 @@ export function useFile({
         const delimiter = format === "tsv" ? "\t" : detectDelimiter(content);
         const newline = detectNewline(content);
         const rows = parseTableText(content, format, delimiter);
-        loadData(rows, {
+        const loaded = loadData(rows, {
           filePath: path,
           fileName: fileNameFromPath(path),
           encoding: normalizeEncoding(encoding),
           newline,
           delimiter,
           format,
+          markdown: format === "markdown" ? parseMarkdownLayout(content) : undefined,
         });
+        if (loaded === false) {
+          return;
+        }
         onRecentPath?.(path);
         onToast(t("toastLoaded"));
       } catch {
@@ -109,7 +124,7 @@ export function useFile({
 
   const openFile = useCallback(async () => {
     try {
-      if (getMeta().dirty && !confirmDiscard()) {
+      if (getMeta().dirty && !(await confirmDiscard())) {
         return;
       }
       if (!isTauriRuntime()) {
@@ -134,6 +149,10 @@ export function useFile({
 
   const saveAs = useCallback(async () => {
     try {
+      // Capture the tab and its rows before any dialog: the user can switch
+      // tabs or keep editing while the picker is open or the write is pending.
+      const docId = getActiveIdRef.current();
+      const rows = getRows();
       const currentMeta = getMeta();
       const defaultName = currentMeta.fileName ?? "untitled.csv";
       if (!isTauriRuntime()) {
@@ -152,19 +171,20 @@ export function useFile({
           const delimiter =
             format === currentMeta.format ? currentMeta.delimiter : delimiterFromFormat(format);
           const content = serializeTableText(
-            getRows(),
+            rows,
             format,
             delimiter,
             currentMeta.newline,
-            serializeOptions(currentMeta),
+            serializeOptions(currentMeta, format),
           );
           await writeFileHandle(handle, content);
-          fileHandlesRef.current.set(getActiveIdRef.current(), handle);
-          updateMeta({
+          fileHandlesRef.current.set(docId, handle);
+          completeSave(docId, rows, {
             fileName: handle.name,
             delimiter,
             dirty: false,
             format,
+            markdown: keptMarkdownLayout(currentMeta, format),
           });
           onToast(t("toastSaved"));
           return;
@@ -177,19 +197,20 @@ export function useFile({
         const delimiter =
           format === currentMeta.format ? currentMeta.delimiter : delimiterFromFormat(format);
         const content = serializeTableText(
-          getRows(),
+          rows,
           format,
           delimiter,
           currentMeta.newline,
-          serializeOptions(currentMeta),
+          serializeOptions(currentMeta, format),
         );
         downloadText(content, fileName);
-        fileHandlesRef.current.delete(getActiveIdRef.current());
-        updateMeta({
+        fileHandlesRef.current.delete(docId);
+        completeSave(docId, rows, {
           fileName,
           delimiter,
           dirty: false,
           format,
+          markdown: keptMarkdownLayout(currentMeta, format),
         });
         onToast(t("toastDownloadStarted"));
         return;
@@ -202,40 +223,44 @@ export function useFile({
       const delimiter = format === currentMeta.format ? currentMeta.delimiter : delimiterFromFormat(format);
       const encoding = encodingForFormat(format, currentMeta.encoding);
       const content = serializeTableText(
-        getRows(),
+        rows,
         format,
         delimiter,
         currentMeta.newline,
-        serializeOptions(currentMeta),
+        serializeOptions(currentMeta, format),
       );
       await invoke("write_file", { path, content, encoding });
-      updateMeta({
+      completeSave(docId, rows, {
         filePath: path,
         fileName: fileNameFromPath(path),
         delimiter,
         encoding,
         dirty: false,
         format,
+        markdown: keptMarkdownLayout(currentMeta, format),
       });
       onRecentPath?.(path);
       onToast(t("toastSaved"));
     } catch (error) {
       onToast(saveErrorMessage(error));
     }
-  }, [getMeta, getRows, updateMeta, onToast, onRecentPath]);
+  }, [getMeta, getRows, completeSave, onToast, onRecentPath]);
 
   const saveFile = useCallback(async () => {
     try {
+      const docId = getActiveIdRef.current();
+      const rows = getRows();
       const currentMeta = getMeta();
       if (!isTauriRuntime()) {
+        const format = currentMeta.format ?? "csv";
         const content = serializeTableText(
-          getRows(),
-          currentMeta.format ?? "csv",
+          rows,
+          format,
           currentMeta.delimiter,
           currentMeta.newline,
-          serializeOptions(currentMeta),
+          serializeOptions(currentMeta, format),
         );
-        const handle = fileHandlesRef.current.get(getActiveIdRef.current());
+        const handle = fileHandlesRef.current.get(docId);
         if (handle && handle.name === currentMeta.fileName) {
           if (typeof handle.queryPermission === "function") {
             let permission = await handle.queryPermission({ mode: "readwrite" });
@@ -248,7 +273,7 @@ export function useFile({
             }
           }
           await writeFileHandle(handle, content);
-          updateMeta({ dirty: false });
+          completeSave(docId, rows, { dirty: false });
           onToast(t("toastSaved"));
           return;
         }
@@ -257,7 +282,7 @@ export function useFile({
           return;
         }
         downloadText(content, currentMeta.fileName ?? "untitled.csv");
-        updateMeta({ dirty: false });
+        completeSave(docId, rows, { dirty: false });
         onToast(t("toastDownloadStarted"));
         return;
       }
@@ -268,28 +293,28 @@ export function useFile({
       const format = currentMeta.format ?? "csv";
       const encoding = encodingForFormat(format, currentMeta.encoding);
       const content = serializeTableText(
-        getRows(),
+        rows,
         format,
         currentMeta.delimiter,
         currentMeta.newline,
-        serializeOptions(currentMeta),
+        serializeOptions(currentMeta, format),
       );
       await invoke("write_file", {
         path: currentMeta.filePath,
         content,
         encoding,
       });
-      updateMeta({ encoding, dirty: false });
+      completeSave(docId, rows, { encoding, dirty: false });
       onRecentPath?.(currentMeta.filePath);
       onToast(t("toastSaved"));
     } catch (error) {
       onToast(saveErrorMessage(error));
     }
-  }, [getMeta, getRows, updateMeta, onToast, saveAs, onRecentPath]);
+  }, [getMeta, getRows, completeSave, onToast, saveAs, onRecentPath]);
 
   const loadSample = useCallback(async () => {
     try {
-      if (getMeta().dirty && !confirmDiscard()) {
+      if (getMeta().dirty && !(await confirmDiscard())) {
         return;
       }
       const response = await fetch(`${import.meta.env.BASE_URL}sample.csv`);
@@ -298,13 +323,16 @@ export function useFile({
       }
       const content = await response.text();
       const rows = parseTableText(content, "csv", ",");
-      loadData(rows, {
+      const loaded = loadData(rows, {
         fileName: "sample.csv",
         delimiter: ",",
         newline: detectNewline(content),
         encoding: "utf-8",
         format: "csv",
       });
+      if (loaded === false) {
+        return;
+      }
       resetSaveTarget();
       onToast(t("toastLoaded"));
     } catch {
@@ -319,16 +347,21 @@ export function useFile({
       };
       const handleDrop = (event: DragEvent) => {
         event.preventDefault();
-        if (getMetaRef.current().dirty && !confirmDiscardRef.current()) {
+        // Read the file before awaiting: dataTransfer is emptied once the
+        // drop event handler returns.
+        const file = event.dataTransfer?.files[0];
+        if (!file) {
           return;
         }
-        const file = event.dataTransfer?.files[0];
-        if (file) {
+        void (async () => {
+          if (getMetaRef.current().dirty && !(await confirmDiscardRef.current())) {
+            return;
+          }
           // D&D has no writable handle — next Save will pick a location.
-          void loadBrowserFile(file, loadDataRef.current, onToastRef.current, () => {
+          await loadBrowserFile(file, loadDataRef.current, onToastRef.current, () => {
             fileHandlesRef.current.delete(getActiveIdRef.current());
           });
-        }
+        })();
       };
       window.addEventListener("dragover", handleDragOver);
       window.addEventListener("drop", handleDrop);
@@ -340,15 +373,15 @@ export function useFile({
 
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    listen<FileDropPayload>("tauri://drag-drop", (event) => {
+    listen<FileDropPayload>("tauri://drag-drop", async (event) => {
       const path = extractDropPath(event.payload);
       if (!path) {
         return;
       }
-      if (getMetaRef.current().dirty && !confirmDiscardRef.current()) {
+      if (getMetaRef.current().dirty && !(await confirmDiscardRef.current())) {
         return;
       }
-      void loadPathRef.current(path);
+      await loadPathRef.current(path);
     })
       .then((handler) => {
         if (cancelled) {
@@ -372,7 +405,7 @@ export function useFile({
       if (!path) {
         return;
       }
-      if (getMetaRef.current().dirty && !confirmDiscardRef.current()) {
+      if (getMetaRef.current().dirty && !(await confirmDiscardRef.current())) {
         return;
       }
       await loadPathRef.current(path);
@@ -535,19 +568,25 @@ async function loadBrowserFile(
           onToast(t("toastLoading", { percent: Math.round(ratio * 100) }));
         },
       });
-      loadData(rows, {
+      const loaded = loadData(rows, {
         fileName: file.name,
         delimiter,
         newline,
         encoding: "utf-8",
         format,
       });
+      if (loaded === false) {
+        return;
+      }
       onAdopt?.();
       onToast(t("toastLoaded"));
       return;
     }
 
-    content = await file.text();
+    // The browser build only reads and writes UTF-8. Decode strictly: a
+    // Shift_JIS / EUC-JP / Latin-1 file decoded leniently turns its text into
+    // U+FFFD, and saving would then overwrite the original with that.
+    content = decodeUtf8Strict(await readFileBytes(file));
     if (content.includes("\0")) {
       throw new Error("file contains NUL bytes");
     }
@@ -557,17 +596,44 @@ async function loadBrowserFile(
     content = content.replace(/^\uFEFF/, "");
     const delimiter = format === "tsv" ? "\t" : detectDelimiter(content);
     rows = parseTableText(content, format, delimiter);
-    loadData(rows, {
+    const loaded = loadData(rows, {
       fileName: file.name,
       delimiter,
       newline: detectNewline(content),
       encoding: "utf-8",
       format,
+      markdown: format === "markdown" ? parseMarkdownLayout(content) : undefined,
     });
+    if (loaded === false) {
+      return;
+    }
     onAdopt?.();
     onToast(t("toastLoaded"));
+  } catch (error) {
+    onToast(error instanceof TextEncodingError ? t("toastLoadNotUtf8") : t("toastLoadFailed"));
+  }
+}
+
+async function readFileBytes(file: Blob): Promise<Uint8Array> {
+  if (typeof file.arrayBuffer === "function") {
+    return new Uint8Array(await file.arrayBuffer());
+  }
+  return new Uint8Array(
+    await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error ?? new Error("failed to read file"));
+      reader.readAsArrayBuffer(file);
+    }),
+  );
+}
+
+function decodeUtf8Strict(bytes: Uint8Array): string {
+  try {
+    // ignoreBOM keeps a leading BOM in the text; the caller strips it.
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
   } catch {
-    onToast(t("toastLoadFailed"));
+    throw new TextEncodingError();
   }
 }
 
@@ -578,8 +644,18 @@ function encodingForFormat(
   return format === "json" || format === "yaml" ? "utf-8" : encoding;
 }
 
-function serializeOptions(meta: SheetMeta): SerializeOptions {
-  return { sanitizeFormulas: meta.csvFormulaGuard, omitEmptyCells: meta.omitEmptyCells };
+function serializeOptions(meta: SheetMeta, format: FileFormat): SerializeOptions {
+  return {
+    sanitizeFormulas: meta.csvFormulaGuard,
+    omitEmptyCells: meta.omitEmptyCells,
+    markdown: keptMarkdownLayout(meta, format),
+  };
+}
+
+// The text around a Markdown table belongs to that document. Keep it while the
+// sheet is saved as Markdown again; saving under another format drops it.
+function keptMarkdownLayout(meta: SheetMeta, format: FileFormat): MarkdownLayout | undefined {
+  return format === "markdown" && meta.format === "markdown" ? meta.markdown : undefined;
 }
 
 function saveErrorMessage(error: unknown): string {

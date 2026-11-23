@@ -32,6 +32,22 @@ export type SheetMeta = {
   // Opt-in save guards (off by default to keep round-trips faithful).
   csvFormulaGuard: boolean; // prefix =/+/-/@ cells with ' on CSV/TSV export
   omitEmptyCells: boolean; // drop empty values from JSON/YAML objects
+  // Markdown files: the document around the edited table, kept so saving
+  // rewrites only the table.
+  markdown?: MarkdownLayout;
+};
+
+export type MarkdownAlignment = "none" | "left" | "center" | "right";
+
+export type MarkdownLayout = {
+  // Whether the file held a table. When false, `before` is the whole file.
+  hasTable: boolean;
+  // Text before the table, including the line break that ends it.
+  before: string;
+  // Text after the table, starting with the line break that ended the table.
+  after: string;
+  // Column alignments from the separator row (`:---`, `---:`, `:---:`).
+  alignments: MarkdownAlignment[];
 };
 
 export type HistoryEntry = {

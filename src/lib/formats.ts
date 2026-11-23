@@ -1,5 +1,12 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import type { CellValue, Delimiter, FileFormat, Newline } from "../types/sheet";
+import type {
+  CellValue,
+  Delimiter,
+  FileFormat,
+  MarkdownAlignment,
+  MarkdownLayout,
+  Newline,
+} from "../types/sheet";
 import { parseCsv, serializeCsv } from "./csv";
 
 export function parseTableText(text: string, format: FileFormat, delimiter: Delimiter): CellValue[][] {
@@ -18,6 +25,9 @@ export function parseTableText(text: string, format: FileFormat, delimiter: Deli
 export type SerializeOptions = {
   sanitizeFormulas?: boolean;
   omitEmptyCells?: boolean;
+  // Markdown only: the document the table came from. Without it the file is
+  // written as the table alone.
+  markdown?: MarkdownLayout;
 };
 
 export function serializeTableText(
@@ -27,7 +37,7 @@ export function serializeTableText(
   newline: Newline,
   options: SerializeOptions = {},
 ): string {
-  const { sanitizeFormulas = false, omitEmptyCells = false } = options;
+  const { sanitizeFormulas = false, omitEmptyCells = false, markdown } = options;
   if (format === "json") {
     const json = JSON.stringify(rowsToObjects(rows, omitEmptyCells), null, 2);
     // JSON.stringify always emits LF; rewrite every break when the sheet asks for CRLF
@@ -39,7 +49,9 @@ export function serializeTableText(
     return newline === "CRLF" ? yaml.replace(/\n/g, "\r\n") : yaml;
   }
   if (format === "markdown") {
-    return serializeMarkdownTable(rows, newline);
+    return markdown
+      ? serializeMarkdownDocument(rows, newline, markdown)
+      : serializeMarkdownTable(rows, newline);
   }
   return serializeCsv(rows, delimiter, newline, sanitizeFormulas);
 }
@@ -142,30 +154,123 @@ function uniqueHeaders(headerRow: readonly CellValue[]): string[] {
   });
 }
 
+type MarkdownLine = { text: string; eol: string };
+
+// Splits text into lines and keeps each line's own break, so the parts of a
+// Markdown document around the table can be written back byte for byte.
+// Indexes match text.split(/\r\n|\n|\r/).
+function splitMarkdownLines(text: string): MarkdownLine[] {
+  const lines: MarkdownLine[] = [];
+  const pattern = /([^\r\n]*)(\r\n|\n|\r|$)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    lines.push({ text: match[1]!, eol: match[2]! });
+    if (match[2] === "") {
+      break;
+    }
+  }
+  return lines;
+}
+
+// The first table: its header line index and the index just past its last row.
+function locateMarkdownTable(lines: readonly string[]): { start: number; end: number } | null {
+  const start = lines.findIndex(
+    (line, index) => isMarkdownRow(line) && isSeparatorRow(lines[index + 1] ?? ""),
+  );
+  if (start === -1) {
+    return null;
+  }
+  let end = start;
+  while (end < lines.length && isMarkdownRow(lines[end]!)) {
+    end += 1;
+  }
+  return { start, end };
+}
+
 function parseMarkdownTable(text: string): CellValue[][] {
   const lines = text.split(/\r\n|\n|\r/);
-  const start = lines.findIndex((line, index) => isMarkdownRow(line) && isSeparatorRow(lines[index + 1] ?? ""));
-  if (start === -1) {
+  const table = locateMarkdownTable(lines);
+  if (!table) {
     return [];
   }
 
   const rows: CellValue[][] = [];
-  for (let index = start; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (!isMarkdownRow(line)) {
-      break;
+  for (let index = table.start; index < table.end; index += 1) {
+    if (index === table.start + 1) {
+      continue; // separator row
     }
-    if (index === start + 1 && isSeparatorRow(line)) {
-      continue;
-    }
-    rows.push(splitMarkdownRow(line));
+    rows.push(splitMarkdownRow(lines[index]!));
   }
   return rows;
+}
+
+/**
+ * Records what surrounds the first table of a Markdown document, so a save
+ * rewrites only the table and keeps headings, prose, other tables and the
+ * column alignments. A document without a table is kept whole in `before`.
+ */
+export function parseMarkdownLayout(text: string): MarkdownLayout {
+  const lines = splitMarkdownLines(text);
+  const table = locateMarkdownTable(lines.map((line) => line.text));
+  if (!table) {
+    return { hasTable: false, before: text, after: "", alignments: [] };
+  }
+  const join = (part: readonly MarkdownLine[]) =>
+    part.map((line) => line.text + line.eol).join("");
+  return {
+    hasTable: true,
+    before: join(lines.slice(0, table.start)),
+    after: lines[table.end - 1]!.eol + join(lines.slice(table.end)),
+    alignments: splitMarkdownRow(lines[table.start + 1]!.text).map(alignmentOf),
+  };
+}
+
+function alignmentOf(cell: string): MarkdownAlignment {
+  const token = cell.trim();
+  const left = token.startsWith(":");
+  const right = token.endsWith(":");
+  if (left && right) {
+    return "center";
+  }
+  if (left) {
+    return "left";
+  }
+  return right ? "right" : "none";
+}
+
+const ALIGNMENT_MARKERS: Record<MarkdownAlignment, string> = {
+  none: "---",
+  left: ":---",
+  center: ":---:",
+  right: "---:",
+};
+
+function serializeMarkdownDocument(
+  rows: readonly (readonly CellValue[])[],
+  newline: Newline,
+  layout: MarkdownLayout,
+): string {
+  const table = serializeMarkdownTable(rows, newline, layout.alignments);
+  if (layout.hasTable) {
+    return layout.before + table + layout.after;
+  }
+  if (table === "") {
+    return layout.before;
+  }
+  // A table added to a document that had none goes after the existing text,
+  // separated by a blank line.
+  const nl = newline === "CRLF" ? "\r\n" : "\n";
+  if (layout.before === "") {
+    return table + nl;
+  }
+  const gap = /(\r\n|\n|\r)$/.test(layout.before) ? nl : nl + nl;
+  return layout.before + gap + table + nl;
 }
 
 function serializeMarkdownTable(
   rows: readonly (readonly CellValue[])[],
   newline: Newline = "LF",
+  alignments: readonly MarkdownAlignment[] = [],
 ): string {
   if (rows.length === 0) {
     return "";
@@ -178,7 +283,10 @@ function serializeMarkdownTable(
     Array.from({ length: columnCount }, (_, index) => escapeMarkdownCell(row[index] ?? "")),
   );
   const header = normalized[0];
-  const separator = Array.from({ length: columnCount }, () => "---");
+  const separator = Array.from(
+    { length: columnCount },
+    (_, index) => ALIGNMENT_MARKERS[alignments[index] ?? "none"],
+  );
   return [header, separator, ...normalized.slice(1)]
     .map((row) => `| ${row.join(" | ")} |`)
     .join(newline === "CRLF" ? "\r\n" : "\n");

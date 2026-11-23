@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import {
   ContextMenu,
@@ -20,17 +21,18 @@ import { TitleBar } from "./components/TitleBar";
 import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
 import { parseClipboardText, clipboardTsv, normalizeRange } from "./lib/clipboard";
+import { confirmDiscard } from "./lib/confirm";
 import { setLocale, t } from "./lib/i18n";
 import { parseCellRef } from "./lib/cellref";
 import { sortRows, type SortDirection } from "./lib/sort";
 import { MAX_ZOOM, MIN_ZOOM, pushRecentFile, ZOOM_STEP } from "./lib/settings";
 import { useDocuments, type ActiveDocumentLive, type DocumentSnapshot } from "./hooks/useDocuments";
-import { useFile } from "./hooks/useFile";
+import { isTauriRuntime, useFile } from "./hooks/useFile";
 import { useFilter } from "./hooks/useFilter";
 import { useHistory } from "./hooks/useHistory";
 import { useSelection } from "./hooks/useSelection";
 import { useSettings } from "./hooks/useSettings";
-import { cloneRows } from "./hooks/useSheet";
+import { cloneRows, sameRows } from "./hooks/useSheet";
 import { useSheet } from "./hooks/useSheet";
 import {
   emptyView,
@@ -206,6 +208,42 @@ export default function App() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [workspace.anyDirty]);
 
+  // Unsaved work in any tab. Inactive tabs keep their meta in the workspace;
+  // the shown tab's live meta is in useSheet (its workspace copy can be stale).
+  const unsavedRef = useRef(false);
+  unsavedRef.current =
+    sheet.meta.dirty ||
+    workspace.documents.some((doc) => doc.id !== workspace.activeId && doc.meta.dirty);
+
+  // Desktop: beforeunload does not run when the window is closed by the OS
+  // (Alt+F4, the taskbar, the title bar's own close button). Ask before the
+  // window goes away; the window API destroys it unless the handler prevents it.
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    getCurrentWindow()
+      .onCloseRequested(async (event) => {
+        if (unsavedRef.current && !(await confirmDiscard(t("confirmUnsaved")))) {
+          event.preventDefault();
+        }
+      })
+      .then((handler) => {
+        if (cancelled) {
+          handler();
+          return;
+        }
+        unlisten = handler;
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   const toastTimerRef = useRef<number | null>(null);
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -269,7 +307,7 @@ export default function App() {
   }, [workspace.documents.length, sheet.meta, sheet.rows]);
 
   const loadIntoWorkspace = useCallback(
-    (rows: CellValue[][], meta: Partial<SheetMeta>) => {
+    (rows: CellValue[][], meta: Partial<SheetMeta>): boolean => {
       setLoadNonce((n) => n + 1);
       if (isBlankStarter()) {
         workspace.replaceActiveContent(rows, meta);
@@ -280,22 +318,54 @@ export default function App() {
         setSelectedColumns([]);
         selectionState.setSelection({ row: 0, col: 0 });
         filter.clearAll();
-        return;
+        return true;
       }
       const doc = workspace.openDocument(rows, meta, getLive());
       applyDocument(doc);
+      if (doc.meta.dirty) {
+        // The file is open in another tab with unsaved edits; openDocument
+        // showed that tab instead of reloading it from disk.
+        showToast(t("toastAlreadyOpenUnsaved"));
+        return false;
+      }
+      return true;
     },
-    [isBlankStarter, sheet, history, selectionState, filter, workspace, getLive, applyDocument],
+    [
+      isBlankStarter,
+      sheet,
+      history,
+      selectionState,
+      filter,
+      workspace,
+      getLive,
+      applyDocument,
+      showToast,
+    ],
+  );
+
+  const completeSave = useCallback(
+    (docId: string, savedRows: CellValue[][], meta: Partial<SheetMeta>) => {
+      if (workspace.getActiveId() === docId) {
+        // Edits made while the write was pending are not on disk yet.
+        sheet.setMeta({ ...meta, dirty: !sameRows(rowsRef.current, savedRows) });
+        return;
+      }
+      workspace.updateDocumentMeta(docId, (doc) => ({
+        ...meta,
+        dirty: !sameRows(doc.rows, savedRows),
+      }));
+    },
+    [sheet, workspace],
   );
 
   const file = useFile({
     loadData: loadIntoWorkspace,
-    updateMeta: (meta) => sheet.setMeta(meta),
+    completeSave,
     getRows: () => rowsRef.current,
     getMeta: () => metaRef.current,
     getActiveId: workspace.getActiveId,
     onToast: showToast,
-    confirmDiscard: () => window.confirm(t("confirmUnsaved")),
+    confirmDiscard: () => confirmDiscard(t("confirmUnsaved")),
     onRecentPath: (path) => {
       updateSettings((current) => ({
         recentFiles: pushRecentFile(current.recentFiles, path),
@@ -341,13 +411,13 @@ export default function App() {
   );
 
   const closeTab = useCallback(
-    (id: string) => {
+    async (id: string) => {
       const target = workspace.documents.find((doc) => doc.id === id);
       if (!target) {
         return;
       }
       const dirty = id === workspace.activeId ? sheet.meta.dirty : target.meta.dirty;
-      if (dirty && !window.confirm(t("confirmCloseTab"))) {
+      if (dirty && !(await confirmDiscard(t("confirmCloseTab")))) {
         return;
       }
       file.resetSaveTarget?.(id);
@@ -1348,7 +1418,7 @@ export default function App() {
 
   return (
     <div className="appShell" onKeyDown={handleKeyDown}>
-      <TitleBar meta={sheet.meta} anyDirty={workspace.anyDirty || sheet.meta.dirty} />
+      <TitleBar meta={sheet.meta} />
       <TabBar
         documents={tabDocuments}
         activeId={workspace.activeId}

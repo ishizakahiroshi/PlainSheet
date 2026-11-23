@@ -119,6 +119,15 @@ export function useDocuments(initial?: DocumentSnapshot) {
         const match = documentsRef.current.find(
           (doc) => doc.meta.filePath && doc.meta.filePath === meta.filePath,
         );
+        if (match && match.meta.dirty && match.id !== activeIdRef.current) {
+          // Reloading would replace another tab's unsaved edits and undo
+          // history without asking (the discard prompt only covers the active
+          // tab). Show that tab instead; its dirty meta tells the caller the
+          // file was not reloaded.
+          activeIdRef.current = match.id;
+          setActiveId(match.id);
+          return match;
+        }
         if (match) {
           const cloned = cloneRows(rows);
           const refreshed: DocumentSnapshot = {
@@ -280,6 +289,20 @@ export function useDocuments(initial?: DocumentSnapshot) {
     setDocuments(next);
   }, []);
 
+  // Patches the stored meta of a tab that is not shown (the shown tab's live
+  // meta lives in useSheet). Used when a save finishes after the user switched
+  // away from the tab that was saved.
+  const updateDocumentMeta = useCallback(
+    (id: string, patch: (doc: DocumentSnapshot) => Partial<SheetMeta>) => {
+      const next = documentsRef.current.map((doc) =>
+        doc.id === id ? { ...doc, meta: { ...doc.meta, ...patch(doc) } } : doc,
+      );
+      documentsRef.current = next;
+      setDocuments(next);
+    },
+    [],
+  );
+
   const getActiveId = useCallback(() => activeIdRef.current, []);
 
   return {
@@ -294,5 +317,6 @@ export function useDocuments(initial?: DocumentSnapshot) {
     switchTo,
     closeDocument,
     replaceActiveContent,
+    updateDocumentMeta,
   };
 }

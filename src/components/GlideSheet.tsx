@@ -22,7 +22,7 @@ import type { ContextMenuKind } from "./ContextMenu";
 import { columnName } from "../lib/columns";
 import { t } from "../lib/i18n";
 import { targetRanges } from "../lib/selectionTarget";
-import { fillSeries } from "../lib/autofill";
+import { fillAlongAxis, positiveModulo } from "../lib/autofill";
 
 type GlideSheetProps = {
   rows: CellValue[][];
@@ -861,13 +861,13 @@ export function GlideSheet({
           for (let rowOffset = 0; rowOffset < source.height; rowOffset += 1) {
             sourceValues.push(data[source.y + rowOffset]?.[toSourceCol(col)] ?? "");
           }
-          const filled = fillSeries(sourceValues, dest.height);
-          for (let rowOffset = 0; rowOffset < dest.height; rowOffset += 1) {
-            updates.push({
-              row: toSourceRow(dest.y + rowOffset),
-              col: toSourceCol(col),
-              value: filled[rowOffset] ?? "",
-            });
+          for (const { index, value } of fillAlongAxis(
+            sourceValues,
+            source.y,
+            dest.y,
+            dest.height,
+          )) {
+            updates.push({ row: toSourceRow(index), col: toSourceCol(col), value });
           }
         }
       } else if (dest.y === source.y && dest.height === source.height) {
@@ -878,24 +878,34 @@ export function GlideSheet({
           for (let colOffset = 0; colOffset < source.width; colOffset += 1) {
             sourceValues.push(data[visibleRow]?.[toSourceCol(source.x + colOffset)] ?? "");
           }
-          const filled = fillSeries(sourceValues, dest.width);
-          for (let colOffset = 0; colOffset < dest.width; colOffset += 1) {
-            updates.push({
-              row: toSourceRow(visibleRow),
-              col: toSourceCol(dest.x + colOffset),
-              value: filled[colOffset] ?? "",
-            });
+          for (const { index, value } of fillAlongAxis(
+            sourceValues,
+            source.x,
+            dest.x,
+            dest.width,
+          )) {
+            updates.push({ row: toSourceRow(visibleRow), col: toSourceCol(index), value });
           }
         }
       } else {
-        // Fallback: tile copy.
+        // Fallback: tile copy, aligned on the source and leaving it untouched.
         for (let rowOffset = 0; rowOffset < dest.height; rowOffset += 1) {
           for (let colOffset = 0; colOffset < dest.width; colOffset += 1) {
-            const srcRow = source.y + (rowOffset % source.height);
-            const srcCol = source.x + (colOffset % source.width);
+            const row = dest.y + rowOffset;
+            const col = dest.x + colOffset;
+            if (
+              row >= source.y &&
+              row < source.y + source.height &&
+              col >= source.x &&
+              col < source.x + source.width
+            ) {
+              continue;
+            }
+            const srcRow = source.y + positiveModulo(row - source.y, source.height);
+            const srcCol = source.x + positiveModulo(col - source.x, source.width);
             updates.push({
-              row: toSourceRow(dest.y + rowOffset),
-              col: toSourceCol(dest.x + colOffset),
+              row: toSourceRow(row),
+              col: toSourceCol(col),
               value: data[srcRow]?.[toSourceCol(srcCol)] ?? "",
             });
           }

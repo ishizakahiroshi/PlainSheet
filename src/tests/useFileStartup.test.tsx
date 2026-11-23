@@ -36,7 +36,7 @@ function setup({ dirty = false, confirm = true, pending = [STARTUP_PATH] as (str
   renderHook(() =>
     useFile({
       loadData,
-      updateMeta: vi.fn(),
+      completeSave: vi.fn(),
       getRows: () => [],
       getMeta: () => ({ dirty }) as SheetMeta,
       onToast,
