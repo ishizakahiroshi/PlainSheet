@@ -1,10 +1,10 @@
 ---
 cover:
-  path: portfolio/overview-2026-09-28.jpg
+  path: portfolio/promo-cover-v0.1.2.jpg
   alt: {ja: "PlainSheet の紹介動画", en: "PlainSheet overview video"}
 video:
   provider: youtube
-  id: "rMYdZCiuIjE"
+  id: "RqGbry2ocMA"
   durationSeconds: 20
 schemaVersion: 1
 color: "#c85b8e"
