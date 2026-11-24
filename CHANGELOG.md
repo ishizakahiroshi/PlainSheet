@@ -4,7 +4,7 @@ All notable changes to PlainSheet are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.2] - 2026-11-23
+## [0.1.2] - 2026-11-24
 
 ### Fixed
 
