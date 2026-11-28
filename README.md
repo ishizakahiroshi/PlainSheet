@@ -40,7 +40,7 @@ The builds are not code-signed. A file downloaded in a browser can trigger a Win
 
 ## Status
 
-PlainSheet is at `v0.1.2`. It is optimized for small to medium plain text tables; files larger than 50 MB are not opened by the desktop app. Richer export options and Git diff helpers are planned after the first release. See [CHANGELOG.md](CHANGELOG.md).
+PlainSheet is at `v0.1.3`. It is optimized for small to medium plain text tables; files larger than 50 MB are not opened by the desktop app. Richer export options and Git diff helpers are planned after the first release. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Development
 

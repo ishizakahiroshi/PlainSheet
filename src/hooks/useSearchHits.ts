@@ -13,9 +13,11 @@ export type SearchState = {
   hits: SearchHit[];
   // The last regular-expression search was stopped for taking too long.
   timedOut: boolean;
+  pending: boolean;
 };
 
-const EMPTY: SearchState = { hits: [], timedOut: false };
+const EMPTY: SearchState = { hits: [], timedOut: false, pending: false };
+const PENDING: SearchState = { hits: [], timedOut: false, pending: true };
 
 function createWorker(): Worker | null {
   if (typeof Worker === "undefined") {
@@ -41,8 +43,16 @@ export function useSearchHits(
 ): SearchState {
   const workerRef = useRef<Worker | null>(null);
   const requestRef = useRef(0);
-  const [result, setResult] = useState<SearchState>(EMPTY);
   const inWorker = options.regex && query !== "" && typeof Worker !== "undefined";
+  const input = useMemo(
+    () => ({ rows, query, options, allowedRows }),
+    [rows, query, options, allowedRows],
+  );
+  const [result, setResult] = useState<{
+    input: typeof input;
+    hits: SearchHit[];
+    timedOut: boolean;
+  } | null>(null);
 
   const syncHits = useMemo(
     () => (inWorker ? null : findSearchHits(rows, query, options, allowedRows)),
@@ -53,12 +63,13 @@ export function useSearchHits(
     if (!inWorker) {
       return;
     }
+    const { rows, query, options, allowedRows } = input;
     const id = ++requestRef.current;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const debounce = setTimeout(() => {
       const worker = workerRef.current ?? createWorker();
       if (!worker) {
-        setResult({ hits: findSearchHits(rows, query, options, allowedRows), timedOut: false });
+        setResult({ input, hits: findSearchHits(rows, query, options, allowedRows), timedOut: false });
         return;
       }
       workerRef.current = worker;
@@ -67,7 +78,7 @@ export function useSearchHits(
           return;
         }
         clearTimeout(timeout);
-        setResult({ hits: event.data.hits, timedOut: false });
+        setResult({ input, hits: event.data.hits, timedOut: false });
       };
       timeout = setTimeout(() => {
         if (id !== requestRef.current) {
@@ -75,7 +86,7 @@ export function useSearchHits(
         }
         worker.terminate();
         workerRef.current = null;
-        setResult({ hits: [], timedOut: true });
+        setResult({ input, hits: [], timedOut: true });
       }, SEARCH_TIMEOUT_MS);
       const request: SearchRequest = {
         id,
@@ -87,10 +98,11 @@ export function useSearchHits(
       worker.postMessage(request);
     }, DEBOUNCE_MS);
     return () => {
+      ++requestRef.current;
       clearTimeout(debounce);
       clearTimeout(timeout);
     };
-  }, [inWorker, rows, query, options, allowedRows]);
+  }, [inWorker, input]);
 
   useEffect(
     () => () => {
@@ -100,5 +112,8 @@ export function useSearchHits(
     [],
   );
 
-  return syncHits ? { hits: syncHits, timedOut: false } : result;
+  if (!inWorker) return syncHits ? { ...EMPTY, hits: syncHits } : EMPTY;
+  return result?.input === input
+    ? { hits: result.hits, timedOut: result.timedOut, pending: false }
+    : PENDING;
 }

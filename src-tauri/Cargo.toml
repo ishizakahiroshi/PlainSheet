@@ -1,6 +1,6 @@
 [package]
 name = "plainsheet"
-version = "0.1.2"
+version = "0.1.3"
 description = "PlainSheet desktop CSV editor"
 authors = ["PlainSheet contributors"]
 license = "MIT"
