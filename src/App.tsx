@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import {
@@ -13,7 +13,7 @@ import { FormulaBar } from "./components/FormulaBar";
 import { HelpModal } from "./components/HelpModal";
 import { SearchPanel, type SearchOptions } from "./components/SearchPanel";
 import { useSearchHits } from "./hooks/useSearchHits";
-import { buildMatcher } from "./lib/search";
+import { buildMatcher, type SearchHit } from "./lib/search";
 import { GlideSheet } from "./components/GlideSheet";
 import { columnName } from "./lib/columns";
 import { SettingsModal } from "./components/SettingsModal";
@@ -89,6 +89,13 @@ export default function App() {
     caseSensitive: false,
   });
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
+  const pendingReplaceNavigation = useRef<{
+    from: SearchHit;
+    query: string;
+    options: SearchOptions;
+    document: string;
+    loadNonce: number;
+  } | null>(null);
   const [searchScrollNonce, setSearchScrollNonce] = useState(0);
   const [focusCell, setFocusCell] = useState<{ row: number; col: number; nonce: number } | null>(
     null,
@@ -523,13 +530,6 @@ export default function App() {
     : null;
 
   useEffect(() => {
-    if (activeSearchIndex >= searchHits.length) {
-      setActiveSearchIndex(0);
-      setSearchScrollNonce((nonce) => nonce + 1);
-    }
-  }, [activeSearchIndex, searchHits.length]);
-
-  useEffect(() => {
     setSearchScrollNonce((nonce) => nonce + 1);
   }, [query, searchOptions]);
 
@@ -549,6 +549,7 @@ export default function App() {
   });
   const recordBeforeChange = () => history.record(sheet.rows, selectionState.selection, snapshot());
   const replaceRowsFromHistory = (entry: HistoryEntry) => {
+    pendingReplaceNavigation.current = null;
     const dataChanged = JSON.stringify(entry.rows) !== JSON.stringify(sheet.rows);
     const nextDirty =
       !sheet.meta.dirty && dataChanged
@@ -1105,7 +1106,13 @@ export default function App() {
     if (next) replaceRowsFromHistory(next);
   };
 
-  const prepareNavigation = (row: number, col: number, endRow = row, endCol = col) => {
+  const prepareNavigation = (
+    row: number,
+    col: number,
+    endRow = row,
+    endCol = col,
+    recordVisibilityChange = true,
+  ) => {
     if (
       filter.hasFilters &&
       filter
@@ -1125,13 +1132,49 @@ export default function App() {
       nextView.hiddenRows.length !== view.hiddenRows.length ||
       nextView.hiddenColumns.length !== view.hiddenColumns.length
     ) {
-      recordBeforeChange();
+      if (recordVisibilityChange) recordBeforeChange();
       setView(nextView);
     }
     setSelectedRows([]);
     setSelectedColumns([]);
     return true;
   };
+  // Resolve the replacement cursor from the refreshed hits, not the old numeric
+  // index while a regex search is still running. A second occurrence in the
+  // same cell stays current; otherwise take the next cell, wrapping at the end.
+  useLayoutEffect(() => {
+    const pending = pendingReplaceNavigation.current;
+    if (!pending) {
+      if (!search.pending && activeSearchIndex !== 0 && activeSearchIndex >= searchHits.length) {
+        setActiveSearchIndex(0);
+        setSearchScrollNonce((nonce) => nonce + 1);
+      }
+      return;
+    }
+    if (
+      pending.document !== workspace.activeId ||
+      pending.loadNonce !== loadNonce ||
+      pending.query !== query ||
+      pending.options !== searchOptions ||
+      !searchOpen
+    ) {
+      pendingReplaceNavigation.current = null;
+      return;
+    }
+    if (search.pending) return;
+    pendingReplaceNavigation.current = null;
+    const index = searchHits.findIndex(
+      ({ row, col }) => row > pending.from.row || (row === pending.from.row && col >= pending.from.col),
+    );
+    const nextIndex = index < 0 ? 0 : index;
+    const hit = searchHits[nextIndex];
+    setActiveSearchIndex(nextIndex);
+    if (hit && prepareNavigation(hit.row, hit.col, hit.row, hit.col, false)) {
+      selectionState.selectCell(hit.row, hit.col, false);
+      setSearchScrollNonce((nonce) => nonce + 1);
+    }
+  });
+
   const jumpSearch = (direction: 1 | -1) => {
     if (searchHits.length === 0) {
       return;
@@ -1149,10 +1192,7 @@ export default function App() {
     if (!hit) {
       return;
     }
-    if (!prepareNavigation(hit.row, hit.col)) {
-      return;
-    }
-    const matcher = search.timedOut ? null : buildMatcher(query, searchOptions);
+    const matcher = search.timedOut || search.pending ? null : buildMatcher(query, searchOptions);
     if (!matcher) {
       return;
     }
@@ -1162,11 +1202,21 @@ export default function App() {
     if (replaced === previous) {
       return;
     }
+    if (!prepareNavigation(hit.row, hit.col, hit.row, hit.col, false)) {
+      return;
+    }
     recordBeforeChange();
     const next = cloneRows(sheet.rows);
     next[hit.row][hit.col] = replaced;
+    pendingReplaceNavigation.current = {
+      from: hit,
+      query,
+      options: searchOptions,
+      document: workspace.activeId,
+      loadNonce,
+    };
+    selectionState.selectCell(hit.row, hit.col, false);
     sheet.replaceRows(next, true, false);
-    setSearchScrollNonce((nonce) => nonce + 1);
   };
 
   const replaceAll = () => {
@@ -1175,7 +1225,7 @@ export default function App() {
       return;
     }
     // A pattern that was too slow to search would freeze the window here.
-    const matcher = search.timedOut ? null : buildMatcher(query, searchOptions);
+    const matcher = search.timedOut || search.pending ? null : buildMatcher(query, searchOptions);
     if (!matcher) {
       if (search.timedOut) {
         showToast(t("toastSearchTooSlow"));

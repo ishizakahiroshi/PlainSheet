@@ -10,6 +10,8 @@ import {
 import App from "../App";
 import { parseCsv, serializeCsv } from "../lib/csv";
 import { setLocale } from "../lib/i18n";
+import { findSearchHits } from "../lib/search";
+import type { SearchRequest } from "../lib/search.worker";
 import { DEFAULT_SETTINGS, SETTINGS_STORAGE_KEY } from "../lib/settings";
 import type { CellValue } from "../types/sheet";
 
@@ -1027,5 +1029,86 @@ describe("consolidated review regressions: source targets and persisted shape", 
     act(() => grid().onMouseMove!(rowMarkerEvent(3, 1)));
     fireEvent.mouseUp(window, { button: 0 });
     expect([...grid().gridSelection!.rows]).toEqual([1, 2, 3]);
+  });
+});
+
+describe("replace the current search hit", () => {
+  it("shows the next target before replacement and undoes each replacement separately", async () => {
+    const original = [
+      ["A1", "B1", "C1"],
+      ["A2", "B2", "needle"],
+      ["A3", "B3", "needle"],
+    ];
+    await start(original);
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    const searchControls = within(screen.getByRole("complementary", { name: "Search" }));
+    fireEvent.change(searchControls.getByRole("textbox", { name: "Find" }), { target: { value: "needle" } });
+    fireEvent.change(searchControls.getByRole("textbox", { name: "Replace" }), {
+      target: { value: "replacement" },
+    });
+    fireEvent.click(searchControls.getByRole("button", { name: "Next" }));
+    expect(grid().gridSelection?.current?.cell).toEqual([2, 2]);
+    expect(screen.getByDisplayValue("C3")).toBeInTheDocument();
+    fireEvent.click(searchControls.getByRole("button", { name: "Replace" }));
+    expect(grid().gridSelection?.current?.cell).toEqual([2, 1]);
+    expect(screen.getByDisplayValue("C2")).toBeInTheDocument();
+    expect(searchControls.getByText(/1\s*\/\s*1/)).toBeInTheDocument();
+    expect(grid().highlightRegions).toContainEqual(
+      expect.objectContaining({ range: { x: 2, y: 1, width: 1, height: 1 }, style: "solid-outline" }),
+    );
+    expect(data(3, 3)).toEqual([original[0], original[1], ["A3", "B3", "replacement"]]);
+    fireEvent.click(searchControls.getByRole("button", { name: "Replace" }));
+    expect(data(3, 3)).toEqual([original[0], ["A2", "B2", "replacement"], ["A3", "B3", "replacement"]]);
+    undo();
+    expect(data(3, 3)).toEqual([original[0], original[1], ["A3", "B3", "replacement"]]);
+    undo();
+    expect(data(3, 3)).toEqual(original);
+  });
+
+  it("waits for fresh regex hits rather than replacing against an old worker result", async () => {
+    const requests: SearchRequest[] = [];
+    const workers: SearchWorker[] = [];
+    class SearchWorker {
+      onmessage?: (event: MessageEvent) => void;
+      constructor() {
+        workers.push(this);
+      }
+      postMessage(request: SearchRequest) {
+        requests.push(request);
+      }
+      terminate() {}
+    }
+    const finishSearch = async (index: number) => {
+      await vi.waitFor(() => expect(requests).toHaveLength(index + 1));
+      const { id, rows, query, options, allowedRows } = requests[index]!;
+      const hits = findSearchHits(rows, query, options, allowedRows ? new Set(allowedRows) : null);
+      await act(async () => workers.at(-1)!.onmessage?.({ data: { id, hits } } as MessageEvent));
+    };
+    vi.stubGlobal("Worker", SearchWorker);
+    try {
+      await start([["A", "B", "C"], ["A", "B", "needle"], ["A", "B", "needle needle"]]);
+      fireEvent.click(screen.getByRole("button", { name: "Search" }));
+      const searchControls = within(screen.getByRole("complementary", { name: "Search" }));
+      fireEvent.click(searchControls.getByRole("checkbox", { name: "Regex" }));
+      fireEvent.change(searchControls.getByRole("textbox", { name: "Find" }), { target: { value: "needl[e]" } });
+      fireEvent.change(searchControls.getByRole("textbox", { name: "Replace" }), { target: { value: "swap" } });
+      await finishSearch(0);
+      fireEvent.click(searchControls.getByRole("button", { name: "Next" }));
+      const replace = searchControls.getByRole("button", { name: "Replace" });
+      fireEvent.click(replace);
+      expect(cell(2, 2)).toBe("swap needle");
+      fireEvent.click(replace);
+      expect(cell(2, 2)).toBe("swap needle");
+      await finishSearch(1);
+      expect(grid().gridSelection?.current?.cell).toEqual([2, 2]);
+      fireEvent.click(replace);
+      expect(cell(2, 2)).toBe("swap swap");
+      await finishSearch(2);
+      expect(grid().gridSelection?.current?.cell).toEqual([2, 1]);
+      expect(screen.getByDisplayValue("C2")).toBeInTheDocument();
+    } finally {
+      cleanup();
+      vi.unstubAllGlobals();
+    }
   });
 });
